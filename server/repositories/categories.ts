@@ -2,6 +2,8 @@ import type { Tx } from '@/server/db/transaction';
 
 export type CategoryRow = {
   id: string;
+  nameEn: string | null;
+  nameZh: string | null;
   kind: 'income' | 'expense';
   accountId: string;
   isActive: boolean;
@@ -28,7 +30,7 @@ export async function getCategoryWithAccount(
   expectedKind: 'income' | 'expense',
 ): Promise<CategoryRow> {
   const rows = await tx`
-    select id, kind, account_id, is_active
+    select id, name_en, name_zh, kind, account_id, is_active
     from categories
     where id = ${categoryId} and organization_id = ${organizationId}
   `;
@@ -40,6 +42,8 @@ export async function getCategoryWithAccount(
 
   const category: CategoryRow = {
     id: row.id as string,
+    nameEn: (row.name_en as string | null) ?? null,
+    nameZh: (row.name_zh as string | null) ?? null,
     kind: row.kind as CategoryRow['kind'],
     accountId: row.account_id as string,
     isActive: row.is_active as boolean,
@@ -55,4 +59,93 @@ export async function getCategoryWithAccount(
   }
 
   return category;
+}
+
+/** 取分类，只校验归属，不校验 kind。用于改名与停用场景。 */
+export async function getCategory(
+  tx: Tx,
+  organizationId: string,
+  categoryId: string,
+): Promise<CategoryRow> {
+  const rows = await tx`
+    select id, name_en, name_zh, kind, account_id, is_active
+    from categories
+    where id = ${categoryId} and organization_id = ${organizationId}
+  `;
+  const row = rows.at(0);
+  if (!row) {
+    throw new CategoryError('This category was not found in this company.');
+  }
+  return {
+    id: row.id as string,
+    nameEn: (row.name_en as string | null) ?? null,
+    nameZh: (row.name_zh as string | null) ?? null,
+    kind: row.kind as CategoryRow['kind'],
+    accountId: row.account_id as string,
+    isActive: row.is_active as boolean,
+  };
+}
+
+export async function insertCategory(
+  tx: Tx,
+  row: {
+    organizationId: string;
+    nameEn: string | null;
+    nameZh: string | null;
+    kind: 'income' | 'expense';
+    accountId: string;
+    sortOrder: number;
+  },
+): Promise<{ id: string }> {
+  const [inserted] = await tx`
+    insert into categories (organization_id, name_en, name_zh, kind, account_id, is_active, sort_order)
+    values (${row.organizationId}, ${row.nameEn}, ${row.nameZh}, ${row.kind},
+            ${row.accountId}, true, ${row.sortOrder})
+    returning id
+  `;
+  return { id: inserted.id as string };
+}
+
+export async function updateCategoryNames(
+  tx: Tx,
+  organizationId: string,
+  categoryId: string,
+  names: { nameEn: string | null; nameZh: string | null },
+): Promise<void> {
+  const result = await tx`
+    update categories
+    set name_en = ${names.nameEn}, name_zh = ${names.nameZh}
+    where id = ${categoryId} and organization_id = ${organizationId}
+  `;
+  if (result.count === 0) {
+    throw new CategoryError('This category was not found in this company.');
+  }
+}
+
+export async function updateCategoryActive(
+  tx: Tx,
+  organizationId: string,
+  categoryId: string,
+  isActive: boolean,
+): Promise<void> {
+  const result = await tx`
+    update categories set is_active = ${isActive}
+    where id = ${categoryId} and organization_id = ${organizationId}
+  `;
+  if (result.count === 0) {
+    throw new CategoryError('This category was not found in this company.');
+  }
+}
+
+export async function nextCategorySortOrder(
+  tx: Tx,
+  organizationId: string,
+  kind: 'income' | 'expense',
+): Promise<number> {
+  const [row] = await tx`
+    select coalesce(max(sort_order), 0) + 10 as next
+    from categories
+    where organization_id = ${organizationId} and kind = ${kind}
+  `;
+  return Number(row.next);
 }

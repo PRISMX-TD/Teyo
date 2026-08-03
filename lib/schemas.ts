@@ -75,6 +75,21 @@ export const categorySchema = bilingualName.and(
   }),
 );
 
+/**
+ * 改名只动名字，不动科目类型、编码或分类归属。
+ * 与 accountSchema / categorySchema 区别：后者用于创建时的完整校验，
+ * 此 schema 专门用于改名 Action。
+ */
+export const renameSchema = z
+  .object({
+    nameEn: z.string().trim().max(80).optional(),
+    nameZh: z.string().trim().max(80).optional(),
+  })
+  .refine((v) => Boolean(v.nameEn?.length || v.nameZh?.length), {
+    message: 'At least one name is required.',
+    path: ['nameEn'],
+  });
+
 const transactionBase = z.object({
   occurredOn: isoDate,
   amount: positiveAmount,
