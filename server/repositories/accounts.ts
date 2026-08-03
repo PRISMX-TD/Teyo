@@ -63,6 +63,26 @@ export async function getAccount(
   return account;
 }
 
+/** 列出所有活跃资金账户，供交易表单选择。按 sort_order 排序保证 UI 稳定。 */
+export async function listMoneyAccounts(
+  tx: Tx,
+  organizationId: string,
+): Promise<Array<{ id: string; nameEn: string | null; nameZh: string | null }>> {
+  const rows = await tx`
+    select id, name_en, name_zh
+    from accounts
+    where organization_id = ${organizationId}
+      and is_money_account = true
+      and is_active = true
+    order by sort_order
+  `;
+  return rows.map((row) => ({
+    id: row.id as string,
+    nameEn: (row.name_en as string) ?? null,
+    nameZh: (row.name_zh as string) ?? null,
+  }));
+}
+
 export async function insertAccount(
   tx: Tx,
   row: {

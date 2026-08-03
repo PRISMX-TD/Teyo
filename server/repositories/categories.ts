@@ -149,3 +149,22 @@ export async function nextCategorySortOrder(
   `;
   return Number(row.next);
 }
+
+/** 列出所有活跃分类，供交易表单选择。按 sort_order 排序。 */
+export async function listCategories(
+  tx: Tx,
+  organizationId: string,
+): Promise<Array<{ id: string; nameEn: string | null; nameZh: string | null; kind: string }>> {
+  const rows = await tx`
+    select id, name_en, name_zh, kind
+    from categories
+    where organization_id = ${organizationId} and is_active = true
+    order by sort_order
+  `;
+  return rows.map((row) => ({
+    id: row.id as string,
+    nameEn: (row.name_en as string) ?? null,
+    nameZh: (row.name_zh as string) ?? null,
+    kind: row.kind as string,
+  }));
+}
