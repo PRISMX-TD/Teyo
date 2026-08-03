@@ -16,6 +16,13 @@ export default defineConfig({
     environment: 'node',
     include: ['tests/**/*.test.ts'],
     globals: false,
+    // 全部是集成测试，每个测试文件各开一个进程、各自持有连接池
+    // （server/db/client.ts 的 max:10 加 tests/helpers/db.ts 的 max:4）。
+    // 不限并发时会按 CPU 核数一起开，撞上 Postgres 的连接上限，
+    // 报 EMAXCONNSESSION，且失败的文件每轮都不一样，看起来像数据污染。
+    // 4 个进程 × 14 条连接留有余量。
+    maxWorkers: 4,
+    minWorkers: 1,
   },
   resolve: {
     alias: { '@': rootDir },
