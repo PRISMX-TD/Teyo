@@ -1,0 +1,17 @@
+node_modules/
+.next/
+out/
+build/
+coverage/
+.env
+.env.local
+.env*.local
+.vercel
+.DS_Store
+*.tsbuildinfo
+next-env.d.ts
+
+# 文档只保留本地，不入库
+*.md
+docs/
+.superpowers/
