@@ -193,6 +193,7 @@ const zh: Translated<typeof en> = {
     validation: '请检查标红的项目。',
     unexpected: '出了点问题，请再试一次。',
     offlineEditBlocked: '当前离线。可以新增记录，但编辑需要联网。',
+    exportTooManyRows: '这次导出有 {count} 行，超过 {limit} 行上限。请缩短期间后重试。',
   },
   common: {
     cancel: '取消',

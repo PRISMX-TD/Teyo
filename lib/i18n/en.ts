@@ -181,6 +181,8 @@ const en = {
     unexpected: 'Something went wrong. Please try again.',
     offlineEditBlocked:
       'You are offline. You can add new records, but editing needs a connection.',
+    exportTooManyRows:
+      'This export would contain {count} rows, over the {limit} row limit. Choose a shorter period and try again.',
   },
   common: {
     cancel: 'Cancel',
