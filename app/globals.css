@@ -1,16 +1,360 @@
+:root {
+  --color-bg: #fafaf9;
+  --color-surface: #ffffff;
+  --color-border: #e7e5e4;
+  --color-text: #292524;
+  --color-text-muted: #78716c;
+  --color-accent: #2563eb;
+  --color-accent-hover: #1d4ed8;
+  --color-danger: #dc2626;
+  --color-success: #16a34a;
+
+  --radius-sm: 6px;
+  --radius-md: 8px;
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.06);
+  --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.08);
+}
+
 *,
 *::before,
 *::after {
   box-sizing: border-box;
-}
-
-html,
-body {
   margin: 0;
   padding: 0;
 }
 
+html {
+  font-size: 16px;
+  -webkit-text-size-adjust: 100%;
+}
+
 body {
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family: system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
   line-height: 1.5;
+  color: var(--color-text);
+  background: var(--color-bg);
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+}
+
+button {
+  cursor: pointer;
+  font: inherit;
+}
+
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-sm);
+  padding: 0.5rem 0.75rem;
+  background: var(--color-surface);
+}
+
+input:focus,
+select:focus,
+textarea:focus {
+  outline: none;
+  border-color: var(--color-accent);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+/* ---------- Auth pages ---------- */
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem 1rem;
+}
+
+.auth-brand {
+  text-align: center;
+  margin-bottom: 2rem;
+}
+
+.auth-brand strong {
+  font-size: 1.75rem;
+  font-weight: 700;
+}
+
+.auth-brand p {
+  color: var(--color-text-muted);
+  margin-top: 0.25rem;
+}
+
+.auth-shell {
+  width: 100%;
+  max-width: 400px;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  padding: 2rem;
+  box-shadow: var(--shadow-md);
+}
+
+.auth-shell h1 {
+  font-size: 1.25rem;
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+.auth-shell label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  margin-top: 1rem;
+}
+
+.auth-shell label:first-of-type {
+  margin-top: 0;
+}
+
+.auth-shell input {
+  width: 100%;
+}
+
+.auth-shell button {
+  width: 100%;
+  margin-top: 1.5rem;
+  padding: 0.625rem 1rem;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+}
+
+.auth-shell button:hover {
+  background: var(--color-accent-hover);
+}
+
+.auth-shell button:disabled {
+  opacity: 0.6;
+}
+
+.auth-shell > form > p {
+  margin-top: 1rem;
+  text-align: center;
+  font-size: 0.875rem;
+}
+
+.auth-shell > form > p a {
+  margin: 0 0.25rem;
+}
+
+.form-error {
+  color: var(--color-danger);
+  font-size: 0.875rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  background: #fef2f2;
+  border-radius: var(--radius-sm);
+}
+
+.form-success {
+  color: var(--color-success);
+  font-size: 0.875rem;
+  margin-top: 0.75rem;
+  padding: 0.5rem;
+  background: #f0fdf4;
+  border-radius: var(--radius-sm);
+}
+
+/* ---------- App shell ---------- */
+
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+}
+
+.sidebar {
+  width: 240px;
+  flex-shrink: 0;
+  background: var(--color-surface);
+  border-right: 1px solid var(--color-border);
+  display: flex;
+  flex-direction: column;
+  padding: 1.5rem;
+}
+
+.sidebar-brand {
+  font-size: 1.25rem;
+  font-weight: 700;
+  margin-bottom: 1.5rem;
+}
+
+.sidebar-nav {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.sidebar-nav a {
+  display: block;
+  padding: 0.5rem 0.75rem;
+  border-radius: var(--radius-sm);
+  color: var(--color-text);
+  font-size: 0.925rem;
+}
+
+.sidebar-nav a:hover,
+.sidebar-nav .active {
+  background: #f1f5f9;
+  text-decoration: none;
+}
+
+.sidebar-nav .active {
+  font-weight: 600;
+  color: var(--color-accent);
+}
+
+.sidebar-footer {
+  border-top: 1px solid var(--color-border);
+  padding-top: 1rem;
+  font-size: 0.85rem;
+}
+
+/* ---------- Org switcher ---------- */
+
+.org-switcher {
+  margin-bottom: 1.25rem;
+}
+
+.org-switcher-form {
+  display: flex;
+  gap: 0.25rem;
+}
+
+.org-switcher select {
+  flex: 1;
+  padding: 0.375rem 0.5rem;
+  font-size: 0.85rem;
+}
+
+.org-switcher button {
+  padding: 0.375rem 0.75rem;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-size: 0.85rem;
+}
+
+/* ---------- Content area ---------- */
+
+.app-main {
+  flex: 1;
+  padding: 2rem;
+  min-width: 0;
+}
+
+.app-main h1 {
+  font-size: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+/* ---------- Landing ---------- */
+
+.landing {
+  max-width: 480px;
+  margin: 4rem auto;
+  text-align: center;
+}
+
+.landing h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.landing p {
+  color: var(--color-text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.landing ul {
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.landing a {
+  display: block;
+  padding: 0.75rem 1rem;
+  background: var(--color-surface);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-sm);
+}
+
+.landing a:hover {
+  border-color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* ---------- Onboarding ---------- */
+
+.onboarding-page {
+  max-width: 440px;
+  margin: 4rem auto;
+  padding: 0 1rem;
+}
+
+.onboarding-page h1 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.onboarding-page > p {
+  color: var(--color-text-muted);
+  margin-bottom: 1.5rem;
+}
+
+.onboarding-page label {
+  display: block;
+  font-size: 0.875rem;
+  font-weight: 500;
+  margin-top: 1rem;
+  margin-bottom: 0.25rem;
+}
+
+.onboarding-page label:first-of-type {
+  margin-top: 0;
+}
+
+.onboarding-page input,
+.onboarding-page select {
+  width: 100%;
+}
+
+.onboarding-page .hint {
+  font-size: 0.8rem;
+  color: var(--color-text-muted);
+  margin-top: 0.25rem;
+}
+
+.onboarding-page button {
+  margin-top: 1.5rem;
+  padding: 0.625rem 1rem;
+  width: 100%;
+  background: var(--color-accent);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius-sm);
+  font-weight: 600;
 }
