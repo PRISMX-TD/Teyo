@@ -212,3 +212,15 @@ export const profileSchema = z.object({
   displayName: nonEmpty.max(80),
   locale: localeSchema,
 });
+
+export const signUpSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  password: z.string().min(8).max(72),
+  displayName: z.string().trim().min(1).max(80),
+  locale: localeSchema,
+});
+
+export const signInSchema = z.object({
+  email: z.string().trim().toLowerCase().email(),
+  password: z.string().min(1).max(72),
+});
