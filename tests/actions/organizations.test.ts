@@ -156,18 +156,22 @@ describe('createOrganization', () => {
   it('leaves nothing behind when the transaction fails', async () => {
     // slug 唯一约束以外的失败路径：币种非法会被 schema 拦在事务之前，
     // 这里用超长 name 触发数据库层报错，确认没有半成品公司残留。
-    const before = await admin`select count(*)::int as n from organizations`;
+    // 只数这个名字的行，不数全表：并发跑其它测试文件时全表计数会被别人建的
+    // 公司带偏，断言就会无故失败。
+    const longName = 'x'.repeat(200);
 
     await expect(
       createOrganization({
-        name: 'x'.repeat(200),
+        name: longName,
         baseCurrency: 'MYR',
         timezone: 'Asia/Kuala_Lumpur',
       }),
     ).rejects.toThrow();
 
-    const after = await admin`select count(*)::int as n from organizations`;
-    expect(after[0].n).toBe(before[0].n);
+    const after = await admin`
+      select count(*)::int as n from organizations where name = ${longName}
+    `;
+    expect(after[0].n).toBe(0);
   });
 });
 
