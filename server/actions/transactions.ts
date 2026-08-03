@@ -11,14 +11,20 @@ import {
   type RateSource,
 } from '@/server/domain/exchange-rate';
 import { assertPeriodOpen } from '@/server/domain/period-lock';
+import { canEditTransaction } from '@/server/domain/permissions';
 import { findRate } from '@/server/repositories/exchange-rates';
 import { getMoneyAccount } from '@/server/repositories/accounts';
 import { getCategoryWithAccount } from '@/server/repositories/categories';
 import { recordAudit } from '@/server/repositories/audit-logs';
+import { AuthError } from '@/server/auth/guard';
 import {
+  deleteJournalLines,
   findTransactionByClientUuid,
+  getTransactionDetail,
   insertJournalLines,
   insertTransaction,
+  markVoided,
+  updateTransactionHead,
 } from '@/server/repositories/transactions';
 
 export type CreateTransactionInput = {
@@ -79,7 +85,7 @@ export async function resolveRate(
 async function resolveCounterAccountId(
   tx: Tx,
   organizationId: string,
-  input: CreateTransactionInput,
+  input: { kind: TransactionKind; counterAccountId?: string; categoryId?: string },
 ): Promise<string> {
   if (input.kind === 'transfer') {
     if (!input.counterAccountId) {
@@ -183,4 +189,169 @@ export async function createTransaction(
 
   revalidatePath(`/${orgSlug}/transactions`);
   return result;
+}
+
+export type UpdateTransactionInput = {
+  occurredOn: string;
+  amount: string;
+  currency: string;
+  moneyAccountId: string;
+  counterAccountId?: string;
+  categoryId?: string;
+  description?: string;
+  exchangeRate?: string;
+};
+
+/**
+ * 编辑一笔交易。
+ *
+ * 只要 transaction:read 就能进来，真正的授权靠 canEditTransaction：
+ * bookkeeper 只能改自己录的，owner/admin 可以改任何人的。用
+ * transaction:create 做门槛是不对的——viewer 与 bookkeeper 的区别不在能否
+ * 创建，而在能否改哪些记录。
+ *
+ * 分录不原地改而是整体重建。journal_lines 的平衡触发器是延迟约束，
+ * 同一事务内先删后插不会中途报错，提交时才校验最终状态。
+ */
+export async function updateTransaction(
+  orgSlug: string,
+  id: string,
+  input: UpdateTransactionInput,
+): Promise<void> {
+  const context = await requirePermission(orgSlug, 'transaction:read');
+
+  await withTransaction(context.userId, async (tx) => {
+    const existing = await getTransactionDetail(tx, context.organizationId, id);
+
+    if (existing.voidedAt) {
+      throw new AuthError('forbidden', 'This record is voided and can no longer be edited.');
+    }
+
+    if (!canEditTransaction(context.role, existing.createdBy === context.userId)) {
+      throw new AuthError('forbidden', 'Your role cannot edit this record.');
+    }
+
+    // 原日期与新日期都要在开放期间内：只查其一，就能把记录搬进或搬出锁定区间。
+    assertPeriodOpen(existing.occurredOn, context.lockedUntil);
+    assertPeriodOpen(input.occurredOn, context.lockedUntil);
+
+    // kind 不可改：改了就等于换一笔账，分录方向、分类与对方账户全都得重来，
+    // 让用户作废重录更清晰，也让审计留下两条独立记录。
+    const kind = existing.kind;
+
+    const moneyAccount = await getMoneyAccount(tx, context.organizationId, input.moneyAccountId);
+    const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, {
+      kind,
+      counterAccountId: input.counterAccountId,
+      categoryId: input.categoryId,
+    });
+
+    const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(input.currency));
+    const { scaledRate, source } = await resolveRate(tx, {
+      currency: input.currency,
+      baseCurrency: context.baseCurrency,
+      occurredOn: input.occurredOn,
+      manualRate: input.exchangeRate,
+    });
+
+    const lines = buildJournalLines({
+      kind,
+      amountMinor,
+      currency: input.currency,
+      baseCurrency: context.baseCurrency,
+      scaledRate,
+      moneyAccountId: moneyAccount.id,
+      counterAccountId,
+    });
+
+    const description = input.description ?? '';
+
+    await updateTransactionHead(tx, context.organizationId, id, {
+      occurredOn: input.occurredOn,
+      description,
+      currency: input.currency,
+      amountMinor,
+      // 与创建路径同理：表头金额取自分录，数据库的平衡触发器看不到表头。
+      baseAmountMinor: lines[0].baseAmountMinor,
+      scaledRate,
+      rateSource: source,
+      categoryId: kind === 'transfer' ? null : (input.categoryId as string),
+    });
+
+    await deleteJournalLines(tx, context.organizationId, id);
+    await insertJournalLines(tx, context.organizationId, id, lines);
+
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'transaction.updated',
+      entityType: 'transaction',
+      entityId: id,
+      before: {
+        occurredOn: existing.occurredOn,
+        amountMinor: existing.amountMinor.toString(),
+        currency: existing.currency,
+        categoryId: existing.categoryId,
+        description: existing.description,
+      },
+      after: {
+        occurredOn: input.occurredOn,
+        amountMinor: amountMinor.toString(),
+        currency: input.currency,
+        categoryId: kind === 'transfer' ? null : (input.categoryId ?? null),
+        description,
+      },
+    });
+  });
+
+  revalidatePath(`/${orgSlug}`);
+  revalidatePath(`/${orgSlug}/transactions`);
+  revalidatePath(`/${orgSlug}/transactions/${id}`);
+}
+
+/**
+ * 作废一笔交易。分录保留不动——账目要可追溯，删掉分录就查不出当初记了什么。
+ * 数据库层也没有 delete 策略，硬删除在那一层就不可能。
+ */
+export async function voidTransaction(
+  orgSlug: string,
+  id: string,
+  reason: string,
+): Promise<void> {
+  const cleanReason = reason.trim();
+  if (cleanReason === '') {
+    throw new LedgerError('Voiding a record needs a reason.');
+  }
+
+  const context = await requirePermission(orgSlug, 'transaction:read');
+
+  await withTransaction(context.userId, async (tx) => {
+    const existing = await getTransactionDetail(tx, context.organizationId, id);
+
+    if (existing.voidedAt) {
+      throw new AuthError('forbidden', 'This record is already voided.');
+    }
+
+    if (!canEditTransaction(context.role, existing.createdBy === context.userId)) {
+      throw new AuthError('forbidden', 'Your role cannot void this record.');
+    }
+
+    assertPeriodOpen(existing.occurredOn, context.lockedUntil);
+
+    await markVoided(tx, context.organizationId, id, context.userId, cleanReason);
+
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'transaction.voided',
+      entityType: 'transaction',
+      entityId: id,
+      before: { voidedAt: null },
+      after: { voidedAt: new Date().toISOString(), voidReason: cleanReason },
+    });
+  });
+
+  revalidatePath(`/${orgSlug}`);
+  revalidatePath(`/${orgSlug}/transactions`);
+  revalidatePath(`/${orgSlug}/transactions/${id}`);
 }
