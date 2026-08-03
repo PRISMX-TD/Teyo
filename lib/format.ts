@@ -12,7 +12,7 @@ function groupThousands(whole: string): string {
   return whole.replace(/\B(?=(\d{3})+(?!\d))/g, ',');
 }
 
-export function formatMoney(amountMinor: bigint, currency: string, _locale: Locale): string {
+export function formatMoney(amountMinor: bigint, currency: string, _locale?: Locale): string {
   const exponent = currencyExponent(currency);
   const decimal = formatMinorToDecimal(amountMinor, exponent);
   const negative = decimal.startsWith('-');

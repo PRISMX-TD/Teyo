@@ -1,0 +1,66 @@
+import { getMessages } from '@/lib/i18n';
+import { requirePermission } from '@/server/auth/guard';
+import { updatePeriodLock, updateOrganization } from '@/server/actions/organizations';
+import { getUserLocale } from '@/server/repositories/organizations';
+
+export default async function GeneralSettingsPage({
+  params,
+}: {
+  params: Promise<{ orgSlug: string }>;
+}) {
+  const { orgSlug } = await params;
+  const context = await requirePermission(orgSlug, 'account:manage');
+  const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
+  const t = getMessages(locale);
+
+  return (
+    <main>
+      <h1>{t.settings.general}</h1>
+
+      <section>
+        <h2>{t.settings.lockTitle}</h2>
+        <p>{t.settings.lockHint}</p>
+        <form
+          action={async (formData: FormData) => {
+            'use server';
+            const lockDate = String(formData.get('lockDate') ?? '');
+            if (!lockDate) return;
+            await updatePeriodLock(orgSlug, { lockedUntil: lockDate || null });
+          }}
+        >
+          <input name="lockDate" type="date" required />
+          <button type="submit">{t.settings.save}</button>
+        </form>
+      </section>
+
+      <section>
+        <h2>{t.settings.general}</h2>
+        <form
+          action={async (formData: FormData) => {
+            'use server';
+            await updateOrganization(orgSlug, {
+              name: String(formData.get('name') ?? ''),
+              timezone: String(formData.get('timezone') ?? ''),
+              industry: String(formData.get('industry') ?? '') || undefined,
+            });
+          }}
+        >
+          <label htmlFor="name">{t.settings.name}</label>
+          <input id="name" name="name" required />
+
+          <label htmlFor="timezone">{t.onboarding.timezone}</label>
+          <select id="timezone" name="timezone" defaultValue="Asia/Kuala_Lumpur">
+            <option value="Asia/Kuala_Lumpur">Asia/Kuala Lumpur (GMT+8)</option>
+            <option value="Asia/Singapore">Asia/Singapore (GMT+8)</option>
+            <option value="Asia/Shanghai">Asia/Shanghai (GMT+8)</option>
+          </select>
+
+          <label htmlFor="industry">{t.onboarding.industry}</label>
+          <input id="industry" name="industry" />
+
+          <button type="submit">{t.settings.save}</button>
+        </form>
+      </section>
+    </main>
+  );
+}

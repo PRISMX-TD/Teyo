@@ -168,3 +168,23 @@ export async function listCategories(
     kind: row.kind as string,
   }));
 }
+
+/** 列出全部分类（含已隐藏），供设置页管理。 */
+export async function listAllCategories(
+  tx: Tx,
+  organizationId: string,
+): Promise<Array<{ id: string; nameEn: string | null; nameZh: string | null; kind: string; isActive: boolean }>> {
+  const rows = await tx`
+    select id, name_en, name_zh, kind, is_active
+    from categories
+    where organization_id = ${organizationId}
+    order by sort_order
+  `;
+  return rows.map((row) => ({
+    id: row.id as string,
+    nameEn: (row.name_en as string) ?? null,
+    nameZh: (row.name_zh as string) ?? null,
+    kind: row.kind as string,
+    isActive: row.is_active as boolean,
+  }));
+}

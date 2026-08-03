@@ -83,6 +83,28 @@ export async function listMoneyAccounts(
   }));
 }
 
+/** 列出全部科目（含已隐藏），供设置页管理。 */
+export async function listAllAccounts(
+  tx: Tx,
+  organizationId: string,
+): Promise<AccountRow[]> {
+  const rows = await tx`
+    select id, code, name_en, name_zh, type, is_money_account, is_active
+    from accounts
+    where organization_id = ${organizationId}
+    order by sort_order
+  `;
+  return rows.map((row) => ({
+    id: row.id as string,
+    code: row.code as string,
+    nameEn: (row.name_en as string) ?? null,
+    nameZh: (row.name_zh as string) ?? null,
+    type: row.type as AccountRow['type'],
+    isMoneyAccount: row.is_money_account as boolean,
+    isActive: row.is_active as boolean,
+  }));
+}
+
 export async function insertAccount(
   tx: Tx,
   row: {
