@@ -10,6 +10,16 @@ const PUBLIC_PATHS = [
 ];
 
 export async function middleware(request: NextRequest) {
+  const { pathname } = request.nextUrl;
+
+  const isPublic =
+    PUBLIC_PATHS.some((p) => pathname.startsWith(p)) || pathname.startsWith('/invite/');
+
+  // 公开页面不需要鉴权：跳过 Supabase Auth API 调用，省一次网络往返。
+  if (isPublic) {
+    return NextResponse.next();
+  }
+
   let response = NextResponse.next({ request });
 
   const supabase = createServerClient(
@@ -35,11 +45,7 @@ export async function middleware(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  const { pathname } = request.nextUrl;
-  const isPublic =
-    PUBLIC_PATHS.some((p) => pathname.startsWith(p)) || pathname.startsWith('/invite/');
-
-  if (!user && !isPublic) {
+  if (!user) {
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.searchParams.set('next', pathname);

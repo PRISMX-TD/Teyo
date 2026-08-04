@@ -27,9 +27,16 @@ function getPool(): postgres.Sql {
     throw new Error('DATABASE_URL is not set.');
   }
 
+  // vitest 并行跑 32 个文件时，每文件一个 pool 可能同时持有数十条连接，
+  // 会撞上 Supabase PgBouncer 的 session 模式连接数上限（pool_size: 15）。
+  // 测试环境用更大的 pool 但限制并行度；生产 serverless 每个实例只服务一个请求，
+  // 用较小 pool 就够了。
+  const isTest = process.env.VITEST === 'true';
+
   pool = postgres(connectionString, {
-    max: 10,
-    idle_timeout: 20,
+    max: isTest ? 10 : 3,
+    idle_timeout: isTest ? 20 : 5,
+    connect_timeout: 10,
     transform: { undefined: null },
   });
 

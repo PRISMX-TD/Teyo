@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { cache } from 'react';
 import type { Tx } from '@/server/db/transaction';
 import { sql } from '@/server/db/client';
 
@@ -97,22 +98,25 @@ export async function listOrganizationsForUser(
   return rows as unknown as Array<{ id: string; name: string; slug: string; role: string }>;
 }
 
-/** 公司切换器：列出用户所有活跃成员关系的公司，按名称排序保证 UI 稳定。 */
-export async function listUserOrganizations(
-  userId: string,
-): Promise<Array<{ id: string; name: string; slug: string; role: string }>> {
-  const rows = await sql`
-    select o.id, o.name, o.slug, m.role
-    from organizations o
-    join memberships m on m.organization_id = o.id
-    where m.user_id = ${userId} and m.status = 'active'
-    order by o.name
-  `;
-  return rows as unknown as Array<{ id: string; name: string; slug: string; role: string }>;
-}
+/** 公司切换器：列出用户所有活跃成员关系的公司，按名称排序保证 UI 稳定。
+ * 用 React.cache() 去重：同一请求内 layout + page 各自调用也只查一次。 */
+export const listUserOrganizations = cache(
+  async (userId: string): Promise<Array<{ id: string; name: string; slug: string; role: string }>> => {
+    const rows = await sql`
+      select o.id, o.name, o.slug, m.role
+      from organizations o
+      join memberships m on m.organization_id = o.id
+      where m.user_id = ${userId} and m.status = 'active'
+      order by o.name
+    `;
+    return rows as unknown as Array<{ id: string; name: string; slug: string; role: string }>;
+  },
+);
 
-/** 取用户语言设置，不存在或为 null 时回退到 en。 */
-export async function getUserLocale(userId: string): Promise<string> {
+/** 取用户语言设置，不存在或为 null 时回退到 en。
+ * 用 React.cache() 去重：root layout、app layout、各页面各自调用，
+ * 但同一请求内只查一次数据库。 */
+export const getUserLocale = cache(async (userId: string): Promise<string> => {
   const [row] = await sql`select locale from app_users where id = ${userId}`;
   return (row?.locale as string) ?? 'en';
-}
+});

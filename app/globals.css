@@ -1696,6 +1696,37 @@ td.numeric {
 }
 
 /* ==========================================================================
+   页面加载骨架 —— 导航后立即出现，减少等待感
+   ========================================================================== */
+
+.loading-skeleton {
+  min-height: 100vh;
+  background:
+    linear-gradient(var(--ink-100) 40px, transparent 0),
+    linear-gradient(var(--ink-100) 24px, transparent 0),
+    linear-gradient(var(--ink-100) 24px, transparent 0);
+  background-size:
+    100% 40px,
+    65% 24px,
+    80% 24px;
+  background-position:
+    0 var(--space-8),
+    0 calc(var(--space-8) + 64px),
+    0 calc(var(--space-8) + 104px);
+  background-repeat: no-repeat;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 0.4; }
+  50% { opacity: 0.7; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading-skeleton { animation: none; opacity: 0.5; }
+}
+
+/* ==========================================================================
    打印 —— 账页本来就是要能打出来给会计的
    ========================================================================== */
 
