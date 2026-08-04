@@ -1,6 +1,6 @@
-import { NamedList } from '@/components/settings/named-list';
+import { CoAList } from '@/components/settings/coa-list';
 import { getMessages } from '@/lib/i18n';
-import { createMoneyAccount, renameAccount, setAccountActive } from '@/server/actions/accounts';
+import { createAccount, renameAccount, setAccountActive } from '@/server/actions/accounts';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -22,22 +22,24 @@ export default async function AccountsSettingsPage({
 
   const items = accounts.map((a) => ({
     id: a.id,
+    code: a.code,
     nameEn: a.nameEn,
     nameZh: a.nameZh,
+    type: a.type,
+    isMoneyAccount: a.isMoneyAccount,
     isActive: a.isActive,
-    extra: a.isMoneyAccount ? (t.settings.accountType ?? '') : '',
   }));
 
   return (
     <>
       <h1>{t.settings.accounts}</h1>
-      <NamedList
+      <CoAList
         orgSlug={orgSlug}
         items={items}
         locale={locale}
-        onCreate={createMoneyAccount as unknown as (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>}
-        onRename={renameAccount as unknown as (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>}
-        onToggle={setAccountActive as unknown as (orgSlug: string, id: string, active: boolean) => Promise<unknown>}
+        createAction={createAccount as unknown as (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>}
+        renameAction={renameAccount as unknown as (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>}
+        toggleAction={setAccountActive as unknown as (orgSlug: string, id: string, active: boolean) => Promise<unknown>}
       />
     </>
   );

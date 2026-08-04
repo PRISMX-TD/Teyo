@@ -45,7 +45,9 @@ export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLab
             <td>
               {row.categoryId
                 ? localizedName({ name_en: row.categoryNameEn, name_zh: row.categoryNameZh }, locale)
-                : t.transaction.transfer}
+                : row.kind === 'journal'
+                  ? t.transaction.journal
+                  : t.transaction.transfer}
             </td>
             <td>
               {localizedName(

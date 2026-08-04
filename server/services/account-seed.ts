@@ -26,10 +26,20 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   { code: 'bank', nameEn: 'Bank Account', nameZh: '银行账户', type: 'asset', isMoneyAccount: true, sortOrder: 20 },
   { code: 'accounts-receivable', nameEn: 'Accounts Receivable', nameZh: '应收账款', type: 'asset', isMoneyAccount: false, sortOrder: 30 },
   { code: 'inventory', nameEn: 'Inventory', nameZh: '库存', type: 'asset', isMoneyAccount: false, sortOrder: 40 },
+  { code: 'equipment', nameEn: 'Equipment', nameZh: '设备', type: 'asset', isMoneyAccount: false, sortOrder: 50 },
+  { code: 'furniture', nameEn: 'Furniture & Fixtures', nameZh: '家具及装修', type: 'asset', isMoneyAccount: false, sortOrder: 60 },
+  { code: 'vehicles', nameEn: 'Vehicles', nameZh: '车辆', type: 'asset', isMoneyAccount: false, sortOrder: 70 },
+  { code: 'software-intangible', nameEn: 'Software (Intangible)', nameZh: '无形资产·软件', type: 'asset', isMoneyAccount: false, sortOrder: 80 },
+  { code: 'ad-equipment', nameEn: 'Accum. Depr. - Equipment', nameZh: '累计折旧·设备', type: 'asset', isMoneyAccount: false, sortOrder: 85 },
+  { code: 'ad-furniture', nameEn: 'Accum. Depr. - Furniture', nameZh: '累计折旧·家具', type: 'asset', isMoneyAccount: false, sortOrder: 86 },
+  { code: 'ad-vehicles', nameEn: 'Accum. Depr. - Vehicles', nameZh: '累计折旧·车辆', type: 'asset', isMoneyAccount: false, sortOrder: 87 },
+  { code: 'ad-software', nameEn: 'Accum. Amort. - Software', nameZh: '累计摊销·软件', type: 'asset', isMoneyAccount: false, sortOrder: 88 },
+  { code: 'prepaid-expenses', nameEn: 'Prepaid Expenses', nameZh: '预付费用', type: 'asset', isMoneyAccount: false, sortOrder: 90 },
   // 负债
   { code: 'accounts-payable', nameEn: 'Accounts Payable', nameZh: '应付账款', type: 'liability', isMoneyAccount: false, sortOrder: 110 },
   { code: 'loans', nameEn: 'Loans', nameZh: '贷款', type: 'liability', isMoneyAccount: false, sortOrder: 120 },
   { code: 'tax-payable', nameEn: 'Tax Payable', nameZh: '待缴税款', type: 'liability', isMoneyAccount: false, sortOrder: 130 },
+  { code: 'deferred-revenue', nameEn: 'Deferred Revenue', nameZh: '递延收入', type: 'liability', isMoneyAccount: false, sortOrder: 140 },
   // 权益
   { code: 'capital', nameEn: 'Capital', nameZh: '股本', type: 'equity', isMoneyAccount: false, sortOrder: 210 },
   { code: 'retained-earnings', nameEn: 'Retained Earnings', nameZh: '留存收益', type: 'equity', isMoneyAccount: false, sortOrder: 220 },
@@ -44,7 +54,10 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   { code: 'marketing', nameEn: 'Marketing', nameZh: '市场推广', type: 'expense', isMoneyAccount: false, sortOrder: 440 },
   { code: 'transport', nameEn: 'Transport', nameZh: '交通', type: 'expense', isMoneyAccount: false, sortOrder: 450 },
   { code: 'professional-fees', nameEn: 'Professional Fees', nameZh: '专业服务', type: 'expense', isMoneyAccount: false, sortOrder: 460 },
-  { code: 'other-expenses', nameEn: 'Other Expenses', nameZh: '其他', type: 'expense', isMoneyAccount: false, sortOrder: 470 },
+  { code: 'ai-llm-costs', nameEn: 'AI & LLM Costs', nameZh: 'AI/LLM 费用', type: 'expense', isMoneyAccount: false, sortOrder: 470 },
+  { code: 'depreciation', nameEn: 'Depreciation', nameZh: '折旧', type: 'expense', isMoneyAccount: false, sortOrder: 480 },
+  { code: 'amortization', nameEn: 'Amortization', nameZh: '摊销', type: 'expense', isMoneyAccount: false, sortOrder: 490 },
+  { code: 'other-expenses', nameEn: 'Other Expenses', nameZh: '其他', type: 'expense', isMoneyAccount: false, sortOrder: 500 },
 ] as const;
 
 export const SEED_CATEGORIES: readonly SeedCategory[] = [
@@ -56,7 +69,10 @@ export const SEED_CATEGORIES: readonly SeedCategory[] = [
   { nameEn: 'Marketing', nameZh: '市场推广', kind: 'expense', accountCode: 'marketing', sortOrder: 140 },
   { nameEn: 'Transport', nameZh: '交通', kind: 'expense', accountCode: 'transport', sortOrder: 150 },
   { nameEn: 'Professional Fees', nameZh: '专业服务', kind: 'expense', accountCode: 'professional-fees', sortOrder: 160 },
-  { nameEn: 'Other', nameZh: '其他', kind: 'expense', accountCode: 'other-expenses', sortOrder: 170 },
+  { nameEn: 'AI / LLM', nameZh: 'AI/LLM 费用', kind: 'expense', accountCode: 'ai-llm-costs', sortOrder: 170 },
+  { nameEn: 'Depreciation', nameZh: '折旧', kind: 'expense', accountCode: 'depreciation', sortOrder: 180 },
+  { nameEn: 'Amortization', nameZh: '摊销', kind: 'expense', accountCode: 'amortization', sortOrder: 190 },
+  { nameEn: 'Other', nameZh: '其他', kind: 'expense', accountCode: 'other-expenses', sortOrder: 200 },
 ] as const;
 
 /**

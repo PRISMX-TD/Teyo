@@ -58,7 +58,9 @@ export default async function TransactionDetailPage({
         ? t.transaction.income
         : row.kind === 'expense'
           ? t.transaction.expense
-          : t.transaction.transfer;
+          : row.kind === 'journal'
+            ? t.transaction.journal
+            : t.transaction.transfer;
 
     return (
       <Layout orgSlug={orgSlug} t={t}>

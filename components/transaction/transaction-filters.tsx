@@ -47,6 +47,7 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
           <option value="income">{t.transaction.income}</option>
           <option value="expense">{t.transaction.expense}</option>
           <option value="transfer">{t.transaction.transfer}</option>
+          <option value="journal">{t.transaction.journal}</option>
         </select>
       </div>
 

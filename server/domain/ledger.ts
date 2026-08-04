@@ -8,7 +8,7 @@ export class LedgerError extends Error {
   }
 }
 
-export type TransactionKind = 'income' | 'expense' | 'transfer';
+export type TransactionKind = 'income' | 'expense' | 'transfer' | 'journal';
 export type Direction = 'debit' | 'credit';
 
 export type DraftJournalLine = {
@@ -36,6 +36,7 @@ export type BuildLinesInput = {
  * income   debit money account   / credit revenue account
  * expense  debit expense account / credit money account
  * transfer debit destination     / credit source
+ * journal  debit account         / credit account
  */
 export function buildJournalLines(input: BuildLinesInput): DraftJournalLine[] {
   const { kind, amountMinor, currency, baseCurrency, scaledRate, moneyAccountId, counterAccountId } =
@@ -50,8 +51,8 @@ export function buildJournalLines(input: BuildLinesInput): DraftJournalLine[] {
   if (!moneyAccountId || !counterAccountId) {
     throw new LedgerError('Both accounts are required.');
   }
-  if (kind === 'transfer' && moneyAccountId === counterAccountId) {
-    throw new LedgerError('A transfer requires two different accounts.');
+  if ((kind === 'transfer' || kind === 'journal') && moneyAccountId === counterAccountId) {
+    throw new LedgerError('This operation requires two different accounts.');
   }
 
   const baseAmountMinor = convertToBaseMinor({
@@ -61,8 +62,9 @@ export function buildJournalLines(input: BuildLinesInput): DraftJournalLine[] {
     scaledRate,
   });
 
-  const debitAccountId = kind === 'expense' ? counterAccountId : moneyAccountId;
-  const creditAccountId = kind === 'expense' ? moneyAccountId : counterAccountId;
+  // journal: debit moneyAccountId, credit counterAccountId (same as income)
+  const debitAccountId = (kind === 'expense') ? counterAccountId : moneyAccountId;
+  const creditAccountId = (kind === 'expense') ? moneyAccountId : counterAccountId;
 
   const lines: DraftJournalLine[] = [
     { accountId: debitAccountId, direction: 'debit', amountMinor, baseAmountMinor },

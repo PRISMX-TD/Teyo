@@ -13,7 +13,7 @@ import {
 import { assertPeriodOpen } from '@/server/domain/period-lock';
 import { canEditTransaction } from '@/server/domain/permissions';
 import { findRate } from '@/server/repositories/exchange-rates';
-import { getMoneyAccount } from '@/server/repositories/accounts';
+import { findAccount, getMoneyAccount } from '@/server/repositories/accounts';
 import { getCategoryWithAccount } from '@/server/repositories/categories';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import { AuthError } from '@/server/auth/guard';
@@ -87,6 +87,12 @@ async function resolveCounterAccountId(
   organizationId: string,
   input: { kind: TransactionKind; counterAccountId?: string; categoryId?: string },
 ): Promise<string> {
+  if (input.kind === 'journal') {
+    // Journal entries use two arbitrary accounts, no category needed.
+    // This function shouldn't be called for journal - the caller should handle it.
+    throw new LedgerError('Journal entries do not use categories.');
+  }
+
   if (input.kind === 'transfer') {
     if (!input.counterAccountId) {
       throw new LedgerError('A transfer needs a destination account.');
@@ -188,6 +194,111 @@ export async function createTransaction(
   });
 
   revalidatePath(`/${orgSlug}/transactions`);
+  return result;
+}
+
+export type CreateJournalInput = {
+  occurredOn: string;
+  amount: string;
+  currency?: string;
+  debitAccountId: string;
+  creditAccountId: string;
+  description?: string;
+};
+
+/**
+ * 通用记账凭证：任意两个科目之间的借贷分录。
+ *
+ * 不限制一方必须是资金账户——用户可以把任何科目配成一对：
+ *   现金 → 无形资产（资本化研发投入）
+ *   预付费用 → 现金（预付一年租金）
+ *   折旧 → 累计折旧（非现金的折旧分录）
+ *
+ * 金额用本位币，不需要汇率查表。与 createTransaction 一样享有幂等保护。
+ */
+export async function createJournal(
+  orgSlug: string,
+  input: CreateJournalInput,
+): Promise<{ id: string; deduplicated: boolean }> {
+  const context = await requirePermission(orgSlug, 'transaction:create');
+  assertPeriodOpen(input.occurredOn, context.lockedUntil);
+
+  const clientUuid = crypto.randomUUID();
+  const baseCurrency = context.baseCurrency;
+
+  const result = await withTransaction(context.userId, async (tx) => {
+    const existing = await findTransactionByClientUuid(tx, context.organizationId, clientUuid);
+    if (existing) {
+      return { id: existing.id, deduplicated: true };
+    }
+
+    const debitAccount = await findAccount(tx, context.organizationId, input.debitAccountId);
+    if (!debitAccount) throw new LedgerError('The debit account was not found.');
+    if (!debitAccount.isActive) throw new LedgerError(`Account ${debitAccount.code} is archived.`);
+
+    const creditAccount = await findAccount(tx, context.organizationId, input.creditAccountId);
+    if (!creditAccount) throw new LedgerError('The credit account was not found.');
+    if (!creditAccount.isActive) throw new LedgerError(`Account ${creditAccount.code} is archived.`);
+
+    if (input.debitAccountId === input.creditAccountId) {
+      throw new LedgerError('Debit and credit must be different accounts.');
+    }
+
+    const currency = input.currency ?? baseCurrency;
+    const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(currency));
+
+    const lines = buildJournalLines({
+      kind: 'journal',
+      amountMinor,
+      currency,
+      baseCurrency,
+      scaledRate: RATE_SCALE,
+      moneyAccountId: debitAccount.id,    // journal: debit
+      counterAccountId: creditAccount.id,  // journal: credit
+    });
+
+    const baseAmountMinor = lines[0].baseAmountMinor;
+
+    const { id } = await insertTransaction(tx, {
+      organizationId: context.organizationId,
+      kind: 'journal',
+      occurredOn: input.occurredOn,
+      description: input.description ?? '',
+      currency,
+      amountMinor,
+      baseAmountMinor,
+      scaledRate: RATE_SCALE,
+      rateSource: 'auto',
+      categoryId: null,
+      createdBy: context.userId,
+      clientUuid,
+    });
+
+    await insertJournalLines(tx, context.organizationId, id, lines);
+
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'transaction.created',
+      entityType: 'transaction',
+      entityId: id,
+      after: {
+        kind: 'journal',
+        occurredOn: input.occurredOn,
+        currency,
+        amountMinor: amountMinor.toString(),
+        baseAmountMinor: baseAmountMinor.toString(),
+        debitAccount: debitAccount.code,
+        creditAccount: creditAccount.code,
+        description: input.description ?? '',
+      },
+    });
+
+    return { id, deduplicated: false };
+  });
+
+  revalidatePath(`/${orgSlug}/transactions`);
+  revalidatePath(`/${orgSlug}/reports`);
   return result;
 }
 

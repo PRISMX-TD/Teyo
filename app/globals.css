@@ -1734,7 +1734,8 @@ td.numeric {
   .sidebar,
   .offline-banner,
   .filters,
-  .primary-button {
+  .primary-button,
+  .report-tabs button:not(.active) {
     display: none;
   }
 
@@ -1762,6 +1763,52 @@ td.numeric {
   .transaction-table tr {
     break-inside: avoid;
   }
+}
+
+/* ==========================================================================
+   科目表 (Chart of Accounts)
+   ========================================================================== */
+
+.coa-section {
+  margin-bottom: var(--space-md);
+}
+
+.coa-section-title {
+  font-size: var(--fs-small);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-500);
+  margin-bottom: var(--space-xs);
+  padding-bottom: var(--space-xs);
+  border-bottom: 1px solid var(--ink-200);
+}
+
+.coa-code {
+  font-family: var(--font-mono);
+  font-size: var(--fs-small);
+  color: var(--ink-400);
+  margin-right: var(--space-sm);
+  min-width: 100px;
+  display: inline-block;
+}
+
+.badge-info {
+  background: var(--ink-100);
+  color: var(--ink-600);
+}
+
+.checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  margin-right: var(--space-sm);
+  font-size: var(--fs-small);
+  color: var(--ink-500);
+}
+
+.add-form h3 {
+  font-size: var(--fs-body);
+  margin-bottom: var(--space-xs);
 }
 
 /* ==========================================================================

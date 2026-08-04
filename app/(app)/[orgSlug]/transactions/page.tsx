@@ -26,7 +26,7 @@ export default async function TransactionsListPage({
   const filters: TFilters = {
     from: typeof raw.from === 'string' ? raw.from : undefined,
     to: typeof raw.to === 'string' ? raw.to : undefined,
-    kind: typeof raw.kind === 'string' ? (raw.kind as 'income' | 'expense' | 'transfer') : undefined,
+    kind: typeof raw.kind === 'string' ? (raw.kind as 'income' | 'expense' | 'transfer' | 'journal') : undefined,
     categoryId: typeof raw.categoryId === 'string' ? raw.categoryId : undefined,
     moneyAccountId: typeof raw.moneyAccountId === 'string' ? raw.moneyAccountId : undefined,
     createdBy: typeof raw.createdBy === 'string' ? raw.createdBy : undefined,
@@ -57,6 +57,9 @@ export default async function TransactionsListPage({
       <h1>{t.transaction.listTitle}</h1>
       <Link href={`/${orgSlug}/transactions/new`} className="primary-button">
         {t.transaction.newTitle}
+      </Link>
+      <Link href={`/${orgSlug}/transactions/journal`} className="primary-button">
+        {t.journal.newTitle}
       </Link>
 
       <TransactionFilters

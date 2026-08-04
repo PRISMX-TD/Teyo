@@ -6,6 +6,7 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import {
   AccountError,
+  AccountRow,
   countActiveMoneyAccounts,
   getAccount,
   insertAccount,
@@ -58,6 +59,52 @@ export async function createMoneyAccount(
       entityType: 'account',
       entityId: id,
       after: { code, ...names, isMoneyAccount: true },
+    });
+
+    return { id };
+  });
+
+  revalidatePath(`/${orgSlug}/settings/accounts`);
+  return result;
+}
+
+export async function createAccount(
+  orgSlug: string,
+  input: {
+    nameEn?: string;
+    nameZh?: string;
+    type: 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
+    isMoneyAccount: boolean;
+  },
+): Promise<{ id: string }> {
+  const context = await requirePermission(orgSlug, 'account:manage');
+  const names = normaliseNames(renameSchema.parse(input));
+
+  const result = await withTransaction(context.userId, async (tx) => {
+    const code = await nextAvailableCode(
+      tx,
+      context.organizationId,
+      names.nameEn ?? names.nameZh ?? 'account',
+    );
+    const sortOrder = await nextAccountSortOrder(tx, context.organizationId, input.type as AccountRow['type']);
+
+    const { id } = await insertAccount(tx, {
+      organizationId: context.organizationId,
+      code,
+      nameEn: names.nameEn,
+      nameZh: names.nameZh,
+      type: input.type as AccountRow['type'],
+      isMoneyAccount: input.isMoneyAccount,
+      sortOrder,
+    });
+
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'account.created',
+      entityType: 'account',
+      entityId: id,
+      after: { code, ...names, type: input.type, isMoneyAccount: input.isMoneyAccount },
     });
 
     return { id };
