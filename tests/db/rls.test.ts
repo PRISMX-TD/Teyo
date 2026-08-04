@@ -293,4 +293,30 @@ describe('role enforcement at the database layer', () => {
     const rows = await asUser(frankId, (tx) => tx`select id from transactions`);
     expect(rows).toHaveLength(0);
   });
+
+  // 回归：onboarding 曾在建公司后直接 seed 而没写 owner membership，
+  // accounts_write 策略因此拒绝插入，线上表现为创建公司后 500。
+  // 建公司的流程必须在同一事务里先写 membership，再 seed。
+  it('rejects account inserts by a creator who has no membership yet', async () => {
+    const graceId = await createUser(`grace-${RUN}@example.com`, 'Grace');
+    extraUsers.push(graceId);
+
+    await expect(
+      asUser(graceId, async (tx) => {
+        const [org] = await tx`
+          insert into organizations (name, slug, base_currency, timezone, created_by)
+          values ('No Membership Co', ${`no-membership-${RUN}`}, 'MYR',
+                  'Asia/Kuala_Lumpur', ${graceId})
+          returning id
+        `;
+
+        // 故意跳过 membership，直接 seed
+        return tx`
+          insert into accounts (organization_id, code, name_en, name_zh, type,
+                                is_money_account, is_system, sort_order)
+          values (${org.id}, 'cash', 'Cash', '现金', 'asset', true, true, 10)
+        `;
+      }),
+    ).rejects.toThrow(/row-level security/i);
+  });
 });
