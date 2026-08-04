@@ -51,7 +51,7 @@ export default async function TransactionsListPage({
   });
 
   return (
-    <main>
+    <>
       <h1>{t.transaction.listTitle}</h1>
       <Link href={`/${orgSlug}/transactions/new`} className="primary-button">
         {t.transaction.newTitle}
@@ -72,6 +72,6 @@ export default async function TransactionsListPage({
         baseCurrency={context.baseCurrency}
         emptyLabel={t.transaction.empty}
       />
-    </main>
+    </>
   );
 }

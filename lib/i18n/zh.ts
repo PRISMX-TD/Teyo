@@ -141,6 +141,7 @@ const zh: Translated<typeof en> = {
     audit: '操作记录',
     save: '保存修改',
     saved: '已保存。',
+    rename: '重命名',
     lockTitle: '锁定账本',
     lockHint: '这一天及之前的记录，任何人都不能再改。',
     lockedUntil: '已锁定至',

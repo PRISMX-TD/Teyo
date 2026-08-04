@@ -24,7 +24,7 @@ export default async function AuditSettingsPage({
   );
 
   return (
-    <main>
+    <>
       <h1>{t.audit.title}</h1>
 
       {rows.length === 0 ? (
@@ -57,6 +57,6 @@ export default async function AuditSettingsPage({
           {t.common.loading}
         </a>
       ) : null}
-    </main>
+    </>
   );
 }

@@ -29,7 +29,7 @@ export default async function AccountsSettingsPage({
   }));
 
   return (
-    <main>
+    <>
       <h1>{t.settings.accounts}</h1>
       <NamedList
         orgSlug={orgSlug}
@@ -39,6 +39,6 @@ export default async function AccountsSettingsPage({
         onRename={renameAccount as unknown as (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>}
         onToggle={setAccountActive as unknown as (orgSlug: string, id: string, active: boolean) => Promise<unknown>}
       />
-    </main>
+    </>
   );
 }

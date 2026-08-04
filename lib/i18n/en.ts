@@ -128,6 +128,7 @@ const en = {
     audit: 'Activity log',
     save: 'Save changes',
     saved: 'Changes saved.',
+    rename: 'Rename',
     lockTitle: 'Lock the books',
     lockHint: 'Nobody can change records dated on or before this day.',
     lockedUntil: 'Locked through',

@@ -14,10 +14,10 @@ export default async function ExportPage({
   const t = getMessages(locale);
 
   return (
-    <main>
+    <>
       <h1>{t.exportPage.title}</h1>
       <p>{t.exportPage.subtitle}</p>
       <ExportForm orgSlug={orgSlug} locale={locale} />
-    </main>
+    </>
   );
 }

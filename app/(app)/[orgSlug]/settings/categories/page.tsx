@@ -29,7 +29,7 @@ export default async function CategoriesSettingsPage({
   }));
 
   return (
-    <main>
+    <>
       <h1>{t.settings.categories}</h1>
       <NamedList
         orgSlug={orgSlug}
@@ -39,6 +39,6 @@ export default async function CategoriesSettingsPage({
         onRename={renameCategory as unknown as (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>}
         onToggle={setCategoryActive as unknown as (orgSlug: string, id: string, active: boolean) => Promise<unknown>}
       />
-    </main>
+    </>
   );
 }

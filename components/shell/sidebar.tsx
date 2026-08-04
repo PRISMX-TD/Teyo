@@ -23,6 +23,11 @@ export function Sidebar({ orgSlug, i18n }: Props) {
     <aside className="sidebar">
       <div className="sidebar-brand">{i18n.brand.name}</div>
 
+      {/* 录一笔是这个产品的主动作，不能埋在二级页里 */}
+      <Link href={`/${orgSlug}/transactions/new`} className="sidebar-action">
+        {i18n.transaction.newTitle}
+      </Link>
+
       <nav className="sidebar-nav">
         {links.map((link) => {
           const isActive =

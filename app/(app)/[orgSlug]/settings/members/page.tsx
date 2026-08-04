@@ -20,7 +20,7 @@ export default async function MembersSettingsPage({
   ]);
 
   return (
-    <main>
+    <>
       <h1>{t.members.title}</h1>
       <MembersPanel
         orgSlug={orgSlug}
@@ -29,6 +29,6 @@ export default async function MembersSettingsPage({
         currentUserId={context.userId}
         locale={locale}
       />
-    </main>
+    </>
   );
 }

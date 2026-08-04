@@ -29,7 +29,7 @@ export default async function NewTransactionPage({
   });
 
   return (
-    <main>
+    <>
       <h1>{t.transaction.newTitle}</h1>
       <TransactionForm
         orgSlug={orgSlug}
@@ -40,6 +40,6 @@ export default async function NewTransactionPage({
         expenseCategories={categories.filter((c) => c.kind === 'expense').map(toOption)}
         currencies={[...SUPPORTED_CURRENCIES]}
       />
-    </main>
+    </>
   );
 }

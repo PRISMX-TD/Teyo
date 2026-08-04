@@ -30,69 +30,89 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
 
   return (
     <form action={apply} className="filters">
-      <label htmlFor="from">{t.filters.from}</label>
-      <input id="from" name="from" type="date" defaultValue={params.get('from') ?? ''} />
+      <div className="filter-field">
+        <label htmlFor="from">{t.filters.from}</label>
+        <input id="from" name="from" type="date" defaultValue={params.get('from') ?? ''} />
+      </div>
 
-      <label htmlFor="to">{t.filters.to}</label>
-      <input id="to" name="to" type="date" defaultValue={params.get('to') ?? ''} />
+      <div className="filter-field">
+        <label htmlFor="to">{t.filters.to}</label>
+        <input id="to" name="to" type="date" defaultValue={params.get('to') ?? ''} />
+      </div>
 
-      <label htmlFor="kind">{t.filters.kind}</label>
-      <select id="kind" name="kind" defaultValue={params.get('kind') ?? ''}>
-        <option value="">—</option>
-        <option value="income">{t.transaction.income}</option>
-        <option value="expense">{t.transaction.expense}</option>
-        <option value="transfer">{t.transaction.transfer}</option>
-      </select>
+      <div className="filter-field">
+        <label htmlFor="kind">{t.filters.kind}</label>
+        <select id="kind" name="kind" defaultValue={params.get('kind') ?? ''}>
+          <option value="">—</option>
+          <option value="income">{t.transaction.income}</option>
+          <option value="expense">{t.transaction.expense}</option>
+          <option value="transfer">{t.transaction.transfer}</option>
+        </select>
+      </div>
 
-      <label htmlFor="categoryId">{t.filters.category}</label>
-      <select id="categoryId" name="categoryId" defaultValue={params.get('categoryId') ?? ''}>
-        <option value="">—</option>
-        {categories.map((c) => (
-          <option key={c.id} value={c.id}>
-            {localizedName(c, locale)}
-          </option>
-        ))}
-      </select>
+      <div className="filter-field">
+        <label htmlFor="categoryId">{t.filters.category}</label>
+        <select id="categoryId" name="categoryId" defaultValue={params.get('categoryId') ?? ''}>
+          <option value="">—</option>
+          {categories.map((c) => (
+            <option key={c.id} value={c.id}>
+              {localizedName(c, locale)}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <label htmlFor="moneyAccountId">{t.filters.moneyAccount}</label>
-      <select id="moneyAccountId" name="moneyAccountId" defaultValue={params.get('moneyAccountId') ?? ''}>
-        <option value="">—</option>
-        {moneyAccounts.map((a) => (
-          <option key={a.id} value={a.id}>
-            {localizedName(a, locale)}
-          </option>
-        ))}
-      </select>
+      <div className="filter-field">
+        <label htmlFor="moneyAccountId">{t.filters.moneyAccount}</label>
+        <select id="moneyAccountId" name="moneyAccountId" defaultValue={params.get('moneyAccountId') ?? ''}>
+          <option value="">—</option>
+          {moneyAccounts.map((a) => (
+            <option key={a.id} value={a.id}>
+              {localizedName(a, locale)}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <label htmlFor="createdBy">{t.filters.member}</label>
-      <select id="createdBy" name="createdBy" defaultValue={params.get('createdBy') ?? ''}>
-        <option value="">—</option>
-        {members.map((m) => (
-          <option key={m.userId} value={m.userId}>
-            {m.displayName}
-          </option>
-        ))}
-      </select>
+      <div className="filter-field">
+        <label htmlFor="createdBy">{t.filters.member}</label>
+        <select id="createdBy" name="createdBy" defaultValue={params.get('createdBy') ?? ''}>
+          <option value="">—</option>
+          {members.map((m) => (
+            <option key={m.userId} value={m.userId}>
+              {m.displayName}
+            </option>
+          ))}
+        </select>
+      </div>
 
-      <label htmlFor="minAmount">{t.filters.minAmount}</label>
-      <input id="minAmount" name="minAmount" inputMode="decimal" defaultValue={params.get('minAmount') ?? ''} />
+      <div className="filter-field">
+        <label htmlFor="minAmount">{t.filters.minAmount}</label>
+        <input id="minAmount" name="minAmount" inputMode="decimal" defaultValue={params.get('minAmount') ?? ''} />
+      </div>
 
-      <label htmlFor="maxAmount">{t.filters.maxAmount}</label>
-      <input id="maxAmount" name="maxAmount" inputMode="decimal" defaultValue={params.get('maxAmount') ?? ''} />
+      <div className="filter-field">
+        <label htmlFor="maxAmount">{t.filters.maxAmount}</label>
+        <input id="maxAmount" name="maxAmount" inputMode="decimal" defaultValue={params.get('maxAmount') ?? ''} />
+      </div>
 
-      <label htmlFor="keyword">{t.filters.keyword}</label>
-      <input id="keyword" name="keyword" defaultValue={params.get('keyword') ?? ''} />
+      <div className="filter-field">
+        <label htmlFor="keyword">{t.filters.keyword}</label>
+        <input id="keyword" name="keyword" defaultValue={params.get('keyword') ?? ''} />
+      </div>
 
-      <label htmlFor="includeVoided">
-        <input id="includeVoided" name="includeVoided" type="checkbox" value="true"
-          defaultChecked={params.get('includeVoided') === 'true'} />
-        {t.filters.includeVoided}
-      </label>
+      <div className="filter-actions">
+        <label htmlFor="includeVoided" className="filter-toggle">
+          <input id="includeVoided" name="includeVoided" type="checkbox" value="true"
+            defaultChecked={params.get('includeVoided') === 'true'} />
+          {t.filters.includeVoided}
+        </label>
 
-      <button type="submit">{t.filters.apply}</button>
-      <button type="button" onClick={() => router.push(`/${orgSlug}/transactions`)}>
-        {t.filters.reset}
-      </button>
+        <button type="submit">{t.filters.apply}</button>
+        <button type="button" onClick={() => router.push(`/${orgSlug}/transactions`)}>
+          {t.filters.reset}
+        </button>
+      </div>
     </form>
   );
 }

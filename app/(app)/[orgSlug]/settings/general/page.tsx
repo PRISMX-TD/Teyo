@@ -14,7 +14,7 @@ export default async function GeneralSettingsPage({
   const t = getMessages(locale);
 
   return (
-    <main>
+    <>
       <h1>{t.settings.general}</h1>
 
       <section>
@@ -61,6 +61,6 @@ export default async function GeneralSettingsPage({
           <button type="submit">{t.settings.save}</button>
         </form>
       </section>
-    </main>
+    </>
   );
 }

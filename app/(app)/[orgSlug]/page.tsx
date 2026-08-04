@@ -1,4 +1,5 @@
 import { SummaryCards } from '@/components/overview/summary-cards';
+import { formatMoney } from '@/lib/format';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -31,7 +32,7 @@ export default async function OverviewPage({
   }));
 
   return (
-    <main>
+    <>
       <h1>{t.overview.title}</h1>
 
       <SummaryCards
@@ -42,19 +43,28 @@ export default async function OverviewPage({
         locale={locale}
       />
 
-      <section>
+      <section className="recent-log">
         <h2>{t.overview.recentTransactions}</h2>
-        {data.recent.rows.length === 0 ? <p>{t.overview.empty}</p> : null}
-        <ul>
-          {data.recent.rows.map((row) => (
-            <li key={row.id}>
-              <a href={`/${orgSlug}/transactions/${row.id}`}>
-                {row.occurredOn} &middot; {row.description || '\u2014'}
-              </a>
-            </li>
-          ))}
-        </ul>
+        {data.recent.rows.length === 0 ? (
+          <p className="empty-state">{t.overview.empty}</p>
+        ) : (
+          <ul>
+            {data.recent.rows.map((row) => (
+              <li key={row.id} className={row.voidedAt ? 'row-voided' : undefined}>
+                <a href={`/${orgSlug}/transactions/${row.id}`}>
+                  <span className="mono log-date">{row.occurredOn}</span>
+                  <span className="log-desc">{row.description || '\u2014'}</span>
+                  <span
+                    className={`numeric ${row.kind === 'income' ? 'money-in' : 'money-out'}`}
+                  >
+                    {formatMoney(row.baseAmountMinor, context.baseCurrency, locale)}
+                  </span>
+                </a>
+              </li>
+            ))}
+          </ul>
+        )}
       </section>
-    </main>
+    </>
   );
 }

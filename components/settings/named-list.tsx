@@ -85,7 +85,7 @@ export function NamedList({ orgSlug, items, locale, onCreate, onRename, onToggle
               <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}{item.kind ? ` (${item.kind})` : ''}{item.extra ? ` (${item.extra})` : ''}</span>
               {!item.isActive ? <span className="badge">{t.settings.inactive}</span> : null}
               <button onClick={() => { setEditing(item.id); setEditEn(item.nameEn ?? ''); setEditZh(item.nameZh ?? ''); }}>
-                {t.settings.save}
+                {t.settings.rename}
               </button>
               <button onClick={() => onToggle(orgSlug, item.id, !item.isActive)}>
                 {item.isActive ? t.settings.deactivate : t.settings.reactivate}
