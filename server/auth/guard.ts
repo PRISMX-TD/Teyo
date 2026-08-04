@@ -1,3 +1,4 @@
+import { redirect } from 'next/navigation';
 import { withTransaction } from '@/server/db/transaction';
 import { can, type Action, type Role } from '@/server/domain/permissions';
 import { getCurrentUserId } from '@/server/auth/session';
@@ -23,10 +24,21 @@ export type OrgContext = {
   lockedUntil: string | null;
 };
 
+/**
+ * 未登录时直接跳登录页，而不是抛 AuthError。
+ *
+ * 抛错在 Server Component 里没有 error boundary 兜住就是 500，用户看到的是
+ * 「An error occurred in the Server Components render」而不是登录表单。
+ * middleware 通常会先拦下未登录请求，但它与 getUser() 的会话判定可能不一致
+ * （cookie 刷新中、middleware matcher 未覆盖的路径），这里必须能兜住。
+ *
+ * redirect() 通过抛 NEXT_REDIRECT 实现，Next.js 会识别并转成 307，
+ * 所以它不会被当成错误。
+ */
 export async function requireUserId(): Promise<string> {
   const userId = await getCurrentUserId();
   if (!userId) {
-    throw new AuthError('unauthenticated', 'You need to sign in to continue.');
+    redirect('/login');
   }
   return userId;
 }

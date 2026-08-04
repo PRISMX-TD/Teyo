@@ -58,7 +58,10 @@ export async function middleware(request: NextRequest) {
 export const config = {
   // icon/apple-icon 由 app/icon.tsx 动态生成，路径不带扩展名，
   // 必须显式排除，否则未登录时会被重定向到 /login，PWA 装不上图标。
+  //
+  // api 也必须排除：路由处理器自带鉴权（cron 用 CRON_SECRET 校验 Bearer），
+  // 走这里的会话重定向会让 Vercel Cron 拿到 307 而不是执行任务。
   matcher: [
-    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|swe-worker-.*|icon|apple-icon|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)',
+    '/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|swe-worker-.*|icon|apple-icon|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)',
   ],
 };

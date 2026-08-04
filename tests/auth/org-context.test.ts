@@ -98,10 +98,13 @@ describe('resolveOrgContext', () => {
     });
   });
 
-  it('throws unauthenticated when there is no session', async () => {
+  // 无会话时改为 redirect('/login') 而不是抛 AuthError：Server Component 里
+  // 抛错没有 error boundary 会变成 500，用户看不到登录页。这里断言 redirect
+  // 摘要，仍然覆盖「无会话拿不到 org context」这个意图。
+  it('redirects to login when there is no session', async () => {
     currentUser.id = null;
     await expect(resolveOrgContext(orgSlug)).rejects.toMatchObject({
-      code: 'unauthenticated',
+      digest: 'NEXT_REDIRECT;replace;/login;307;',
     });
   });
 });
