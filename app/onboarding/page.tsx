@@ -1,13 +1,8 @@
 import { redirect } from 'next/navigation';
 import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
-import {
-  listUserOrganizations,
-  generateUniqueSlug,
-  insertOrganization,
-} from '@/server/repositories/organizations';
-import { withTransaction } from '@/server/db/transaction';
-import { seedChartOfAccounts } from '@/server/services/account-seed';
+import { listUserOrganizations } from '@/server/repositories/organizations';
+import { createOrganization } from '@/server/actions/organizations';
 
 export default async function OnboardingPage() {
   const userId = await requireUserId();
@@ -28,27 +23,17 @@ export default async function OnboardingPage() {
       <form
         action={async (formData: FormData) => {
           'use server';
-          const userId = await requireUserId();
           const name = String(formData.get('companyName') ?? '').trim();
-          const baseCurrency = String(formData.get('baseCurrency') ?? 'MYR').trim().toUpperCase();
-          const timezone = String(formData.get('timezone') ?? 'Asia/Kuala_Lumpur').trim();
-          const industry = String(formData.get('industry') ?? '').trim() || null;
-
           if (!name || name.length < 2) return;
 
-          // 创建公司 + seed → 页面刷新后走上面的 redirect
-          const slug = await withTransaction(userId, async (tx) => {
-            const s = await generateUniqueSlug(tx, name);
-            const id = await insertOrganization(tx, {
-              name,
-              slug: s,
-              baseCurrency,
-              timezone,
-              industry,
-              createdBy: userId,
-            });
-            await seedChartOfAccounts(tx, id);
-            return s;
+          // 复用 createOrganization：它会在同一事务内写入 owner membership。
+          // 少了那一步，accounts / categories 的 RLS 策略（要求 owner 或 admin）
+          // 会拒绝 seed 插入，报 "new row violates row-level security policy"。
+          const { slug } = await createOrganization({
+            name,
+            baseCurrency: String(formData.get('baseCurrency') ?? 'MYR').trim().toUpperCase(),
+            timezone: String(formData.get('timezone') ?? 'Asia/Kuala_Lumpur').trim(),
+            industry: String(formData.get('industry') ?? '').trim() || undefined,
           });
 
           redirect(`/${slug}`);
