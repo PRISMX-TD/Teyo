@@ -1,6 +1,6 @@
 import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
-import { listUserOrganizations } from '@/server/repositories/organizations';
+import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 import { Sidebar } from '@/components/shell/sidebar';
 import { OrgSwitcher } from '@/components/shell/org-switcher';
 import React from 'react';
@@ -23,7 +23,8 @@ export default async function AppLayout({
     redirect('/');
   }
 
-  const t = getMessages('en');
+  const locale = (await getUserLocale(userId)) as 'en' | 'zh';
+  const t = getMessages(locale);
 
   return (
     <div className="app-shell">

@@ -17,10 +17,12 @@ export default async function NewTransactionPage({
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const { accounts, categories } = await withTransaction(context.userId, async (tx) => ({
-    accounts: await listMoneyAccounts(tx, context.organizationId),
-    categories: await listCategories(tx, context.organizationId),
-  }));
+  const [accounts, categories] = await withTransaction(context.userId, async (tx) =>
+    Promise.all([
+      listMoneyAccounts(tx, context.organizationId),
+      listCategories(tx, context.organizationId),
+    ]),
+  );
 
   const toOption = (row: { id: string; nameEn: string | null; nameZh: string | null }) => ({
     id: row.id,

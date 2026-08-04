@@ -1,7 +1,9 @@
 import { MembersPanel } from '@/components/settings/members-panel';
 import { getMessages } from '@/lib/i18n';
-import { listInvitations, listMembers } from '@/server/actions/members';
 import { requirePermission } from '@/server/auth/guard';
+import { withTransaction } from '@/server/db/transaction';
+import { listPendingInvitations } from '@/server/repositories/invitations';
+import { listMembershipsByOrg } from '@/server/repositories/memberships';
 import { getUserLocale } from '@/server/repositories/organizations';
 
 export default async function MembersSettingsPage({
@@ -14,10 +16,13 @@ export default async function MembersSettingsPage({
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const [members, invitations] = await Promise.all([
-    listMembers(orgSlug),
-    listInvitations(orgSlug),
-  ]);
+  // 直调 repository 合并为一个事务，避免 listMembers/listInvitations 各自再鉴权一次
+  const [members, invitations] = await withTransaction(context.userId, async (tx) =>
+    Promise.all([
+      listMembershipsByOrg(tx, context.organizationId),
+      listPendingInvitations(tx, context.organizationId),
+    ]),
+  );
 
   return (
     <>

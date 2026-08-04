@@ -24,32 +24,34 @@ export default async function OverviewPage({
   const today = new Date().toISOString().slice(0, 10);
   const month = today.slice(0, 7);
 
-  const data = await withTransaction(context.userId, async (tx) => ({
-    totals: await getMonthTotals(tx, context.organizationId, month),
-    balances: await getAccountBalances(tx, context.organizationId, today),
-    shares: await getExpenseByCategory(tx, context.organizationId, month),
-    recent: await listTransactions(tx, context.organizationId, {}, { limit: 8, offset: 0 }),
-  }));
+  const [totals, balances, shares, recent] = await withTransaction(context.userId, async (tx) =>
+    Promise.all([
+      getMonthTotals(tx, context.organizationId, month),
+      getAccountBalances(tx, context.organizationId, today),
+      getExpenseByCategory(tx, context.organizationId, month),
+      listTransactions(tx, context.organizationId, {}, { limit: 8, offset: 0 }),
+    ]),
+  );
 
   return (
     <>
       <h1>{t.overview.title}</h1>
 
       <SummaryCards
-        totals={data.totals}
-        balances={data.balances}
-        shares={data.shares}
+        totals={totals}
+        balances={balances}
+        shares={shares}
         baseCurrency={context.baseCurrency}
         locale={locale}
       />
 
       <section className="recent-log">
         <h2>{t.overview.recentTransactions}</h2>
-        {data.recent.rows.length === 0 ? (
+        {recent.rows.length === 0 ? (
           <p className="empty-state">{t.overview.empty}</p>
         ) : (
           <ul>
-            {data.recent.rows.map((row) => (
+            {recent.rows.map((row) => (
               <li key={row.id} className={row.voidedAt ? 'row-voided' : undefined}>
                 <a href={`/${orgSlug}/transactions/${row.id}`}>
                   <span className="mono log-date">{row.occurredOn}</span>
