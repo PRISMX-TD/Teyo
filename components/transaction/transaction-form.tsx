@@ -5,9 +5,30 @@ import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { RateField } from '@/components/transaction/rate-field';
-import { createTransaction } from '@/server/actions/transactions';
+import { AttachmentPanel } from '@/components/transaction/attachment-panel';
+import { createTransaction, updateTransaction, voidTransaction } from '@/server/actions/transactions';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null };
+
+type EditData = {
+  id: string;
+  occurredOn: string;
+  amount: string;
+  currency: string;
+  moneyAccountId: string;
+  categoryId: string | null;
+  counterAccountId: string | null;
+  description: string;
+  exchangeRate: string;
+  kind: 'income' | 'expense' | 'transfer';
+};
+
+type Attachment = {
+  id: string;
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+};
 
 type Props = {
   orgSlug: string;
@@ -17,6 +38,10 @@ type Props = {
   incomeCategories: Option[];
   expenseCategories: Option[];
   currencies: string[];
+  /** 编辑模式时传入已有数据 */
+  mode?: 'create' | 'edit';
+  initialData?: EditData;
+  attachments?: Attachment[];
 };
 
 const KINDS = ['expense', 'income', 'transfer'] as const;
@@ -30,16 +55,24 @@ export function TransactionForm({
   incomeCategories,
   expenseCategories,
   currencies,
+  mode = 'create',
+  initialData,
+  attachments = [],
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
+  const isEdit = mode === 'edit';
 
-  const [kind, setKind] = useState<Kind>('expense');
-  const [currency, setCurrency] = useState(baseCurrency);
-  const [occurredOn, setOccurredOn] = useState(() => new Date().toISOString().slice(0, 10));
-  const [amount, setAmount] = useState('');
+  const [kind, setKind] = useState<Kind>(initialData?.kind ?? 'expense');
+  const [currency, setCurrency] = useState(initialData?.currency ?? baseCurrency);
+  const [occurredOn, setOccurredOn] = useState(
+    () => initialData?.occurredOn ?? new Date().toISOString().slice(0, 10),
+  );
+  const [amount, setAmount] = useState(initialData?.amount ?? '');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [voidDialog, setVoidDialog] = useState(false);
+  const [voidReason, setVoidReason] = useState('');
 
   // 幂等键在表单整个生命周期内固定，重复提交不会产生重复账目
   const clientUuid = useMemo(() => crypto.randomUUID(), []);
@@ -71,7 +104,11 @@ export function TransactionForm({
     };
 
     try {
-      await createTransaction(orgSlug, payload);
+      if (isEdit && initialData) {
+        await updateTransaction(orgSlug, initialData.id, payload);
+      } else {
+        await createTransaction(orgSlug, payload);
+      }
       router.push(`/${orgSlug}/transactions`);
     } catch (e) {
       setError((e as Error).message);
@@ -80,7 +117,23 @@ export function TransactionForm({
     }
   }
 
+  async function handleVoid() {
+    if (!initialData || !voidReason.trim()) return;
+    setPending(true);
+    setError(null);
+    try {
+      await voidTransaction(orgSlug, initialData.id, voidReason);
+      router.push(`/${orgSlug}/transactions`);
+    } catch (e) {
+      setError((e as Error).message);
+      setVoidDialog(false);
+    } finally {
+      setPending(false);
+    }
+  }
+
   return (
+    <>
     <form action={handleSubmit} className="transaction-form">
       <fieldset>
         <legend>{t.transaction.kind}</legend>
@@ -144,7 +197,7 @@ export function TransactionForm({
       <label htmlFor="moneyAccountId">
         {kind === 'transfer' ? t.transaction.destinationAccount : t.transaction.moneyAccount}
       </label>
-      <select id="moneyAccountId" name="moneyAccountId" required>
+      <select id="moneyAccountId" name="moneyAccountId" required defaultValue={initialData?.moneyAccountId ?? undefined}>
         {moneyAccounts.map((account) => (
           <option key={account.id} value={account.id}>
             {localizedName(account, locale)}
@@ -155,7 +208,7 @@ export function TransactionForm({
       {kind === 'transfer' ? (
         <>
           <label htmlFor="counterAccountId">{t.transaction.moneyAccount}</label>
-          <select id="counterAccountId" name="counterAccountId" required>
+          <select id="counterAccountId" name="counterAccountId" required defaultValue={initialData?.counterAccountId ?? undefined}>
             {moneyAccounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {localizedName(account, locale)}
@@ -166,7 +219,7 @@ export function TransactionForm({
       ) : (
         <>
           <label htmlFor="categoryId">{t.transaction.category}</label>
-          <select id="categoryId" name="categoryId" required>
+          <select id="categoryId" name="categoryId" required defaultValue={initialData?.categoryId ?? undefined}>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {localizedName(category, locale)}
@@ -177,7 +230,7 @@ export function TransactionForm({
       )}
 
       <label htmlFor="description">{t.transaction.description}</label>
-      <input id="description" name="description" maxLength={500} />
+      <input id="description" name="description" maxLength={500} defaultValue={initialData?.description ?? undefined} />
 
       {error ? (
         <p role="alert" className="form-error">
@@ -185,9 +238,56 @@ export function TransactionForm({
         </p>
       ) : null}
 
-      <button type="submit" disabled={pending}>
-        {pending ? t.common.loading : t.transaction.save}
-      </button>
+      <div className="form-actions">
+        <button type="submit" disabled={pending}>
+          {pending ? t.common.loading : isEdit ? t.transaction.save : t.transaction.save}
+        </button>
+
+        {isEdit ? (
+          <button
+            type="button"
+            className="btn-danger"
+            disabled={pending}
+            onClick={() => setVoidDialog(true)}
+          >
+            {t.transaction.void}
+          </button>
+        ) : null}
+      </div>
+
+      {voidDialog ? (
+        <dialog open className="void-dialog">
+          <p>{t.transaction.voidReason}</p>
+          <input
+            value={voidReason}
+            onChange={(e) => setVoidReason(e.target.value)}
+            placeholder={t.transaction.voidReason}
+            autoFocus
+          />
+          <div className="void-dialog-actions">
+            <button type="button" onClick={() => setVoidDialog(false)}>
+              {t.common.cancel}
+            </button>
+            <button
+              type="button"
+              className="btn-danger"
+              disabled={!voidReason.trim() || pending}
+              onClick={handleVoid}
+            >
+              {t.transaction.void}
+            </button>
+          </div>
+        </dialog>
+      ) : null}
     </form>
-  );
+
+    {isEdit && initialData ? (
+      <AttachmentPanel
+        orgSlug={orgSlug}
+        transactionId={initialData.id}
+        attachments={attachments}
+        t={t}
+      />
+    ) : null}
+  </>);
 }

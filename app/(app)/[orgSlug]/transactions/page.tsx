@@ -6,6 +6,7 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
 import { listCategories } from '@/server/repositories/categories';
+import { listMembershipsByOrg } from '@/server/repositories/memberships';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listTransactions, type TransactionFilters as TFilters } from '@/server/repositories/transactions';
 
@@ -36,12 +37,13 @@ export default async function TransactionsListPage({
   };
 
   const data = await withTransaction(context.userId, async (tx) => {
-    const [accounts, categories, transactions] = await Promise.all([
+    const [accounts, categories, members, transactions] = await Promise.all([
       listMoneyAccounts(tx, context.organizationId),
       listCategories(tx, context.organizationId),
+      listMembershipsByOrg(tx, context.organizationId),
       listTransactions(tx, context.organizationId, filters, { limit: 50, offset: 0 }),
     ]);
-    return { accounts, categories, transactions };
+    return { accounts, categories, members, transactions };
   });
 
   const toOption = (row: { id: string; nameEn: string | null; nameZh: string | null }) => ({
@@ -62,7 +64,7 @@ export default async function TransactionsListPage({
         locale={locale}
         categories={data.categories.map((c) => toOption(c as unknown as { id: string; nameEn: string | null; nameZh: string | null }))}
         moneyAccounts={data.accounts.map(toOption)}
-        members={[]}
+        members={data.members.map((m) => ({ userId: m.userId, displayName: m.displayName }))}
       />
 
       <TransactionTable
