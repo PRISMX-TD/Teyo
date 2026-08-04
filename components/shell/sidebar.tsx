@@ -50,6 +50,7 @@ export function Sidebar({ orgSlug, i18n }: Props) {
       </nav>
 
       <div className="sidebar-footer">
+        <Link href="/account">{i18n.nav.account}</Link>
         <Link href="/">{i18n.nav.switchCompany}</Link>
       </div>
     </aside>
