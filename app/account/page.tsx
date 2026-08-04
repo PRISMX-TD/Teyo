@@ -1,5 +1,5 @@
 import { getMessages } from '@/lib/i18n';
-import { updateProfile } from '@/server/actions/profile';
+import { updateProfile, updateLocale } from '@/server/actions/profile';
 import { requireUserId } from '@/server/auth/guard';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { updatePassword } from '@/server/actions/auth';
@@ -36,10 +36,7 @@ export default async function AccountPage() {
         <form
           action={async (formData: FormData) => {
             'use server';
-            await updateProfile({
-              displayName: String(formData.get('displayName') ?? ''),
-              locale: String(formData.get('locale')) as 'en' | 'zh',
-            });
+            await updateLocale(String(formData.get('locale') ?? 'en'));
           }}
         >
           <label htmlFor="locale">{t.account.language}</label>

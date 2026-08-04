@@ -30,6 +30,21 @@ export async function updateProfile(input: {
   revalidatePath('/account');
 }
 
+const localeSchema = z.enum(['en', 'zh']);
+
+export async function updateLocale(locale: string): Promise<void> {
+  const userId = await requireUserId();
+  const parsed = localeSchema.parse(locale);
+
+  await sql`
+    update app_users set locale = ${parsed} where id = ${userId}
+  `;
+
+  // 必须 revalidate root layout，因为 app layout 里 getUserLocale 读的就是 app_users.locale
+  revalidatePath('/', 'layout');
+  revalidatePath('/account');
+}
+
 export type InvitationPreview = {
   organizationName: string;
   role: Role | 'viewer';
