@@ -4,7 +4,6 @@ import { useEffect, useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { flushQueue, listQueuedTransactions } from '@/lib/offline-queue';
-import { createTransaction } from '@/server/actions/transactions';
 
 export function OfflineBanner({ locale }: { locale: Locale }) {
   const t = getMessages(locale);
@@ -18,6 +17,10 @@ export function OfflineBanner({ locale }: { locale: Locale }) {
 
     async function handleOnline() {
       setOffline(false);
+      // 动态 import：这个 banner 挂在 root layout 上，静态引入会把
+      // server action 的模块图（含 postgres 客户端）拉进每个页面的
+      // 客户端 bundle，导致所有路由渲染失败。
+      const { createTransaction } = await import('@/server/actions/transactions');
       await flushQueue((orgSlug, payload) => createTransaction(orgSlug, payload));
       await refreshCount();
     }

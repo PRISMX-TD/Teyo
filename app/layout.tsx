@@ -9,6 +9,11 @@ export const metadata: Metadata = {
   title: 'Teyo',
   description: 'The easy way to own your business.',
   manifest: '/manifest.webmanifest',
+  // metadataBase 缺失时 Next.js 会对 OG/manifest 的相对路径发警告
+  metadataBase: new URL(
+    process.env.NEXT_PUBLIC_SITE_URL ??
+      (process.env.VERCEL_URL ? `https://${process.env.VERCEL_URL}` : 'http://localhost:3000'),
+  ),
 };
 
 export const viewport: Viewport = {

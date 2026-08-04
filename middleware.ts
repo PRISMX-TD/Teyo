@@ -56,5 +56,9 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|.*\\.(?:png|jpg|jpeg|svg|webp)$).*)'],
+  // icon/apple-icon 由 app/icon.tsx 动态生成，路径不带扩展名，
+  // 必须显式排除，否则未登录时会被重定向到 /login，PWA 装不上图标。
+  matcher: [
+    '/((?!_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|swe-worker-.*|icon|apple-icon|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)',
+  ],
 };
