@@ -1,5 +1,4 @@
 import { randomUUID } from 'node:crypto';
-import { cache } from 'react';
 import type { Tx } from '@/server/db/transaction';
 import { sql } from '@/server/db/client';
 
@@ -112,9 +111,8 @@ export async function listUserOrganizations(
   return rows as unknown as Array<{ id: string; name: string; slug: string; role: string }>;
 }
 
-/** 取用户语言设置，不存在或为 null 时回退到 en。
- * 用 React.cache() 包裹，同一请求内多次调用只查一次数据库。 */
-export const getUserLocale = cache(async (userId: string): Promise<string> => {
+/** 取用户语言设置，不存在或为 null 时回退到 en。 */
+export async function getUserLocale(userId: string): Promise<string> {
   const [row] = await sql`select locale from app_users where id = ${userId}`;
   return (row?.locale as string) ?? 'en';
-});
+}
