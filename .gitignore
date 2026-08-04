@@ -15,3 +15,12 @@ next-env.d.ts
 *.md
 docs/
 .superpowers/
+
+# Serwist PWA 产物不入库——构建时生成
+public/sw.js
+public/sw.js.map
+public/sw.js.LICENSE.txt
+public/swe-worker-*.js
+public/swe-worker-*.js.map
+public/workbox-*.js
+public/workbox-*.js.map
