@@ -1763,3 +1763,128 @@ td.numeric {
     break-inside: avoid;
   }
 }
+
+/* ==========================================================================
+   报表 —— 试算平衡表 / 损益表 / 资产负债表
+   ========================================================================== */
+
+.report-tabs {
+  display: flex;
+  gap: 0;
+  border-bottom: 2px solid var(--ink-200);
+  margin-bottom: var(--space-md);
+}
+
+.report-tabs button {
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  padding: var(--space-xs) var(--space-md);
+  font-size: var(--fs-body);
+  color: var(--ink-500);
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.report-tabs button:hover {
+  color: var(--ink-800);
+}
+
+.report-tabs button.active {
+  color: var(--ink-900);
+  border-bottom-color: var(--ink-900);
+  font-weight: 600;
+}
+
+.report-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: var(--fs-body);
+  font-variant-numeric: tabular-nums;
+}
+
+.report-table thead th {
+  text-align: left;
+  background: var(--ink-100);
+  padding: var(--space-xs) var(--space-sm);
+  font-size: var(--fs-small);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-500);
+}
+
+.report-table thead th.numeric {
+  text-align: right;
+}
+
+.report-table tbody td,
+.report-table tbody th {
+  padding: var(--space-xs) var(--space-sm);
+  border-bottom: 1px solid var(--ink-100);
+}
+
+.report-table tbody td.numeric,
+.report-table tbody th.numeric {
+  text-align: right;
+}
+
+.report-table .section-header td {
+  padding-top: var(--space-md);
+  font-weight: 600;
+  font-size: var(--fs-small);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--ink-500);
+  border-bottom: 1px solid var(--ink-200);
+}
+
+.report-table .subtotal td,
+.report-table .subtotal th {
+  font-weight: 600;
+  border-bottom: 1px solid var(--ink-300);
+}
+
+.report-table .total-row th,
+.report-table .total-row td {
+  font-weight: 700;
+  padding-top: var(--space-sm);
+  font-size: var(--fs-h4);
+  border-top: 2px solid var(--ink-900);
+  border-bottom: 3px double var(--ink-900);
+}
+
+.report-table tfoot th,
+.report-table tfoot td {
+  font-weight: 700;
+  border-top: 2px solid var(--ink-900);
+  border-bottom: 3px double var(--ink-900);
+  padding: var(--space-xs) var(--space-sm);
+}
+
+/* 打印：报表 */
+@media print {
+  .report-tabs button {
+    display: none;
+  }
+
+  .report-tabs button.active {
+    display: block;
+    border-bottom: none;
+  }
+
+  .report-tabs {
+    border-bottom: none;
+  }
+
+  .report-table {
+    font-size: 10pt;
+    border-color: #999;
+  }
+
+  .report-table thead th {
+    background: #000 !important;
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+}

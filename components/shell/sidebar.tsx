@@ -15,6 +15,7 @@ export function Sidebar({ orgSlug, i18n }: Props) {
   const links = [
     { href: `/${orgSlug}`, label: i18n.nav.overview },
     { href: `/${orgSlug}/transactions`, label: i18n.nav.transactions },
+    { href: `/${orgSlug}/reports`, label: i18n.nav.reports },
     { href: `/${orgSlug}/export`, label: i18n.nav.export },
     { href: `/${orgSlug}/settings`, label: i18n.nav.settings },
   ];
