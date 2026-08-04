@@ -1,3 +1,4 @@
+import { cache } from 'react';
 import { redirect } from 'next/navigation';
 import { withTransaction } from '@/server/db/transaction';
 import { can, type Action, type Role } from '@/server/domain/permissions';
@@ -56,7 +57,12 @@ function toDateOnly(value: Date | string | null): string | null {
   return `${year}-${month}-${day}`;
 }
 
-export async function resolveOrgContext(orgSlug: string): Promise<OrgContext> {
+/**
+ * 解析公司上下文：查 org + membership，返回完整 OrgContext。
+ * 用 React.cache() 去重：app layout 提前调用预热查询，
+ * 页面里的 requirePermission 复用同一结果，零额外 DB 开销。
+ */
+export const resolveOrgContext = cache(async (orgSlug: string): Promise<OrgContext> => {
   const userId = await requireUserId();
 
   const rows = await withTransaction(
@@ -86,7 +92,7 @@ export async function resolveOrgContext(orgSlug: string): Promise<OrgContext> {
     baseCurrency: row.base_currency as string,
     lockedUntil: toDateOnly(row.locked_until as Date | string | null),
   };
-}
+});
 
 export function assertPermission(context: OrgContext, action: Action): void {
   if (!can(context.role, action)) {

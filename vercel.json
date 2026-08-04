@@ -1,8 +1,8 @@
 {
-  "crons": [
-    {
-      "path": "/api/cron/exchange-rates",
-      "schedule": "0 2 * * *"
+  "functions": {
+    "app/**/*": {
+      "regions": ["sin1"],
+      "maxDuration": 30
     }
-  ]
+  }
 }
