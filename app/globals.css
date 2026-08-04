@@ -1909,6 +1909,38 @@ td.numeric {
   padding: var(--space-xs) var(--space-sm);
 }
 
+/* ==========================================================================
+   总账筛选控件
+   ========================================================================== */
+
+.gl-controls {
+  display: flex;
+  gap: var(--space-sm);
+  align-items: end;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-md);
+  padding: var(--space-sm);
+  background: var(--ink-50);
+  border-radius: var(--radius);
+}
+
+.gl-controls select,
+.gl-controls input {
+  padding: var(--space-xs);
+  border: 1px solid var(--ink-200);
+  border-radius: var(--radius);
+  font-size: var(--fs-body);
+}
+
+.gl-controls button {
+  padding: var(--space-xs) var(--space-md);
+  background: var(--ink-900);
+  color: #fff;
+  border: none;
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
 /* 打印：报表 */
 @media print {
   .report-tabs button {

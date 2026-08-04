@@ -3,7 +3,7 @@ import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { getTrialBalance, getProfitLoss, getBalanceSheet } from '@/server/repositories/reports';
+import { getTrialBalance, getProfitLoss, getBalanceSheet, getCashFlow } from '@/server/repositories/reports';
 
 export default async function ReportsPage({
   params,
@@ -19,7 +19,7 @@ export default async function ReportsPage({
   const today = new Date().toISOString().slice(0, 10);
   const yearStart = `${new Date().getFullYear()}-01-01`;
 
-  const { trialBalance, profitLoss, balanceSheet } = await withTransaction(
+  const { trialBalance, profitLoss, balanceSheet, cashFlow } = await withTransaction(
     context.userId,
     async (tx) => {
       const [trial, pl] = await Promise.all([
@@ -28,7 +28,8 @@ export default async function ReportsPage({
       ]);
       // 资产负债表需要当期净利润
       const bs = await getBalanceSheet(tx, context.organizationId, today, pl.netIncome);
-      return { trialBalance: trial, profitLoss: pl, balanceSheet: bs };
+      const cf = await getCashFlow(tx, context.organizationId, yearStart, today);
+      return { trialBalance: trial, profitLoss: pl, balanceSheet: bs, cashFlow: cf };
     },
   );
 
@@ -42,6 +43,7 @@ export default async function ReportsPage({
         trialBalance={trialBalance}
         profitLoss={profitLoss}
         balanceSheet={balanceSheet}
+        cashFlow={cashFlow}
       />
     </>
   );

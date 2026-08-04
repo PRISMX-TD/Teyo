@@ -230,3 +230,279 @@ export async function getBalanceSheet(
 
   return { assetRows, liabilityRows, equityRows, assetTotal, liabilityTotal, equityTotal, netIncome };
 }
+
+/* =========================================================================
+   现金流量表
+   ========================================================================= */
+
+export type CashFlowSection = {
+  label: string;
+  rows: { label: string; amountMinor: bigint }[];
+};
+
+export type CashFlowResult = {
+  operating: CashFlowSection;
+  investing: CashFlowSection;
+  financing: CashFlowSection;
+  netChange: bigint;
+  openingCash: bigint;
+  closingCash: bigint;
+};
+
+/**
+ * 间接法现金流量表。
+ *
+ * 从净利润出发，加减非现金项目和营运资金变动，得到经营活动现金流。
+ * 投资和融资活动直接从科目变动推算。
+ *
+ * 实现中分类依赖账户的 code 前缀匹配，种子数据 code 设计时已考虑这一点。
+ */
+export async function getCashFlow(
+  tx: Tx,
+  organizationId: string,
+  from: string,
+  to: string,
+): Promise<CashFlowResult> {
+  // --- 辅助：单科目期间发生额（本位币，借正贷负） ---
+  async function netFlow(code: string): Promise<bigint> {
+    const r = await tx`
+      select
+        coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                          else -l.base_amount_minor end), 0) as net
+      from journal_lines l
+      join transactions t on t.id = l.transaction_id
+      join accounts a on a.id = l.account_id
+      where l.organization_id = ${organizationId}
+        and a.code = ${code}
+        and t.voided_at is null
+        and t.occurred_on >= ${from}::date
+        and t.occurred_on < ${to}::date
+    `;
+    return BigInt(r[0].net as string);
+  }
+
+  // --- 辅助：期初/期末余额 ---
+  async function balanceAsOf(code: string, asOf: string): Promise<bigint> {
+    const r = await tx`
+      select
+        coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                          else -l.base_amount_minor end), 0) as net
+      from journal_lines l
+      join transactions t on t.id = l.transaction_id
+      join accounts a on a.id = l.account_id
+      where l.organization_id = ${organizationId}
+        and a.code = ${code}
+        and t.voided_at is null
+        and t.occurred_on <= ${asOf}::date
+    `;
+    return BigInt(r[0].net as string);
+  }
+
+  // --- 经营活动 ---
+  // 净利润：P&L 的 net（间接法起点）
+  const pl = await getProfitLoss(tx, organizationId, from, to);
+  const netIncome = pl.netIncome;
+
+  // 加回非现金费用
+  const depreciation = await netFlow('depreciation');
+  const amortization = await netFlow('amortization');
+
+  // 营运资金变动
+  // AR 增加 = 现金减少（借贷记在资产端，ar 的 net = debit-credit，资产增加意味着 net>0，所以 cash 影响是 -netFlow）
+  const arChange = -(await netFlow('accounts-receivable'));
+  // AP 增加 = 现金增加
+  const apChange = await netFlow('accounts-payable');
+  // Inventory 增加 = 现金减少（借买存货）
+  const invChange = -(await netFlow('inventory'));
+
+  // 递延收入变动
+  const deferredRevChange = await netFlow('deferred-revenue');
+  // 预付费用变动
+  const prepaidChange = -(await netFlow('prepaid-expenses'));
+
+  const operatingTotal = netIncome
+    + depreciation
+    + amortization
+    + arChange
+    + apChange
+    + invChange
+    + deferredRevChange
+    + prepaidChange;
+
+  const operating: CashFlowSection = {
+    label: 'Operating',
+    rows: [
+      { label: 'netIncome', amountMinor: netIncome },
+      { label: 'depreciation', amountMinor: depreciation },
+      { label: 'amortization', amountMinor: amortization },
+      { label: 'arChange', amountMinor: arChange },
+      { label: 'apChange', amountMinor: apChange },
+      { label: 'invChange', amountMinor: invChange },
+      { label: 'deferredRevChange', amountMinor: deferredRevChange },
+      { label: 'prepaidChange', amountMinor: prepaidChange },
+    ],
+  };
+
+  // --- 投资活动 ---
+  const equipment = -(await netFlow('equipment'));
+  const furniture = -(await netFlow('furniture'));
+  const vehicles = -(await netFlow('vehicles'));
+  const softwareIntangible = -(await netFlow('software-intangible'));
+
+  const investingTotal = equipment + furniture + vehicles + softwareIntangible;
+
+  const investing: CashFlowSection = {
+    label: 'Investing',
+    rows: [
+      { label: 'equipment', amountMinor: equipment },
+      { label: 'furniture', amountMinor: furniture },
+      { label: 'vehicles', amountMinor: vehicles },
+      { label: 'softwareIntangible', amountMinor: softwareIntangible },
+    ],
+  };
+
+  // --- 融资活动 ---
+  const capital = await netFlow('capital');
+  const loans = await netFlow('loans');
+  const ownersDraw = -(await netFlow('owners-draw'));
+
+  const financingTotal = capital + loans + ownersDraw;
+
+  const financing: CashFlowSection = {
+    label: 'Financing',
+    rows: [
+      { label: 'capital', amountMinor: capital },
+      { label: 'loans', amountMinor: loans },
+      { label: 'ownersDraw', amountMinor: ownersDraw },
+    ],
+  };
+
+  const netChange = operatingTotal + investingTotal + financingTotal;
+
+  // 期初/期末现金 = cash + bank 余额
+  const openingCash =
+    (await balanceAsOf('cash', from)) + (await balanceAsOf('bank', from));
+  const closingCash =
+    (await balanceAsOf('cash', to)) + (await balanceAsOf('bank', to));
+
+  return {
+    operating,
+    investing,
+    financing,
+    netChange,
+    openingCash,
+    closingCash,
+  };
+}
+
+/* =========================================================================
+   总账（General Ledger）
+   ========================================================================= */
+
+export type LedgerLine = {
+  date: string;
+  description: string;
+  kind: string;
+  debitMinor: bigint;
+  creditMinor: bigint;
+  balanceMinor: bigint;
+};
+
+export type LedgerResult = {
+  accountCode: string;
+  accountNameEn: string | null;
+  accountNameZh: string | null;
+  lines: LedgerLine[];
+  openingBalance: bigint;
+  closingBalance: bigint;
+};
+
+/**
+ * 单科目的总账——按日期的分录列表 + 递进余额。
+ */
+export async function getGeneralLedger(
+  tx: Tx,
+  organizationId: string,
+  accountId: string,
+  from: string,
+  to: string,
+): Promise<LedgerResult> {
+  // 科目信息 + 期初余额
+  const accountRows = await tx`
+    select code, name_en, name_zh, type from accounts
+    where id = ${accountId} and organization_id = ${organizationId}
+  `;
+  const account = accountRows[0];
+  if (!account) throw new Error('Account not found');
+
+  const openingRows = await tx`
+    select
+      coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                        else -l.base_amount_minor end), 0) as net
+    from journal_lines l
+    join transactions t on t.id = l.transaction_id
+    where l.account_id = ${accountId}
+      and l.organization_id = ${organizationId}
+      and t.voided_at is null
+      and t.occurred_on < ${from}::date
+  `;
+  let openingBalance = BigInt(openingRows[0].net as string);
+  // 负债、权益、收入类科目正常余额在贷方
+  const acctType = account.type as string;
+  if (acctType === 'liability' || acctType === 'equity' || acctType === 'revenue') {
+    openingBalance = -openingBalance;
+  }
+
+  // 期间分录
+  const lineRows = await tx`
+    select
+      t.occurred_on,
+      t.description,
+      t.kind,
+      t.voided_at,
+      l.direction,
+      l.base_amount_minor
+    from journal_lines l
+    join transactions t on t.id = l.transaction_id
+    where l.account_id = ${accountId}
+      and l.organization_id = ${organizationId}
+      and t.voided_at is null
+      and t.occurred_on >= ${from}::date
+      and t.occurred_on < ${to}::date
+    order by t.occurred_on, t.created_at, t.id
+  `;
+
+  const lines: LedgerLine[] = [];
+  let runningBalance = openingBalance;
+
+  for (const r of lineRows) {
+    const isDebit = r.direction === 'debit';
+    const amt = BigInt(r.base_amount_minor as string);
+    const debitMinor = isDebit ? amt : 0n;
+    const creditMinor = isDebit ? 0n : amt;
+
+    if (acctType === 'asset' || acctType === 'expense') {
+      runningBalance = runningBalance + debitMinor - creditMinor;
+    } else {
+      runningBalance = runningBalance + creditMinor - debitMinor;
+    }
+
+    lines.push({
+      date: typeof r.occurred_on === 'string' ? r.occurred_on.slice(0, 10) : String(r.occurred_on).slice(0, 10),
+      description: (r.description as string) || '',
+      kind: r.kind as string,
+      debitMinor,
+      creditMinor,
+      balanceMinor: runningBalance,
+    });
+  }
+
+  return {
+    accountCode: account.code as string,
+    accountNameEn: (account.name_en as string | null) ?? null,
+    accountNameZh: (account.name_zh as string | null) ?? null,
+    lines,
+    openingBalance,
+    closingBalance: runningBalance,
+  };
+}

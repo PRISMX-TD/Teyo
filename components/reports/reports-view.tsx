@@ -1,13 +1,13 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { TrialBalanceRow } from '@/server/repositories/reports';
-import type { ProfitLossResult, BalanceSheetResult } from '@/server/repositories/reports';
+import type { ProfitLossResult, BalanceSheetResult, CashFlowResult } from '@/server/repositories/reports';
 
-type Tab = 'trial-balance' | 'profit-loss' | 'balance-sheet';
+type Tab = 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow';
 
 type Props = {
   locale: Locale;
@@ -16,6 +16,7 @@ type Props = {
   trialBalance: TrialBalanceRow[];
   profitLoss: ProfitLossResult;
   balanceSheet: BalanceSheetResult;
+  cashFlow: CashFlowResult;
 };
 
 /** localizedName 需要 name_en/name_zh，将 camelCase 类型适配过去 */
@@ -23,13 +24,14 @@ function toOption(row: { nameEn: string | null; nameZh: string | null }) {
   return { name_en: row.nameEn, name_zh: row.nameZh };
 }
 
-export function ReportsView({ locale, baseCurrency, t, trialBalance, profitLoss, balanceSheet }: Props) {
+export function ReportsView({ locale, baseCurrency, t, trialBalance, profitLoss, balanceSheet, cashFlow }: Props) {
   const [tab, setTab] = useState<Tab>('trial-balance');
 
   const tabs: { key: Tab; label: string }[] = [
     { key: 'trial-balance', label: t.reports.trialBalance },
     { key: 'profit-loss', label: t.reports.profitLoss },
     { key: 'balance-sheet', label: t.reports.balanceSheet },
+    { key: 'cash-flow', label: t.reports.cashFlow },
   ];
 
   return (
@@ -50,8 +52,10 @@ export function ReportsView({ locale, baseCurrency, t, trialBalance, profitLoss,
         <TrialBalanceTable rows={trialBalance} locale={locale} baseCurrency={baseCurrency} t={t} />
       ) : tab === 'profit-loss' ? (
         <ProfitLossTable data={profitLoss} locale={locale} baseCurrency={baseCurrency} t={t} />
-      ) : (
+      ) : tab === 'balance-sheet' ? (
         <BalanceSheetTable data={balanceSheet} locale={locale} baseCurrency={baseCurrency} t={t} />
+      ) : (
+        <CashFlowTable data={cashFlow} locale={locale} baseCurrency={baseCurrency} t={t} />
       )}
     </>
   );
@@ -174,6 +178,81 @@ function ProfitLossTable({
           </th>
         </tr>
       </tbody>
+    </table>
+  );
+}
+
+function CashFlowTable({
+  data,
+  locale,
+  baseCurrency,
+  t,
+}: {
+  data: CashFlowResult;
+  locale: Locale;
+  baseCurrency: string;
+  t: Messages;
+}) {
+  const sectionLabels: Record<string, string> = {
+    Operating: t.reports.operating,
+    Investing: t.reports.investing,
+    Financing: t.reports.financing,
+  };
+
+  const lineLabels: Record<string, string> = {
+    netIncome: t.reports.netIncome_cf,
+    depreciation: t.reports.depreciation_cf,
+    amortization: t.reports.amortization_cf,
+    arChange: t.reports.arChange,
+    apChange: t.reports.apChange,
+    invChange: t.reports.invChange,
+    deferredRevChange: t.reports.deferredRevChange,
+    prepaidChange: t.reports.prepaidChange,
+    equipment: t.reports.equipment_cf,
+    furniture: t.reports.furniture_cf,
+    vehicles: t.reports.vehicles_cf,
+    softwareIntangible: t.reports.softwareIntangible_cf,
+    capital: t.reports.capital_cf,
+    loans: t.reports.loans_cf,
+    ownersDraw: t.reports.ownersDraw_cf,
+  };
+
+  return (
+    <table className="report-table">
+      <thead>
+        <tr>
+          <th colSpan={2}>{t.reports.cashFlow}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {([data.operating, data.investing, data.financing] as const).map((section) => (
+          <React.Fragment key={section.label}>
+            <tr className="section-header">
+              <td colSpan={2}>{sectionLabels[section.label] ?? section.label}</td>
+            </tr>
+            {section.rows.map((row, i) => (
+              <tr key={i}>
+                <td>{lineLabels[row.label] ?? row.label}</td>
+                <td className="numeric mono">{formatMoney(row.amountMinor, baseCurrency, locale)}</td>
+              </tr>
+            ))}
+          </React.Fragment>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>{t.reports.netCashFlow}</th>
+          <th className="numeric mono">{formatMoney(data.netChange, baseCurrency, locale)}</th>
+        </tr>
+        <tr>
+          <td>{t.reports.openingCash}</td>
+          <td className="numeric mono">{formatMoney(data.openingCash, baseCurrency, locale)}</td>
+        </tr>
+        <tr>
+          <td>{t.reports.closingCash}</td>
+          <td className="numeric mono">{formatMoney(data.closingCash, baseCurrency, locale)}</td>
+        </tr>
+      </tfoot>
     </table>
   );
 }

@@ -16,6 +16,9 @@ export function Sidebar({ orgSlug, i18n }: Props) {
     { href: `/${orgSlug}`, label: i18n.nav.overview },
     { href: `/${orgSlug}/transactions`, label: i18n.nav.transactions },
     { href: `/${orgSlug}/reports`, label: i18n.nav.reports },
+    { href: `/${orgSlug}/general-ledger`, label: i18n.nav.generalLedger },
+    { href: `/${orgSlug}/reconciliation`, label: i18n.nav.reconciliation },
+    { href: `/${orgSlug}/budgets`, label: i18n.nav.budgets },
     { href: `/${orgSlug}/export`, label: i18n.nav.export },
     { href: `/${orgSlug}/settings`, label: i18n.nav.settings },
   ];

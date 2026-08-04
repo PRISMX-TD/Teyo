@@ -20,6 +20,8 @@ export default async function SettingsIndexPage({
     { href: 'members', label: t.settings.members, action: 'member:manage' },
     { href: 'categories', label: t.settings.categories, action: 'category:manage' },
     { href: 'accounts', label: t.settings.accounts, action: 'account:manage' },
+    { href: 'recurring', label: t.settings.recurring, action: 'transaction:create' },
+    { href: 'contacts', label: t.settings.contacts, action: 'account:manage' },
     { href: 'audit', label: t.settings.audit, action: 'report:export' },
   ];
 
