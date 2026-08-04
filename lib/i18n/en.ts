@@ -16,6 +16,7 @@ const en = {
     sendResetLink: 'Send reset link',
     resetLinkSent: 'Check your inbox for the reset link.',
     invalidCredentials: 'That email and password combination did not work.',
+    confirmEmailSent: 'Check your inbox to confirm your email, then sign in.',
   },
   onboarding: {
     title: 'Set up your company',

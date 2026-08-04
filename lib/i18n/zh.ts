@@ -29,6 +29,7 @@ const zh: Translated<typeof en> = {
     sendResetLink: '发送重设链接',
     resetLinkSent: '重设链接已发到你的邮箱。',
     invalidCredentials: '邮箱或密码不对。',
+    confirmEmailSent: '请到邮箱确认注册，然后回来登录。',
   },
   onboarding: {
     title: '建立你的公司',

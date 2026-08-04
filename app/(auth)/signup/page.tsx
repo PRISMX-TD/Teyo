@@ -8,7 +8,7 @@ export default function SignupPage() {
 
   async function action(formData: FormData) {
     'use server';
-    await signUp({
+    return signUp({
       email: String(formData.get('email') ?? ''),
       password: String(formData.get('password') ?? ''),
       displayName: String(formData.get('displayName') ?? ''),

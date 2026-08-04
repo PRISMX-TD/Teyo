@@ -7,7 +7,7 @@ export default function ResetPasswordPage() {
 
   async function action(formData: FormData) {
     'use server';
-    await updatePassword(String(formData.get('password') ?? ''));
+    return updatePassword(String(formData.get('password') ?? ''));
   }
 
   return (

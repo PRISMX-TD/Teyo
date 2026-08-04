@@ -2,10 +2,25 @@
 
 import { useState, type ReactNode } from 'react';
 
+/** Next.js 用抛错实现 redirect()，摘要以 NEXT_REDIRECT 开头。 */
+function isRedirectError(error: unknown): boolean {
+  return (
+    typeof error === 'object' &&
+    error !== null &&
+    'digest' in error &&
+    typeof (error as { digest: unknown }).digest === 'string' &&
+    (error as { digest: string }).digest.startsWith('NEXT_REDIRECT')
+  );
+}
+
 type Props = {
   title: string;
   submitLabel: string;
-  action: (formData: FormData) => Promise<void>;
+  /**
+   * 成功时返回 undefined（通常已 redirect），失败时返回 { error }。
+   * 生产构建会把 action 抛出的异常脱敏成 500，所以错误必须走返回值。
+   */
+  action: (formData: FormData) => Promise<{ error: string } | undefined | void>;
   children: ReactNode;
   footer?: ReactNode;
   successMessage?: string;
@@ -20,9 +35,15 @@ export function AuthForm({ title, submitLabel, action, children, footer, success
     setPending(true);
     setError(null);
     try {
-      await action(formData);
+      const result = await action(formData);
+      if (result && 'error' in result) {
+        setError(result.error);
+        return;
+      }
       if (successMessage) setDone(true);
     } catch (e) {
+      // redirect() 靠抛特殊错误实现，不能当成失败展示。
+      if (isRedirectError(e)) throw e;
       setError((e as Error).message);
     } finally {
       setPending(false);

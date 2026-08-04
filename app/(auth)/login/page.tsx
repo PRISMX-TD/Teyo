@@ -3,12 +3,17 @@ import { AuthForm } from '@/components/auth/auth-form';
 import { getMessages } from '@/lib/i18n';
 import { signIn } from '@/server/actions/auth';
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ checkEmail?: string }>;
+}) {
   const t = getMessages('en');
+  const { checkEmail } = await searchParams;
 
   async function action(formData: FormData) {
     'use server';
-    await signIn({
+    return signIn({
       email: String(formData.get('email') ?? ''),
       password: String(formData.get('password') ?? ''),
     });
@@ -27,6 +32,12 @@ export default function LoginPage() {
         </p>
       }
     >
+      {checkEmail ? (
+        <p role="status" className="form-success">
+          {t.auth.confirmEmailSent}
+        </p>
+      ) : null}
+
       <label htmlFor="email">{t.auth.email}</label>
       <input id="email" name="email" type="email" autoComplete="email" required />
 

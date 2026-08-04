@@ -32,12 +32,21 @@ export async function ensureAppUser(
   `;
 }
 
+/**
+ * Server Action 的返回值。
+ *
+ * 刻意返回错误而不是 throw：生产构建下 Next.js 会把 action 里未捕获的异常
+ * 替换成脱敏摘要并以 500 响应，客户端拿不到原始 message，用户只能看到白屏。
+ * 返回值能原样传到表单上，也让 Supabase 的限流、邮箱重复等提示可见。
+ */
+export type AuthResult = { error: string } | undefined;
+
 export async function signUp(input: {
   email: string;
   password: string;
   displayName: string;
   locale: Locale;
-}): Promise<void> {
+}): Promise<AuthResult> {
   const parsed = signUpSchema.parse(input);
   const supabase = await createServerClient();
   const origin = (await headers()).get('origin') ?? '';
@@ -51,16 +60,22 @@ export async function signUp(input: {
     },
   });
 
-  if (error) throw new Error(error.message);
+  if (error) return { error: error.message };
 
-  if (data.user) {
+  // 开启邮箱确认时 data.user 已返回但 auth.users 里还没有提交的行，
+  // 此时写 app_users 会撞 app_users_id_fkey。改由 /auth/callback
+  // 在确认后补写，这里只在拿到 session（即无需确认）时才写。
+  if (data.user && data.session) {
     await ensureAppUser(data.user.id, parsed.email, parsed.displayName, parsed.locale);
   }
 
-  redirect('/onboarding');
+  redirect(data.session ? '/onboarding' : '/login?checkEmail=1');
 }
 
-export async function signIn(input: { email: string; password: string }): Promise<void> {
+export async function signIn(input: {
+  email: string;
+  password: string;
+}): Promise<AuthResult> {
   const parsed = signInSchema.parse(input);
   const supabase = await createServerClient();
 
@@ -69,7 +84,7 @@ export async function signIn(input: { email: string; password: string }): Promis
     password: parsed.password,
   });
 
-  if (error) throw new Error(error.message);
+  if (error) return { error: error.message };
 
   if (data.user) {
     const metadata = data.user.user_metadata as { display_name?: string; locale?: Locale };
@@ -99,9 +114,9 @@ export async function requestPasswordReset(email: string): Promise<void> {
   });
 }
 
-export async function updatePassword(newPassword: string): Promise<void> {
+export async function updatePassword(newPassword: string): Promise<AuthResult> {
   const supabase = await createServerClient();
   const { error } = await supabase.auth.updateUser({ password: newPassword });
-  if (error) throw new Error(error.message);
+  if (error) return { error: error.message };
   redirect('/');
 }
