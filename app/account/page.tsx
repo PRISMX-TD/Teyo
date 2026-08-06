@@ -24,7 +24,9 @@ export default async function AccountPage() {
             });
           }}
         >
-          <label htmlFor="displayName">{t.account.displayName}</label>
+          <label htmlFor="displayName" className="visually-hidden">
+            {t.account.displayName}
+          </label>
           <input id="displayName" name="displayName" required />
 
           <button type="submit">{t.settings.save}</button>
@@ -39,7 +41,9 @@ export default async function AccountPage() {
             await updateLocale(String(formData.get('locale') ?? 'en'));
           }}
         >
-          <label htmlFor="locale">{t.account.language}</label>
+          <label htmlFor="locale" className="visually-hidden">
+            {t.account.language}
+          </label>
           <select id="locale" name="locale" defaultValue={locale}>
             <option value="en">{t.account.english}</option>
             <option value="zh">{t.account.chinese}</option>
@@ -57,7 +61,9 @@ export default async function AccountPage() {
             await updatePassword(String(formData.get('newPassword') ?? ''));
           }}
         >
-          <label htmlFor="newPassword">{t.account.newPassword}</label>
+          <label htmlFor="newPassword" className="visually-hidden">
+            {t.account.newPassword}
+          </label>
           <input id="newPassword" name="newPassword" type="password" minLength={8} required />
 
           <button type="submit">{t.auth.resetPassword}</button>

@@ -538,6 +538,29 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .onboarding-page, .account-page, .invite-page, .error-page { max-width: 520px; margin: 0 auto; padding: var(--space-10) var(--space-4); }
 .onboarding-page h1, .account-page h1, .invite-page h1, .error-page h1 { margin-bottom: var(--space-2); }
 .onboarding-page > p, .account-page > p, .invite-page > p, .error-page > p { color: var(--text-secondary); margin-bottom: var(--space-8); }
+
+/* 独立页面的 section 卡片化：没有这些规则，form 会退回 inline 布局，
+   input 和 button 挤成一行，label 也压在输入框上面。 */
+.account-page > section, .invite-page > form {
+  display: block; margin-top: var(--space-5); padding: var(--space-5);
+  background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+}
+.account-page > section > h2 {
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-tertiary);
+  margin: 0 0 var(--space-4);
+}
+.account-page form { display: flex; flex-direction: column; gap: 0; }
+.account-page form label { margin-bottom: var(--space-2); }
+.account-page form input, .account-page form select { width: 100%; }
+.account-page form button[type='submit'] { align-self: flex-start; margin-top: var(--space-4); }
+.account-page > section:last-of-type { border-color: rgba(239,68,68,0.2); }
+.account-page > section:last-of-type button[type='submit'] { color: #fff; background: var(--red); border-color: var(--red); margin-top: 0; }
+.account-page > section:last-of-type button[type='submit']:hover { background: #dc2626; border-color: #dc2626; }
+
+.invite-page > form { margin-top: var(--space-6); }
+.invite-page > form button[type='submit'] { width: 100%; }
 .onboarding-page label:first-of-type { margin-top: 0; }
 .onboarding-page label { margin-top: var(--space-5); }
 .onboarding-page input, .onboarding-page select { width: 100%; }
@@ -578,6 +601,38 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .settings-index a:first-child { border-top: none; }
 .settings-index a::after { content: '→'; color: var(--text-tertiary); }
 .settings-index a:hover { background: var(--bg-hover); color: var(--accent); text-decoration: none; }
+
+/* Settings 子页面的 section 和 form */
+.app-main > section {
+  display: block; margin-top: var(--space-5); padding: var(--space-5);
+  background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+}
+.app-main > section > h2 {
+  font-size: var(--text-xs); font-weight: 600; letter-spacing: 0.04em;
+  text-transform: uppercase; color: var(--text-tertiary);
+  margin: 0 0 var(--space-2);
+}
+.app-main > section > p {
+  font-size: var(--text-sm); color: var(--text-secondary);
+  margin-bottom: var(--space-4);
+}
+.app-main > section form {
+  display: flex; flex-direction: column; gap: 0;
+}
+.app-main > section form label {
+  margin-top: var(--space-5);
+}
+.app-main > section form label:first-of-type {
+  margin-top: 0;
+}
+.app-main > section form input,
+.app-main > section form select {
+  width: 100%; margin-top: var(--space-2);
+}
+.app-main > section form button[type='submit'] {
+  align-self: flex-start; margin-top: var(--space-5);
+}
 
 .named-list { display: flex; flex-direction: column; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: var(--radius-md); overflow: hidden; }
 .list-item { border-top: 1px solid var(--border-primary); }
