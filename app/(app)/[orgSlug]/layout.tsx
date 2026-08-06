@@ -17,15 +17,12 @@ export default async function AppLayout({
   const userId = await requireUserId();
   const allOrgs = await listUserOrganizations(userId);
 
-  // 用户不属于这家公司 → 跳回首页（再根据权限决定去向）
   const isMember = allOrgs.some((o) => o.slug === orgSlug);
   if (!isMember) {
     const { redirect } = await import('next/navigation');
     redirect('/');
   }
 
-  // 预热 org 上下文：layout 和 page 的 withTransaction 可以并行执行，
-  // React.cache() 保证 page 里的 requirePermission 复用同一结果。
   resolveOrgContext(orgSlug);
 
   const locale = (await getUserLocale(userId)) as 'en' | 'zh';
