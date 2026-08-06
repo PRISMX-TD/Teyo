@@ -3,6 +3,7 @@ import { updateProfile, updateLocale } from '@/server/actions/profile';
 import { requireUserId } from '@/server/auth/guard';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { updatePassword } from '@/server/actions/auth';
+import Link from 'next/link';
 
 export default async function AccountPage() {
   const userId = await requireUserId();
@@ -11,6 +12,9 @@ export default async function AccountPage() {
 
   return (
     <main className="account-page">
+      <Link href="/" style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+        ← {locale === 'zh' ? '返回' : 'Back'}
+      </Link>
       <h1>{t.account.title}</h1>
 
       <section>
