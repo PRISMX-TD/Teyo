@@ -4,6 +4,8 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getTrialBalance, getProfitLoss, getBalanceSheet, getCashFlow } from '@/server/repositories/reports';
+import { getArAging, getApAging } from '@/server/repositories/aging';
+import { listContacts } from '@/server/repositories/contacts';
 
 export default async function ReportsPage({
   params,
@@ -15,23 +17,30 @@ export default async function ReportsPage({
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  // 默认截止到今天，期间为本年度
   const today = new Date().toISOString().slice(0, 10);
   const yearStart = `${new Date().getFullYear()}-01-01`;
 
-  const { trialBalance, profitLoss, balanceSheet, cashFlow } = await withTransaction(
-    context.userId,
-    async (tx) => {
-      const [trial, pl] = await Promise.all([
+  const { trialBalance, profitLoss, balanceSheet, cashFlow, arAging, apAging, contacts } =
+    await withTransaction(context.userId, async (tx) => {
+      const [trial, pl, ar, ap, contactList] = await Promise.all([
         getTrialBalance(tx, context.organizationId, today),
         getProfitLoss(tx, context.organizationId, yearStart, today),
+        getArAging(tx, context.organizationId, today),
+        getApAging(tx, context.organizationId, today),
+        listContacts(tx, context.organizationId),
       ]);
-      // 资产负债表需要当期净利润
       const bs = await getBalanceSheet(tx, context.organizationId, today, pl.netIncome);
       const cf = await getCashFlow(tx, context.organizationId, yearStart, today);
-      return { trialBalance: trial, profitLoss: pl, balanceSheet: bs, cashFlow: cf };
-    },
-  );
+      return {
+        trialBalance: trial,
+        profitLoss: pl,
+        balanceSheet: bs,
+        cashFlow: cf,
+        arAging: ar,
+        apAging: ap,
+        contacts: contactList,
+      };
+    });
 
   return (
     <>
@@ -44,6 +53,10 @@ export default async function ReportsPage({
         profitLoss={profitLoss}
         balanceSheet={balanceSheet}
         cashFlow={cashFlow}
+        arAging={arAging}
+        apAging={apAging}
+        contacts={contacts}
+        orgSlug={orgSlug}
       />
     </>
   );

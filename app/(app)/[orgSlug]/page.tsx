@@ -1,15 +1,14 @@
-import { SummaryCards } from '@/components/overview/summary-cards';
-import { formatMoney } from '@/lib/format';
+import { DashboardView } from '@/components/dashboard/dashboard-view';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import {
-  getAccountBalances,
+  getDashboardKpis,
+  getMonthlyTrends,
   getExpenseByCategory,
-  getMonthTotals,
-} from '@/server/repositories/overview';
+  getBankBalances,
+} from '@/server/repositories/dashboard';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { listTransactions } from '@/server/repositories/transactions';
 
 export default async function OverviewPage({
   params,
@@ -21,52 +20,34 @@ export default async function OverviewPage({
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const month = today.slice(0, 7);
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1;
 
-  const [totals, balances, shares, recent] = await withTransaction(context.userId, async (tx) =>
-    Promise.all([
-      getMonthTotals(tx, context.organizationId, month),
-      getAccountBalances(tx, context.organizationId, today),
-      getExpenseByCategory(tx, context.organizationId, month),
-      listTransactions(tx, context.organizationId, {}, { limit: 8, offset: 0 }),
-    ]),
+  const { kpis, trends, expenses, balances } = await withTransaction(
+    context.userId,
+    async (tx) => {
+      const [kpis, trends, expenses, balances] = await Promise.all([
+        getDashboardKpis(tx, context.organizationId),
+        getMonthlyTrends(tx, context.organizationId),
+        getExpenseByCategory(tx, context.organizationId, year, month),
+        getBankBalances(tx, context.organizationId),
+      ]);
+      return { kpis, trends, expenses, balances };
+    },
   );
 
   return (
     <>
       <h1>{t.overview.title}</h1>
-
-      <SummaryCards
-        totals={totals}
+      <DashboardView
+        kpis={kpis}
+        trends={trends}
+        expenses={expenses}
         balances={balances}
-        shares={shares}
-        baseCurrency={context.baseCurrency}
         locale={locale}
+        i18n={t}
       />
-
-      <section className="recent-log">
-        <h2>{t.overview.recentTransactions}</h2>
-        {recent.rows.length === 0 ? (
-          <p className="empty-state">{t.overview.empty}</p>
-        ) : (
-          <ul>
-            {recent.rows.map((row) => (
-              <li key={row.id} className={row.voidedAt ? 'row-voided' : undefined}>
-                <a href={`/${orgSlug}/transactions/${row.id}`}>
-                  <span className="mono log-date">{row.occurredOn}</span>
-                  <span className="log-desc">{row.description || '\u2014'}</span>
-                  <span
-                    className={`numeric ${row.kind === 'income' ? 'money-in' : 'money-out'}`}
-                  >
-                    {formatMoney(row.baseAmountMinor, context.baseCurrency, locale)}
-                  </span>
-                </a>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
     </>
   );
 }

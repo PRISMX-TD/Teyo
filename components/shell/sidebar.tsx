@@ -15,12 +15,21 @@ export function Sidebar({ orgSlug, i18n }: Props) {
   const links = [
     { href: `/${orgSlug}`, label: i18n.nav.overview },
     { href: `/${orgSlug}/transactions`, label: i18n.nav.transactions },
+    { href: `/${orgSlug}/invoices`, label: i18n.nav.invoices },
+    { href: `/${orgSlug}/payments`, label: i18n.nav.payments },
+    { href: `/${orgSlug}/credit-notes`, label: i18n.nav.creditNotes },
+    { href: `/${orgSlug}/purchase-orders`, label: i18n.nav.purchaseOrders },
+    { href: `/${orgSlug}/bills`, label: i18n.nav.bills },
     { href: `/${orgSlug}/reports`, label: i18n.nav.reports },
     { href: `/${orgSlug}/general-ledger`, label: i18n.nav.generalLedger },
     { href: `/${orgSlug}/reconciliation`, label: i18n.nav.reconciliation },
     { href: `/${orgSlug}/budgets`, label: i18n.nav.budgets },
+    { href: `/${orgSlug}/projects`, label: i18n.nav.projects },
+    { href: `/${orgSlug}/bank-import`, label: i18n.nav.bankImport },
+    { href: `/${orgSlug}/fixed-assets`, label: i18n.nav.fixedAssets },
     { href: `/${orgSlug}/export`, label: i18n.nav.export },
     { href: `/${orgSlug}/settings`, label: i18n.nav.settings },
+    { href: `/${orgSlug}/settings/tax`, label: i18n.nav.tax },
   ];
 
   return (

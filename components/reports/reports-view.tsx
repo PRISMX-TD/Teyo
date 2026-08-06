@@ -1,13 +1,15 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { TrialBalanceRow } from '@/server/repositories/reports';
 import type { ProfitLossResult, BalanceSheetResult, CashFlowResult } from '@/server/repositories/reports';
+import type { ArAgingRow, ApAgingRow, CustomerStatement } from '@/server/repositories/aging';
+import type { ContactRow } from '@/server/repositories/contacts';
 
-type Tab = 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow';
+type Tab = 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ar-aging' | 'ap-aging' | 'customer-statement' | 'vendor-statement';
 
 type Props = {
   locale: Locale;
@@ -17,14 +19,33 @@ type Props = {
   profitLoss: ProfitLossResult;
   balanceSheet: BalanceSheetResult;
   cashFlow: CashFlowResult;
+  arAging: ArAgingRow[];
+  apAging: ApAgingRow[];
+  contacts: ContactRow[];
+  orgSlug: string;
 };
 
-/** localizedName 需要 name_en/name_zh，将 camelCase 类型适配过去 */
 function toOption(row: { nameEn: string | null; nameZh: string | null }) {
   return { name_en: row.nameEn, name_zh: row.nameZh };
 }
 
-export function ReportsView({ locale, baseCurrency, t, trialBalance, profitLoss, balanceSheet, cashFlow }: Props) {
+function fmtMinor(amount: bigint): string {
+  return (Number(amount) / 100).toFixed(2);
+}
+
+export function ReportsView({
+  locale,
+  baseCurrency,
+  t,
+  trialBalance,
+  profitLoss,
+  balanceSheet,
+  cashFlow,
+  arAging,
+  apAging,
+  contacts,
+  orgSlug,
+}: Props) {
   const [tab, setTab] = useState<Tab>('trial-balance');
 
   const tabs: { key: Tab; label: string }[] = [
@@ -32,6 +53,10 @@ export function ReportsView({ locale, baseCurrency, t, trialBalance, profitLoss,
     { key: 'profit-loss', label: t.reports.profitLoss },
     { key: 'balance-sheet', label: t.reports.balanceSheet },
     { key: 'cash-flow', label: t.reports.cashFlow },
+    { key: 'ar-aging', label: t.arAging.title },
+    { key: 'ap-aging', label: t.apAging.title },
+    { key: 'customer-statement', label: t.customerStatement.title },
+    { key: 'vendor-statement', label: t.vendorStatement.title },
   ];
 
   return (
@@ -54,12 +79,36 @@ export function ReportsView({ locale, baseCurrency, t, trialBalance, profitLoss,
         <ProfitLossTable data={profitLoss} locale={locale} baseCurrency={baseCurrency} t={t} />
       ) : tab === 'balance-sheet' ? (
         <BalanceSheetTable data={balanceSheet} locale={locale} baseCurrency={baseCurrency} t={t} />
-      ) : (
+      ) : tab === 'cash-flow' ? (
         <CashFlowTable data={cashFlow} locale={locale} baseCurrency={baseCurrency} t={t} />
+      ) : tab === 'ar-aging' ? (
+        <AgingTable rows={arAging} locale={locale} baseCurrency={baseCurrency} t={t} type="ar" />
+      ) : tab === 'ap-aging' ? (
+        <AgingTable rows={apAging} locale={locale} baseCurrency={baseCurrency} t={t} type="ap" />
+      ) : tab === 'customer-statement' ? (
+        <StatementTab
+          contacts={contacts.filter((c) => c.type === 'customer' || c.type === 'both')}
+          orgSlug={orgSlug}
+          locale={locale}
+          baseCurrency={baseCurrency}
+          t={t}
+          type="customer"
+        />
+      ) : (
+        <StatementTab
+          contacts={contacts.filter((c) => c.type === 'vendor' || c.type === 'both')}
+          orgSlug={orgSlug}
+          locale={locale}
+          baseCurrency={baseCurrency}
+          t={t}
+          type="vendor"
+        />
       )}
     </>
   );
 }
+
+/* ── Existing tables unchanged ── */
 
 function TrialBalanceTable({
   rows,
@@ -341,5 +390,202 @@ function BalanceSheetTable({
         </tr>
       </tbody>
     </table>
+  );
+}
+
+/* ── AR/AP Aging table ── */
+
+function AgingTable({
+  rows,
+  locale,
+  baseCurrency,
+  t,
+  type,
+}: {
+  rows: ArAgingRow[] | ApAgingRow[];
+  locale: Locale;
+  baseCurrency: string;
+  t: Messages;
+  type: 'ar' | 'ap';
+}) {
+  const aging = type === 'ar' ? t.arAging : t.apAging;
+
+  if (rows.length === 0) return <p className="empty-state">{t.reports.empty}</p>;
+
+  const totals = rows.reduce(
+    (acc, r) => ({
+      current: acc.current + r.current,
+      d31_60: acc.d31_60 + r.d31_60,
+      d61_90: acc.d61_90 + r.d61_90,
+      over90: acc.over90 + r.over90,
+      total: acc.total + r.total,
+    }),
+    { current: 0n, d31_60: 0n, d61_90: 0n, over90: 0n, total: 0n },
+  );
+
+  return (
+    <table className="report-table">
+      <thead>
+        <tr>
+          <th>{type === 'ar' ? t.invoices.customer : t.bills.vendor}</th>
+          <th className="numeric">{aging.current}</th>
+          <th className="numeric">{aging.days60}</th>
+          <th className="numeric">{aging.days90}</th>
+          <th className="numeric">{aging.over90}</th>
+          <th className="numeric">{aging.total}</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map((row) => (
+          <tr key={row.contactId}>
+            <td>{row.contactName}</td>
+            <td className="numeric mono">{fmtMinor(row.current)}</td>
+            <td className="numeric mono">{fmtMinor(row.d31_60)}</td>
+            <td className="numeric mono">{fmtMinor(row.d61_90)}</td>
+            <td className="numeric mono">{fmtMinor(row.over90)}</td>
+            <td className="numeric mono">{fmtMinor(row.total)}</td>
+          </tr>
+        ))}
+      </tbody>
+      <tfoot>
+        <tr>
+          <th>{t.reports.total}</th>
+          <th className="numeric mono">{fmtMinor(totals.current)}</th>
+          <th className="numeric mono">{fmtMinor(totals.d31_60)}</th>
+          <th className="numeric mono">{fmtMinor(totals.d61_90)}</th>
+          <th className="numeric mono">{fmtMinor(totals.over90)}</th>
+          <th className="numeric mono">{fmtMinor(totals.total)}</th>
+        </tr>
+      </tfoot>
+    </table>
+  );
+}
+
+/* ── Statement tab (Customer / Vendor) ── */
+
+function StatementTab({
+  contacts,
+  orgSlug,
+  locale,
+  baseCurrency,
+  t,
+  type,
+}: {
+  contacts: ContactRow[];
+  orgSlug: string;
+  locale: Locale;
+  baseCurrency: string;
+  t: Messages;
+  type: 'customer' | 'vendor';
+}) {
+  const isCustomer = type === 'customer';
+  const title = isCustomer ? t.customerStatement.title : t.vendorStatement.title;
+  const selectLabel = isCustomer ? t.customerStatement.selectContact : t.vendorStatement.selectContact;
+
+  const [contactId, setContactId] = useState('');
+  const today = new Date().toISOString().slice(0, 10);
+  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const [from, setFrom] = useState(yearStart);
+  const [to, setTo] = useState(today);
+  const [data, setData] = useState<CustomerStatement | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const fetchStatement = useCallback(async () => {
+    if (!contactId) return;
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(
+        `/api/${orgSlug}/statement?type=${type}&contactId=${contactId}&from=${from}&to=${to}`,
+      );
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      const json = await res.json();
+      setData(json);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load statement');
+      setData(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgSlug, type, contactId, from, to]);
+
+  return (
+    <div className="statement-tab">
+      <h3>{title}</h3>
+
+      <div className="statement-controls">
+        <label>
+          {selectLabel}
+          <select value={contactId} onChange={(e) => setContactId(e.target.value)}>
+            <option value="">{selectLabel}</option>
+            {contacts.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {t.reports.from}
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          {t.reports.to}
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <button onClick={fetchStatement} disabled={!contactId || loading}>
+          {loading ? t.common.loading : title}
+        </button>
+      </div>
+
+      {error && <p className="error-message">{error}</p>}
+
+      {data && (
+        <table className="report-table">
+          <thead>
+            <tr>
+              <th>{t.statement.date}</th>
+              <th>{t.statement.description}</th>
+              <th>{t.statement.reference}</th>
+              <th className="numeric">{t.statement.amount}</th>
+              <th className="numeric">{t.statement.balance}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.openingBalance !== 0n && (
+              <tr className="opening-balance">
+                <td colSpan={3}>{t.statement.openingBalance}</td>
+                <td className="numeric mono" />
+                <td className="numeric mono">{fmtMinor(data.openingBalance)}</td>
+              </tr>
+            )}
+            {data.lines.length === 0 && !loading ? (
+              <tr>
+                <td colSpan={5} className="empty-state">
+                  {t.statement.noTransactions}
+                </td>
+              </tr>
+            ) : (
+              data.lines.map((line, i) => (
+                <tr key={i}>
+                  <td className="mono">{line.date}</td>
+                  <td>{line.description}</td>
+                  <td className="mono">{line.reference}</td>
+                  <td className="numeric mono">{fmtMinor(line.amount)}</td>
+                  <td className="numeric mono">{fmtMinor(line.balance)}</td>
+                </tr>
+              ))
+            )}
+          </tbody>
+          <tfoot>
+            <tr>
+              <th colSpan={4}>{t.statement.closingBalance}</th>
+              <th className="numeric mono">{fmtMinor(data.closingBalance)}</th>
+            </tr>
+          </tfoot>
+        </table>
+      )}
+    </div>
   );
 }

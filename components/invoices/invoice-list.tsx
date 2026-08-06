@@ -47,6 +47,7 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
           <th scope="col">{t.invoices.dueDate}</th>
           <th scope="col">{t.invoices.status}</th>
           <th scope="col" className="numeric">{t.invoices.total}</th>
+          <th scope="col">Actions</th>
         </tr>
       </thead>
       <tbody>
@@ -67,6 +68,15 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
             </td>
             <td className="numeric money-out">
               {formatMoney(row.totalMinor, row.currency)}
+            </td>
+            <td>
+              <a
+                href={`/api/invoice/${row.id}/pdf?orgSlug=${orgSlug}`}
+                download
+                className="text-button"
+              >
+                {t.invoicePdf.download}
+              </a>
             </td>
           </tr>
         ))}
