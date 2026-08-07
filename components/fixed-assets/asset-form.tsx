@@ -94,7 +94,7 @@ export function AssetForm({
   }
 
   return (
-    <div className="add-form">
+    <div className="transaction-form">
       <div className="form-field">
         <label>{t.fixedAssets.title ?? 'Asset Name'}</label>
         <input

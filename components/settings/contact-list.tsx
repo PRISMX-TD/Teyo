@@ -178,20 +178,31 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
                   </div>
                 ) : (
                   <>
-                    <div className="list-item-line">
-                      <span className="contact-name">{item.name}</span>
-                      {item.email ? <span className="contact-email">{item.email}</span> : null}
-                      {item.phone ? <span className="contact-phone">{item.phone}</span> : null}
-                      <span className="badge badge-info">{t.settings[TYPE_LABEL_KEYS[item.type]]}</span>
-                      <button onClick={() => startEdit(item)}>
-                        {t.settings.rename ?? 'Edit'}
-                      </button>
-                      <button onClick={() => setExpanded(expanded === item.id ? null : item.id)}>
-                        {expanded === item.id ? '−' : '+'}
-                      </button>
-                      <button onClick={() => onToggle(orgSlug, item.id, !item.isActive)}>
-                        {t.settings.deactivate}
-                      </button>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', padding: 'var(--space-3) var(--space-4)' }}>
+                      {/* 第一层：名称 + 类型 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                        <span className="contact-name" style={{ flex: '1 1 auto', minWidth: 0 }}>{item.name}</span>
+                        <span className="badge badge-info">{t.settings[TYPE_LABEL_KEYS[item.type]]}</span>
+                      </div>
+                      {/* 第二层：联系信息 */}
+                      {(item.email || item.phone) ? (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-3)', flexWrap: 'wrap', fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>
+                          {item.email ? <span className="contact-email">{item.email}</span> : null}
+                          {item.phone ? <span className="contact-phone">{item.phone}</span> : null}
+                        </div>
+                      ) : null}
+                      {/* 第三层：操作按钮 */}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
+                        <button onClick={() => startEdit(item)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                          {t.settings.rename ?? 'Edit'}
+                        </button>
+                        <button onClick={() => setExpanded(expanded === item.id ? null : item.id)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                          {expanded === item.id ? '−' : '+'}
+                        </button>
+                        <button onClick={() => onToggle(orgSlug, item.id, !item.isActive)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                          {t.settings.deactivate}
+                        </button>
+                      </div>
                     </div>
                     {expanded === item.id ? (
                       <div className="contact-details">

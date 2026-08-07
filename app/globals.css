@@ -283,16 +283,37 @@ button {
   cursor: pointer; display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
   min-height: 40px; padding: var(--space-2) var(--space-4);
   font-family: inherit; font-size: var(--text-sm); font-weight: 500;
-  color: var(--text-secondary);
-  background: var(--bg-elevated); border: 1px solid var(--border-primary);
+  color: var(--text-primary);
+  background: var(--bg-elevated); border: 1px solid var(--border-input);
   border-radius: var(--radius-sm);
+  box-shadow: var(--shadow-sm);
   transition: all var(--dur-fast) var(--ease);
 }
-button:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--border-secondary); color: var(--text-primary); }
+button:hover:not(:disabled) { background: var(--bg-hover); border-color: var(--text-tertiary); color: var(--text-primary); }
+button:active:not(:disabled) { background: var(--bg-active); transform: translateY(1px); box-shadow: none; }
 button:disabled { opacity: 0.4; cursor: not-allowed; }
 
 .primary-button, button[type='submit'] {
   color: #fff; background: var(--accent); border: 1px solid var(--accent); font-weight: 550;
+}
+/* 作为 <a> 使用时需要自带按钮盒模型，否则会退化成纯文字 */
+a.primary-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  min-height: 40px; padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm); border-radius: var(--radius-sm);
+  transition: all var(--dur-fast) var(--ease);
+}
+a.secondary-button {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  min-height: 40px; padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm); font-weight: 500; border-radius: var(--radius-sm);
+  color: var(--text-secondary); background: var(--bg-elevated);
+  border: 1px solid var(--border-primary);
+  transition: all var(--dur-fast) var(--ease);
+}
+a.secondary-button:hover {
+  background: var(--bg-hover); border-color: var(--border-secondary);
+  color: var(--text-primary); text-decoration: none;
 }
 .primary-button:hover, button[type='submit']:hover:not(:disabled) { background: var(--accent-hover); border-color: var(--accent-hover); color: #fff; text-decoration: none; }
 button[type='submit']:disabled { background: var(--bg-tertiary); border-color: var(--border-primary); color: var(--text-tertiary); opacity: 0.4; }
@@ -322,6 +343,9 @@ button[type='submit']:disabled { background: var(--bg-tertiary); border-color: v
   border-bottom: 1px solid var(--border-primary);
   vertical-align: baseline;
 }
+/* badge 紧跟表格内文字时需要间距（.badge 本身不再带 margin） */
+.transaction-table td > a + .badge, .audit-table td > a + .badge,
+.transaction-table td > span + .badge { margin-left: var(--space-2); }
 .transaction-table tbody tr { transition: background var(--dur-fast) var(--ease); }
 .transaction-table tbody tr:hover { background: var(--bg-hover); }
 .transaction-table tbody tr:nth-child(even) { background: rgba(255,255,255,0.007); }
@@ -342,11 +366,11 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
    ========================================================================== */
 
 .badge {
-  display: inline-block; margin-left: var(--space-2);
-  padding: 0 var(--space-2); font-size: var(--text-2xs); font-weight: 600;
+  display: inline-block;
+  padding: var(--space-1) var(--space-2); font-size: var(--text-2xs); font-weight: 600;
   letter-spacing: 0.03em; text-transform: uppercase;
-  color: var(--red); background: var(--red-subtle);
-  border: 1px solid rgba(239,68,68,0.2);
+  color: var(--text-secondary); background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary);
   border-radius: var(--radius-sm);
   white-space: nowrap; vertical-align: middle;
 }
@@ -646,10 +670,24 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .list-item-line button, .inline-edit button { flex: 0 0 auto; min-height: 36px; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); }
 .inline-edit input { flex: 1 1 140px; min-width: 0; min-height: 36px; font-size: var(--text-sm); }
 
-.add-form, .invite-form { display: flex; flex-wrap: wrap; gap: var(--space-2); padding: var(--space-4); background: var(--bg-tertiary); border-top: 1px solid var(--border-primary); }
-.add-form input, .add-form select, .invite-form input, .invite-form select { flex: 1 1 140px; min-width: 0; }
-.add-form button, .invite-form button { flex: 0 0 auto; }
-.add-form h3 { font-size: var(--text-sm); margin-bottom: var(--space-1); color: var(--text-primary); width: 100%; }
+/* 网格布局让字段整齐对齐，避免 flex-wrap 造成的参差不齐 */
+.add-form, .invite-form {
+  display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: var(--space-3); align-items: end;
+  padding: var(--space-4); background: var(--bg-tertiary);
+  border-top: 1px solid var(--border-primary);
+}
+.add-form input:not([type='checkbox']):not([type='radio']),
+.add-form select, .add-form textarea,
+.invite-form input:not([type='checkbox']):not([type='radio']),
+.invite-form select { width: 100%; min-width: 0; }
+.add-form > h3, .invite-form > h3 {
+  grid-column: 1 / -1;
+  font-size: var(--text-sm); font-weight: 600; color: var(--text-primary);
+  margin: 0 0 var(--space-1);
+}
+.add-form > .hint, .add-form > .checkbox-label { align-self: center; }
+.add-form > button, .invite-form > button { justify-self: start; }
 
 .members-panel > section { margin-bottom: var(--space-8); }
 .members-panel > section > h2 { font-size: var(--text-xl); margin-bottom: var(--space-4); }
@@ -715,7 +753,19 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .btn-small { min-height: 36px; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); }
 .text-button { display: inline-flex; align-items: center; gap: var(--space-1); padding: var(--space-1) var(--space-2); font-size: var(--text-xs); color: var(--accent); background: none; border: none; cursor: pointer; min-height: auto; }
 .text-button:hover { color: var(--accent-hover); text-decoration: underline; background: none; border: none; }
-.add-button { display: inline-flex; align-items: center; gap: var(--space-1); min-height: 36px; padding: var(--space-1) var(--space-3); font-size: var(--text-sm); margin-bottom: var(--space-3); }
+.add-button {
+  display: inline-flex; align-items: center; gap: var(--space-1);
+  min-height: 36px; padding: var(--space-2) var(--space-3);
+  font-size: var(--text-sm); font-weight: 500;
+  color: var(--accent); background: var(--accent-subtle);
+  border: 1px solid var(--accent-border); border-radius: var(--radius-sm);
+  margin-top: var(--space-4);
+  transition: all var(--dur-fast) var(--ease);
+}
+.add-button:hover {
+  background: var(--accent-subtle); border-color: var(--accent);
+  color: var(--accent); text-decoration: none;
+}
 .action-group { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 
 /* ==========================================================================
@@ -839,7 +889,7 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 
 .inline-edit-row { display: flex; align-items: center; gap: var(--space-2); padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-primary); flex-wrap: wrap; }
 .inline-edit-row:first-child { border-top: none; }
-.form-field { display: flex; flex-direction: column; gap: var(--space-2); min-width: 0; }
+.form-field { display: flex; flex-direction: column; gap: var(--space-3); min-width: 0; }
 .form-field label { margin-top: 0; margin-bottom: 0; }
 
 /* ==========================================================================

@@ -165,37 +165,42 @@ export function ProjectList({ orgSlug, locale, projects: initialProjects, profit
 
         return (
           <div key={project.id} className="list-item">
-            <div className="list-item-line">
-              <span className="contact-name">
-                <Link href={`/${orgSlug}/projects/${project.id}`}>{project.name}</Link>
-              </span>
-              {project.contactName ? (
-                <span>{project.contactName}</span>
-              ) : null}
-              <span className={`badge ${project.status === 'active' ? 'badge-success' : project.status === 'completed' ? 'badge-info' : 'badge'}`}>
-                {statusLabel[project.status] ?? project.status}
-              </span>
-              {project.budgetMinor ? (
-                <span>{t.projects.budget}: {formatMoney(project.budgetMinor, 'USD')}</span>
-              ) : null}
-              {project.startDate ? <span>{project.startDate}</span> : null}
-              {project.endDate ? <span>→ {project.endDate}</span> : null}
-
-              <button onClick={() => startEdit(project)}>Edit</button>
-              <button onClick={() => setExpanded(expanded === project.id ? null : project.id)}>
-                {expanded === project.id ? '−' : '+'}
-              </button>
-
-              {(NEXT_STATUS[project.status] ?? []).map((ns) => (
-                <button
-                  key={ns}
-                  onClick={() => handleStatusChange(project.id, ns)}
-                  disabled={pending}
-                  className="btn-small"
-                >
-                  {statusLabel[ns] ?? ns}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', padding: 'var(--space-3) var(--space-4)' }}>
+              {/* 第一层：名称 + 联系人 + 状态 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                <span className="contact-name" style={{ flex: '1 1 auto', minWidth: 0 }}>
+                  <Link href={`/${orgSlug}/projects/${project.id}`}>{project.name}</Link>
+                </span>
+                {project.contactName ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>{project.contactName}</span> : null}
+                <span className={`badge ${project.status === 'active' ? 'badge-success' : project.status === 'completed' ? 'badge-info' : 'badge'}`}>
+                  {statusLabel[project.status] ?? project.status}
+                </span>
+              </div>
+              {/* 第二层：项目信息 badge */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
+                {project.budgetMinor ? (
+                  <span className="badge badge-info">{t.projects.budget}: {formatMoney(project.budgetMinor, 'USD')}</span>
+                ) : null}
+                {project.startDate ? <span className="badge badge-info">{project.startDate}</span> : null}
+                {project.endDate ? <span className="badge badge-info">→ {project.endDate}</span> : null}
+              </div>
+              {/* 第三层：操作按钮组 */}
+              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-1)' }}>
+                <button onClick={() => startEdit(project)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>Edit</button>
+                <button onClick={() => setExpanded(expanded === project.id ? null : project.id)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                  {expanded === project.id ? '−' : '+'}
                 </button>
-              ))}
+                {(NEXT_STATUS[project.status] ?? []).map((ns) => (
+                  <button
+                    key={ns}
+                    onClick={() => handleStatusChange(project.id, ns)}
+                    disabled={pending}
+                    style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}
+                  >
+                    {statusLabel[ns] ?? ns}
+                  </button>
+                ))}
+              </div>
             </div>
 
             {expanded === project.id && profit ? (
