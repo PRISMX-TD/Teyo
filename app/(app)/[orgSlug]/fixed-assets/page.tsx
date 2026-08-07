@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { AssetList } from '@/components/fixed-assets/asset-list';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -32,7 +33,14 @@ export default async function FixedAssetsPage({
 
   return (
     <>
-      <h1>{t.fixedAssets.title}</h1>
+      <div className="page-header">
+        <h1>{t.fixedAssets.title}</h1>
+        <div className="page-header-actions">
+          <Link href={`/${orgSlug}/fixed-assets/new`} className="primary-button">
+            {locale === 'zh' ? '新增固定资产' : 'New Asset'}
+          </Link>
+        </div>
+      </div>
       <AssetList
         orgSlug={orgSlug}
         baseCurrency={context.baseCurrency}

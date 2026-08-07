@@ -22,10 +22,14 @@ export default async function CreditNotesListPage({
 
   return (
     <>
-      <h1>{t.creditNotes.title}</h1>
-      <Link href={`/${orgSlug}/credit-notes/new`} className="primary-button">
-        {t.creditNotes.newTitle}
-      </Link>
+      <div className="page-header">
+        <h1>{t.creditNotes.title}</h1>
+        <div className="page-header-actions">
+          <Link href={`/${orgSlug}/credit-notes/new`} className="primary-button">
+            {t.creditNotes.newTitle}
+          </Link>
+        </div>
+      </div>
 
       <CreditNoteList
         orgSlug={orgSlug}

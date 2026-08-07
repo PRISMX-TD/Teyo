@@ -34,7 +34,9 @@ export default async function BankImportPage({
 
   return (
     <>
-      <h1>{i18n.bankImport.title}</h1>
+      <div className="page-header">
+        <h1>{i18n.bankImport.title}</h1>
+      </div>
 
       <ImportForm
         orgSlug={orgSlug}

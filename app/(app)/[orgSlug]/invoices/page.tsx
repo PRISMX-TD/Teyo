@@ -22,10 +22,14 @@ export default async function InvoicesListPage({
 
   return (
     <>
-      <h1>{t.invoices.title}</h1>
-      <Link href={`/${orgSlug}/invoices/new`} className="primary-button">
-        {t.invoices.newTitle}
-      </Link>
+      <div className="page-header">
+        <h1>{t.invoices.title}</h1>
+        <div className="page-header-actions">
+          <Link href={`/${orgSlug}/invoices/new`} className="primary-button">
+            {t.invoices.newTitle}
+          </Link>
+        </div>
+      </div>
 
       <InvoiceList
         orgSlug={orgSlug}

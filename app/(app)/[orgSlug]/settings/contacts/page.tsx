@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { ContactList } from '@/components/settings/contact-list';
 import { getMessages } from '@/lib/i18n';
 import { createContact, updateContactAction, toggleContactActive } from '@/server/actions/contacts';
@@ -35,6 +36,9 @@ export default async function ContactsSettingsPage({
 
   return (
     <>
+      <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+        &larr; {locale === 'zh' ? '设置' : 'Settings'}
+      </Link>
       <h1>{t.settings.contacts}</h1>
       <ContactList
         orgSlug={orgSlug}

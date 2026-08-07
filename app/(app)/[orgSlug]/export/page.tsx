@@ -15,7 +15,9 @@ export default async function ExportPage({
 
   return (
     <>
-      <h1>{t.exportPage.title}</h1>
+      <div className="page-header">
+        <h1>{t.exportPage.title}</h1>
+      </div>
       <p>{t.exportPage.subtitle}</p>
       <ExportForm orgSlug={orgSlug} locale={locale} />
     </>

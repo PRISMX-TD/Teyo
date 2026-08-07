@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { NamedList } from '@/components/settings/named-list';
 import { getMessages } from '@/lib/i18n';
 import { createCategory, renameCategory, setCategoryActive } from '@/server/actions/categories';
@@ -30,6 +31,9 @@ export default async function CategoriesSettingsPage({
 
   return (
     <>
+      <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+        &larr; {locale === 'zh' ? '设置' : 'Settings'}
+      </Link>
       <h1>{t.settings.categories}</h1>
       <NamedList
         orgSlug={orgSlug}

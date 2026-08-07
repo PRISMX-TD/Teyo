@@ -20,6 +20,10 @@ export type FixedAssetRow = {
   isActive: boolean;
   disposedAt: string | null;
   createdAt: string;
+  /** 以下三个字段仅作购入时的换算留痕，不参与折旧计算。 */
+  originalCurrency: string | null;
+  originalCostMinor: bigint | null;
+  purchaseExchangeRate: string | null;
 };
 
 export type FixedAssetDetail = FixedAssetRow & {
@@ -72,6 +76,11 @@ function mapAsset(row: Record<string, unknown>): FixedAssetDetail {
     isActive: row.is_active as boolean,
     disposedAt: row.disposed_at ? (row.disposed_at as Date).toISOString() : null,
     createdAt: (row.created_at as Date).toISOString(),
+    originalCurrency: (row.original_currency as string | null) ?? null,
+    originalCostMinor:
+      row.original_cost_minor == null ? null : BigInt(row.original_cost_minor as string),
+    purchaseExchangeRate:
+      row.purchase_exchange_rate == null ? null : String(row.purchase_exchange_rate),
     assetAccountName: row.asset_account_name as string,
     depnExpenseAccountName: row.depn_expense_account_name as string,
     depnAccumAccountName: row.depn_accum_account_name as string,
@@ -89,6 +98,7 @@ export async function listFixedAssets(
       fa.useful_life_months, fa.method, fa.declining_rate_bps,
       fa.asset_account_id, fa.depn_expense_account_id, fa.depn_accum_account_id,
       fa.is_active, fa.disposed_at, fa.created_at,
+      fa.original_currency, fa.original_cost_minor, fa.purchase_exchange_rate,
       aa.name_en as asset_account_name,
       dea.name_en as depn_expense_account_name,
       daa.name_en as depn_accum_account_name
@@ -114,6 +124,7 @@ export async function getFixedAsset(
       fa.useful_life_months, fa.method, fa.declining_rate_bps,
       fa.asset_account_id, fa.depn_expense_account_id, fa.depn_accum_account_id,
       fa.is_active, fa.disposed_at, fa.created_at,
+      fa.original_currency, fa.original_cost_minor, fa.purchase_exchange_rate,
       aa.name_en as asset_account_name,
       dea.name_en as depn_expense_account_name,
       daa.name_en as depn_accum_account_name
@@ -142,6 +153,9 @@ export async function insertFixedAsset(
     assetAccountId: string;
     depnExpenseAccountId: string;
     depnAccumAccountId: string;
+    originalCurrency?: string | null;
+    originalCostMinor?: bigint | null;
+    purchaseExchangeRate?: bigint | null;
   },
 ): Promise<{ id: string }> {
   const inserted = await tx`
@@ -149,7 +163,8 @@ export async function insertFixedAsset(
       organization_id, name, description,
       purchase_date, cost_minor, salvage_value_minor,
       useful_life_months, method, declining_rate_bps,
-      asset_account_id, depn_expense_account_id, depn_accum_account_id
+      asset_account_id, depn_expense_account_id, depn_accum_account_id,
+      original_currency, original_cost_minor, purchase_exchange_rate
     )
     values (
       ${row.organizationId},
@@ -163,7 +178,10 @@ export async function insertFixedAsset(
       ${row.decliningRateBps},
       ${row.assetAccountId},
       ${row.depnExpenseAccountId},
-      ${row.depnAccumAccountId}
+      ${row.depnAccumAccountId},
+      ${row.originalCurrency ?? null},
+      ${row.originalCostMinor ? row.originalCostMinor.toString() : null},
+      ${row.purchaseExchangeRate ? row.purchaseExchangeRate.toString() : null}
     )
     returning id
   `;

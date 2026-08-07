@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { InventoryList } from '@/components/settings/inventory-list';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -26,6 +27,9 @@ export default async function InventorySettingsPage({
 
   return (
     <>
+      <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+        &larr; {locale === 'zh' ? '设置' : 'Settings'}
+      </Link>
       <h1>{t.inventory.title}</h1>
       <InventoryList
         orgSlug={orgSlug}

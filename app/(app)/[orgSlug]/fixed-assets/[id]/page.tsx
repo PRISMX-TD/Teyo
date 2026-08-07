@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { DepreciationSchedule } from '@/components/fixed-assets/depreciation-schedule';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -27,6 +28,9 @@ export default async function FixedAssetDetailPage({
 
   return (
     <>
+      <Link href={`/${orgSlug}/fixed-assets`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+        &larr; {locale === 'zh' ? '固定资产列表' : 'Fixed Assets'}
+      </Link>
       <h1>{t.fixedAssets.title}</h1>
       <DepreciationSchedule
         orgSlug={orgSlug}

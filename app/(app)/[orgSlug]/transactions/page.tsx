@@ -54,13 +54,17 @@ export default async function TransactionsListPage({
 
   return (
     <>
-      <h1>{t.transaction.listTitle}</h1>
-      <Link href={`/${orgSlug}/transactions/new`} className="primary-button">
-        {t.transaction.newTitle}
-      </Link>
-      <Link href={`/${orgSlug}/transactions/journal`} className="primary-button">
-        {t.journal.newTitle}
-      </Link>
+      <div className="page-header">
+        <h1>{t.transaction.listTitle}</h1>
+        <div className="page-header-actions">
+          <Link href={`/${orgSlug}/transactions/new`} className="primary-button">
+            {t.transaction.newTitle}
+          </Link>
+          <Link href={`/${orgSlug}/transactions/journal`} className="primary-button">
+            {t.journal.newTitle}
+          </Link>
+        </div>
+      </div>
 
       <TransactionFilters
         orgSlug={orgSlug}

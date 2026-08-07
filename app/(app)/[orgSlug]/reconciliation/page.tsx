@@ -27,7 +27,9 @@ export default async function ReconciliationPage({
 
   return (
     <>
-      <h1>{t.reconciliation.title}</h1>
+      <div className="page-header">
+        <h1>{t.reconciliation.title}</h1>
+      </div>
       <ReconciliationView
         orgSlug={orgSlug}
         locale={locale}

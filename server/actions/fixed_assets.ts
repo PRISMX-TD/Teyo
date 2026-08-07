@@ -18,6 +18,7 @@ import {
   insertTransaction as insertTransactionRepo,
   insertJournalLines as insertJournalLinesRepo,
 } from '@/server/repositories/transactions';
+import { parseRateToScaled, convertToBaseMinor } from '@/server/domain/exchange-rate';
 
 const createFixedAssetSchema = z.object({
   name: z.string().min(1).max(200),
@@ -31,6 +32,9 @@ const createFixedAssetSchema = z.object({
   assetAccountId: z.string().uuid(),
   depnExpenseAccountId: z.string().uuid(),
   depnAccumAccountId: z.string().uuid(),
+  originalCurrency: z.string().length(3).optional(),
+  originalCostMinor: z.string().optional(),
+  exchangeRate: z.string().regex(/^\d+(\.\d{1,8})?$/).optional(),
 });
 
 const updateFixedAssetSchema = z.object({
@@ -63,12 +67,36 @@ export async function createFixedAsset(
   const parsed = createFixedAssetSchema.parse(input);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 计算基准币种的 costMinor
+    let costMinor: bigint;
+    let originalCurrency: string | null = null;
+    let originalCostMinor: bigint | null = null;
+    let purchaseExchangeRate: bigint | null = null;
+
+    if (parsed.originalCurrency && parsed.originalCurrency !== context.baseCurrency && parsed.exchangeRate) {
+      // 有原币且不同于基准币种，需要换算
+      originalCurrency = parsed.originalCurrency;
+      originalCostMinor = parseMinor(parsed.originalCostMinor || parsed.cost);
+      const scaledRate = parseRateToScaled(parsed.exchangeRate);
+      purchaseExchangeRate = scaledRate;
+      
+      costMinor = convertToBaseMinor({
+        amountMinor: originalCostMinor,
+        currency: originalCurrency,
+        baseCurrency: context.baseCurrency,
+        scaledRate,
+      });
+    } else {
+      // 无原币或原币等于基准币种，直接用 cost
+      costMinor = parseMinor(parsed.cost);
+    }
+
     const { id } = await insertFixedAsset(tx, {
       organizationId: context.organizationId,
       name: parsed.name,
       description: parsed.description ?? null,
       purchaseDate: parsed.purchaseDate,
-      costMinor: parseMinor(parsed.cost),
+      costMinor,
       salvageValueMinor: parseMinor(parsed.salvageValue),
       usefulLifeMonths: parsed.usefulLifeMonths,
       method: parsed.method as DepreciationMethod,
@@ -76,6 +104,9 @@ export async function createFixedAsset(
       assetAccountId: parsed.assetAccountId,
       depnExpenseAccountId: parsed.depnExpenseAccountId,
       depnAccumAccountId: parsed.depnAccumAccountId,
+      originalCurrency,
+      originalCostMinor,
+      purchaseExchangeRate,
     });
 
     await generateDepreciationSchedule(tx, context.organizationId, id);

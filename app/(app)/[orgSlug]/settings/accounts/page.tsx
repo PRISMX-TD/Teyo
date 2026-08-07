@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { CoAList } from '@/components/settings/coa-list';
 import { getMessages } from '@/lib/i18n';
 import { createAccount, renameAccount, setAccountActive } from '@/server/actions/accounts';
@@ -32,6 +33,9 @@ export default async function AccountsSettingsPage({
 
   return (
     <>
+      <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+        &larr; {locale === 'zh' ? '设置' : 'Settings'}
+      </Link>
       <h1>{t.settings.accounts}</h1>
       <CoAList
         orgSlug={orgSlug}

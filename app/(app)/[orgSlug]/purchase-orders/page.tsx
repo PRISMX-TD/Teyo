@@ -22,10 +22,14 @@ export default async function PurchaseOrdersListPage({
 
   return (
     <>
-      <h1>{t.purchaseOrders.title}</h1>
-      <Link href={`/${orgSlug}/purchase-orders/new`} className="primary-button">
-        {t.purchaseOrders.newTitle}
-      </Link>
+      <div className="page-header">
+        <h1>{t.purchaseOrders.title}</h1>
+        <div className="page-header-actions">
+          <Link href={`/${orgSlug}/purchase-orders/new`} className="primary-button">
+            {t.purchaseOrders.newTitle}
+          </Link>
+        </div>
+      </div>
 
       <PoList
         orgSlug={orgSlug}

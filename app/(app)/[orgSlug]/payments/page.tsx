@@ -29,10 +29,14 @@ export default async function PaymentsListPage({
 
   return (
     <>
-      <h1>{t.payments.title}</h1>
-      <Link href={`/${orgSlug}/payments/new`} className="primary-button">
-        {t.payments.newTitle}
-      </Link>
+      <div className="page-header">
+        <h1>{t.payments.title}</h1>
+        <div className="page-header-actions">
+          <Link href={`/${orgSlug}/payments/new`} className="primary-button">
+            {t.payments.newTitle}
+          </Link>
+        </div>
+      </div>
 
       <PaymentList
         orgSlug={orgSlug}

@@ -42,10 +42,14 @@ export default async function ProjectsListPage({
 
   return (
     <>
-      <h1>{t.projects.title}</h1>
-      <Link href={`/${orgSlug}/projects/new`} className="primary-button">
-        {t.projects.newTitle}
-      </Link>
+      <div className="page-header">
+        <h1>{t.projects.title}</h1>
+        <div className="page-header-actions">
+          <Link href={`/${orgSlug}/projects/new`} className="primary-button">
+            {t.projects.newTitle}
+          </Link>
+        </div>
+      </div>
 
       <ProjectList
         orgSlug={orgSlug}

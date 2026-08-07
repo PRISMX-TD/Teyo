@@ -44,7 +44,9 @@ export default async function ReportsPage({
 
   return (
     <>
-      <h1>{t.reports.title}</h1>
+      <div className="page-header">
+        <h1>{t.reports.title}</h1>
+      </div>
       <ReportsView
         locale={locale}
         baseCurrency={context.baseCurrency}

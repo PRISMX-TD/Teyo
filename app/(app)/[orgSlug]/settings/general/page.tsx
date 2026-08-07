@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { updatePeriodLock, updateOrganization } from '@/server/actions/organizations';
@@ -15,6 +16,9 @@ export default async function GeneralSettingsPage({
 
   return (
     <>
+      <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+        &larr; {locale === 'zh' ? '设置' : 'Settings'}
+      </Link>
       <h1>{t.settings.general}</h1>
 
       <section>

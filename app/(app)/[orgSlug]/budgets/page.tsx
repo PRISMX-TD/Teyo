@@ -22,7 +22,9 @@ export default async function BudgetsPage({
 
   return (
     <>
-      <h1>{t.budgets.title}</h1>
+      <div className="page-header">
+        <h1>{t.budgets.title}</h1>
+      </div>
       <BudgetView
         orgSlug={orgSlug}
         locale={locale}

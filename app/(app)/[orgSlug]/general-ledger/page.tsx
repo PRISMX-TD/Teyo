@@ -37,7 +37,9 @@ export default async function GeneralLedgerPage({
 
   return (
     <>
-      <h1>{t.generalLedger.title}</h1>
+      <div className="page-header">
+        <h1>{t.generalLedger.title}</h1>
+      </div>
       <GeneralLedgerView
         orgSlug={orgSlug}
         locale={locale}

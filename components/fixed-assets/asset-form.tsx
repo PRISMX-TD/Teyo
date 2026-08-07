@@ -17,14 +17,26 @@ type Props = {
   locale: Locale;
   i18n: Messages;
   accounts: AccountOption[];
+  baseCurrency: string;
+  currencies: string[];
   onSuccess?: (id: string) => void;
 };
 
-export function AssetForm({ orgSlug, locale, i18n: t, accounts, onSuccess }: Props) {
+export function AssetForm({
+  orgSlug,
+  locale,
+  i18n: t,
+  accounts,
+  baseCurrency,
+  currencies,
+  onSuccess,
+}: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
   const [cost, setCost] = useState('');
+  const [originalCurrency, setOriginalCurrency] = useState(baseCurrency);
+  const [exchangeRate, setExchangeRate] = useState('1.00000000');
   const [salvageValue, setSalvageValue] = useState('0');
   const [usefulLifeMonths, setUsefulLifeMonths] = useState(60);
   const [method, setMethod] = useState<'straight_line' | 'declining_balance'>('straight_line');
@@ -35,6 +47,17 @@ export function AssetForm({ orgSlug, locale, i18n: t, accounts, onSuccess }: Pro
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  const isForeign = originalCurrency !== baseCurrency;
+
+  // 实时预览折算后的基准币种金额
+  const convertedPreview = (() => {
+    if (!isForeign || !cost) return null;
+    const amount = Number(cost.replace(/,/g, ''));
+    const rate = Number(exchangeRate);
+    if (!Number.isFinite(amount) || !Number.isFinite(rate) || rate <= 0) return null;
+    return (amount * rate).toFixed(2);
+  })();
+
   async function handleSubmit() {
     setPending(true);
     setError(null);
@@ -44,6 +67,9 @@ export function AssetForm({ orgSlug, locale, i18n: t, accounts, onSuccess }: Pro
         description: description.trim() || null,
         purchaseDate,
         cost,
+        originalCurrency: isForeign ? originalCurrency : undefined,
+        originalCostMinor: isForeign ? cost : undefined,
+        exchangeRate: isForeign ? exchangeRate : undefined,
         salvageValue,
         usefulLifeMonths,
         method,
@@ -97,21 +123,69 @@ export function AssetForm({ orgSlug, locale, i18n: t, accounts, onSuccess }: Pro
 
       <div className="inline-edit-row">
         <div className="form-field">
-          <label>{t.fixedAssets.cost}</label>
+          <label>{locale === 'zh' ? '购入币种' : 'Purchase Currency'}</label>
+          <select
+            value={originalCurrency}
+            onChange={(e) => {
+              const next = e.target.value;
+              setOriginalCurrency(next);
+              if (next === baseCurrency) setExchangeRate('1.00000000');
+            }}
+          >
+            {currencies.map((c) => (
+              <option key={c} value={c}>
+                {c}
+                {c === baseCurrency ? locale === 'zh' ? '（基准）' : ' (base)' : ''}
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="form-field">
+          <label>
+            {t.fixedAssets.cost} ({originalCurrency})
+          </label>
           <input
             value={cost}
             onChange={(e) => setCost(e.target.value)}
             placeholder="0.00"
           />
         </div>
+      </div>
+
+      {isForeign && (
         <div className="form-field">
-          <label>{t.fixedAssets.salvageValue}</label>
+          <label>
+            {locale === 'zh'
+              ? `购入日汇率（1 ${originalCurrency} = ? ${baseCurrency}）`
+              : `Rate on purchase date (1 ${originalCurrency} = ? ${baseCurrency})`}
+          </label>
           <input
-            value={salvageValue}
-            onChange={(e) => setSalvageValue(e.target.value)}
-            placeholder="0.00"
+            value={exchangeRate}
+            onChange={(e) => setExchangeRate(e.target.value)}
+            placeholder="1.00000000"
+            inputMode="decimal"
           />
+          <span className="hint">
+            {convertedPreview
+              ? locale === 'zh'
+                ? `账面原值：${convertedPreview} ${baseCurrency}（按购入日汇率折算一次，后续不重估）`
+                : `Book cost: ${convertedPreview} ${baseCurrency} (translated once at purchase date, not revalued)`
+              : locale === 'zh'
+                ? '固定资产为非货币性项目，仅按购入日汇率折算一次。'
+                : 'Fixed assets are non-monetary items, translated once at the purchase-date rate.'}
+          </span>
         </div>
+      )}
+
+      <div className="form-field">
+        <label>
+          {t.fixedAssets.salvageValue} ({baseCurrency})
+        </label>
+        <input
+          value={salvageValue}
+          onChange={(e) => setSalvageValue(e.target.value)}
+          placeholder="0.00"
+        />
       </div>
 
       <div className="inline-edit-row">

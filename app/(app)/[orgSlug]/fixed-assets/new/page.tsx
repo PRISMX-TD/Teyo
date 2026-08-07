@@ -5,6 +5,7 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listAllAccounts } from '@/server/repositories/accounts';
+import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
 export default async function NewFixedAssetPage({
   params,
@@ -40,6 +41,8 @@ export default async function NewFixedAssetPage({
         locale={locale}
         i18n={t}
         accounts={accountOptions}
+        baseCurrency={context.baseCurrency}
+        currencies={[...SUPPORTED_CURRENCIES]}
         onSuccess={handleSuccess}
       />
     </>
