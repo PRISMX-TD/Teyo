@@ -99,8 +99,8 @@ export const SEED_CATEGORIES: readonly SeedCategory[] = [
   { nameEn: 'Transport', nameZh: '交通', kind: 'expense', accountCode: 'transport', sortOrder: 150 },
   { nameEn: 'Professional Fees', nameZh: '专业服务', kind: 'expense', accountCode: 'professional-fees', sortOrder: 160 },
   { nameEn: 'AI / LLM', nameZh: 'AI/LLM 费用', kind: 'expense', accountCode: 'ai-llm-costs', sortOrder: 170 },
-  { nameEn: 'Depreciation', nameZh: '折旧', kind: 'expense', accountCode: 'depreciation', sortOrder: 180 },
-  { nameEn: 'Amortization', nameZh: '摊销', kind: 'expense', accountCode: 'amortization', sortOrder: 190 },
+  { nameEn: 'Depreciation', nameZh: '折旧', kind: 'expense', accountCode: 'depreciation', sortOrder: 180, isSystemOnly: true },
+  { nameEn: 'Amortization', nameZh: '摊销', kind: 'expense', accountCode: 'amortization', sortOrder: 190, isSystemOnly: true },
   { nameEn: 'Other', nameZh: '其他', kind: 'expense', accountCode: 'other-expenses', sortOrder: 200 },
 ] as const;
 
@@ -141,6 +141,7 @@ export async function seedChartOfAccounts(tx: Tx, organizationId: string): Promi
         kind: category.kind,
         account_id: idByCode.get(category.accountCode) as string,
         sort_order: category.sortOrder,
+        is_system_only: category.isSystemOnly ?? false,
       })),
     )}
   `;

@@ -6,7 +6,7 @@ import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getTransactionDetail, TransactionNotFoundError } from '@/server/repositories/transactions';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
-import { listCategories } from '@/server/repositories/categories';
+import { listSelectableCategories, type CategoryRow } from '@/server/repositories/categories';
 import { listAttachments } from '@/server/repositories/attachments';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 import { TransactionForm } from '@/components/transaction/transaction-form';
@@ -24,17 +24,19 @@ export default async function TransactionDetailPage({
 
   let row: Awaited<ReturnType<typeof getTransactionDetail>>;
   let accounts: Awaited<ReturnType<typeof listMoneyAccounts>>;
-  let allCategories: Awaited<ReturnType<typeof listCategories>>;
+  let incomeCategories: CategoryRow[];
+  let expenseCategories: CategoryRow[];
   let attachments: Awaited<ReturnType<typeof listAttachments>>;
 
   try {
-    [row, accounts, allCategories, attachments] = await withTransaction(
+    [row, accounts, incomeCategories, expenseCategories, attachments] = await withTransaction(
       context.userId,
       async (tx) =>
         Promise.all([
           getTransactionDetail(tx, context.organizationId, id),
           listMoneyAccounts(tx, context.organizationId),
-          listCategories(tx, context.organizationId),
+          listSelectableCategories(tx, context.organizationId, 'income'),
+          listSelectableCategories(tx, context.organizationId, 'expense'),
           listAttachments(tx, context.organizationId, id),
         ]),
     );
@@ -88,8 +90,31 @@ export default async function TransactionDetailPage({
 
   // 未作废：显示编辑表单
   const categoryId = row.categoryId;
-  const incomeCategories = allCategories.filter((c) => c.kind === 'income');
-  const expenseCategories = allCategories.filter((c) => c.kind === 'expense');
+
+  // 这笔交易可能已经挂在一个只应由系统过账的分类上（比如固定资产模块
+  // 记的折旧）。listSelectableCategories 把这类分类从选择器里筛掉是对的
+  // ——但如果筛掉之后这里的下拉找不到当前值，<select required> 会掉回
+  // 禁用的占位项，用户明明只是想改个日期或备注，却被逼着先随便选一个
+  // 错误的分类才能保存。把它临时补回对应 kind 的选项列表：不新增选它
+  // 的入口（其它交易的选择器里仍然看不到它），只是让已经如此分类的这一
+  // 笔在未被用户主动改动时，保存时不会悄悄换成别的分类。
+  const categoryPools: { income: CategoryRow[]; expense: CategoryRow[] } = {
+    income: [...incomeCategories],
+    expense: [...expenseCategories],
+  };
+  if (categoryId && (row.kind === 'income' || row.kind === 'expense')) {
+    const pool = categoryPools[row.kind];
+    if (!pool.some((c) => c.id === categoryId)) {
+      pool.push({
+        id: categoryId,
+        nameEn: row.categoryNameEn,
+        nameZh: row.categoryNameZh,
+        kind: row.kind,
+        accountId: '',
+        isActive: true,
+      });
+    }
+  }
   const currenciesList = [...SUPPORTED_CURRENCIES];
 
   return (
@@ -104,12 +129,12 @@ export default async function TransactionDetailPage({
           name_en: a.nameEn,
           name_zh: a.nameZh,
         }))}
-        incomeCategories={incomeCategories.map((c) => ({
+        incomeCategories={categoryPools.income.map((c) => ({
           id: c.id,
           name_en: c.nameEn,
           name_zh: c.nameZh,
         }))}
-        expenseCategories={expenseCategories.map((c) => ({
+        expenseCategories={categoryPools.expense.map((c) => ({
           id: c.id,
           name_en: c.nameEn,
           name_zh: c.nameZh,

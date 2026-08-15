@@ -169,6 +169,38 @@ export async function listCategories(
   }));
 }
 
+/**
+ * 供录入表单使用：排除只应由系统过账的分类（折旧、摊销等）。
+ *
+ * 这些分类背后没有对应的现金移动——折旧/摊销由固定资产模块直接过账，
+ * 从不经过用户填写的表单。留在录入选择器里，一个小白买了台电脑很
+ * 自然地会选「折旧」，生成一笔贷记资金账户的分录：一次从未发生的
+ * 现金流出，并且与固定资产模块的过账重复计算。
+ */
+export async function listSelectableCategories(
+  tx: Tx,
+  organizationId: string,
+  kind: 'income' | 'expense',
+): Promise<CategoryRow[]> {
+  const rows = await tx`
+    select id, name_en, name_zh, kind, account_id, is_active
+    from categories
+    where organization_id = ${organizationId}
+      and kind = ${kind}
+      and is_active
+      and not is_system_only
+    order by sort_order, id
+  `;
+  return rows.map((row) => ({
+    id: row.id as string,
+    nameEn: (row.name_en as string | null) ?? null,
+    nameZh: (row.name_zh as string | null) ?? null,
+    kind: row.kind as CategoryRow['kind'],
+    accountId: row.account_id as string,
+    isActive: row.is_active as boolean,
+  }));
+}
+
 /** 列出全部分类（含已隐藏），供设置页管理。 */
 export async function listAllCategories(
   tx: Tx,

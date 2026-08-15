@@ -156,3 +156,20 @@ describe('novice-surface seed accounts', () => {
     expect(purchases!.cashFlowCategory).toBe('operating');
   });
 });
+
+describe('non-cash categories are system-only', () => {
+  it('marks depreciation and amortization as system-only', () => {
+    for (const code of ['depreciation', 'amortization']) {
+      const category = SEED_CATEGORIES.find((c) => c.accountCode === code);
+      expect(category, `${code} category should exist`).toBeDefined();
+      expect(category!.isSystemOnly, `${code} must not be user-selectable`).toBe(true);
+    }
+  });
+
+  it('leaves ordinary expense categories selectable', () => {
+    for (const code of ['rent', 'salaries', 'utilities']) {
+      const category = SEED_CATEGORIES.find((c) => c.accountCode === code);
+      expect(category?.isSystemOnly ?? false).toBe(false);
+    }
+  });
+});
