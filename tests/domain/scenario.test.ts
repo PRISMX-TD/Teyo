@@ -30,9 +30,9 @@ describe('scenario definitions', () => {
     expect(s.needsCategory).toBe(false);
   });
 
-  it('not-sure has no preset kind and routes to suspense account', () => {
+  it('not-sure posts as a journal to suspense without requiring a category', () => {
     const s = scenarioById('not-sure')!;
-    expect(s.kind).toBeNull();
+    expect(s.kind).toBe('journal');
     expect(s.defaultAccountCode).toBe('suspense');
     expect(s.needsCategory).toBe(false);
   });

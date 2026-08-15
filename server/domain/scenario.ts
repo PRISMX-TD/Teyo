@@ -3,7 +3,7 @@ export type ScenarioId =
 
 export type Scenario = {
   id: ScenarioId;
-  kind: 'income' | 'expense' | 'transfer' | null;
+  kind: 'income' | 'expense' | 'transfer' | 'journal';
   /** 预选的分类科目编码；null 表示由用户选择。 */
   defaultAccountCode: string | null;
   /** 该场景是否需要用户选择分类。 */
@@ -37,7 +37,7 @@ export const SCENARIOS: readonly Scenario[] = [
   },
   {
     id: 'not-sure',
-    kind: null,
+    kind: 'journal',
     defaultAccountCode: 'suspense',
     needsCategory: false,
   },
