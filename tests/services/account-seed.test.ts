@@ -139,3 +139,20 @@ describe('seeded accounts carry a cash-flow category', () => {
     }
   });
 });
+
+describe('novice-surface seed accounts', () => {
+  it('seeds a suspense account with no cash-flow category', () => {
+    const suspense = SEED_ACCOUNTS.find((a) => a.code === 'suspense');
+    expect(suspense).toBeDefined();
+    expect(suspense!.type).toBe('asset');
+    expect(suspense!.isMoneyAccount).toBe(false);
+    expect(suspense!.cashFlowCategory).toBeUndefined();
+  });
+
+  it('seeds a purchases account so a trading business can compute margin', () => {
+    const purchases = SEED_ACCOUNTS.find((a) => a.code === 'purchases');
+    expect(purchases).toBeDefined();
+    expect(purchases!.type).toBe('expense');
+    expect(purchases!.cashFlowCategory).toBe('operating');
+  });
+});

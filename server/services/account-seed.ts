@@ -25,6 +25,10 @@ export type SeedCategory = {
   kind: 'income' | 'expense';
   accountCode: string;
   sortOrder: number;
+  /**
+   * 只应由系统过账的分类（折旧、摊销等），不出现在录入表单的选择器中。
+   */
+  isSystemOnly?: boolean;
 };
 
 export const SEED_ACCOUNTS: readonly SeedAccount[] = [
@@ -50,6 +54,10 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   // prepaid-expenses 同 AR/inventory：server/repositories/reports.ts 已把
   // -netFlow('prepaid-expenses') 计入 operatingTotal，是营运资金调整项。
   { code: 'prepaid-expenses', nameEn: 'Prepaid Expenses', nameZh: '预付费用', type: 'asset', isMoneyAccount: false, sortOrder: 90, cashFlowCategory: 'operating' },
+  // suspense：用户不确定一笔钱属于什么时的合法去处。账依然配平，该笔挂在
+  // 「待确认」队列里直到有人处理。cash_flow_category 留空：它不是现金的
+  // 最终去向，只是暂存，不是资金账户本身也不该被归入现金流量表的任何一类。
+  { code: 'suspense', nameEn: 'Unsorted', nameZh: '待确认', type: 'asset', isMoneyAccount: false, sortOrder: 95 },
   // 负债
   { code: 'accounts-payable', nameEn: 'Accounts Payable', nameZh: '应付账款', type: 'liability', isMoneyAccount: false, sortOrder: 110, cashFlowCategory: 'operating' },
   { code: 'loans', nameEn: 'Loans', nameZh: '贷款', type: 'liability', isMoneyAccount: false, sortOrder: 120, cashFlowCategory: 'financing' },
@@ -65,6 +73,9 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   { code: 'sales', nameEn: 'Sales', nameZh: '销售收入', type: 'revenue', isMoneyAccount: false, sortOrder: 310, cashFlowCategory: 'operating' },
   { code: 'other-income', nameEn: 'Other Income', nameZh: '其他收入', type: 'revenue', isMoneyAccount: false, sortOrder: 320, cashFlowCategory: 'operating' },
   // 费用
+  // purchases：种子科目里此前没有任何进货/成本科目，做买卖的生意因此
+  // 算不出毛利。
+  { code: 'purchases', nameEn: 'Purchases', nameZh: '进货', type: 'expense', isMoneyAccount: false, sortOrder: 405, cashFlowCategory: 'operating' },
   { code: 'rent', nameEn: 'Rent', nameZh: '租金', type: 'expense', isMoneyAccount: false, sortOrder: 410, cashFlowCategory: 'operating' },
   { code: 'salaries', nameEn: 'Salaries', nameZh: '薪资', type: 'expense', isMoneyAccount: false, sortOrder: 420, cashFlowCategory: 'operating' },
   { code: 'utilities', nameEn: 'Utilities', nameZh: '水电', type: 'expense', isMoneyAccount: false, sortOrder: 430, cashFlowCategory: 'operating' },
@@ -80,6 +91,7 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
 export const SEED_CATEGORIES: readonly SeedCategory[] = [
   { nameEn: 'Sales', nameZh: '销售收入', kind: 'income', accountCode: 'sales', sortOrder: 10 },
   { nameEn: 'Other Income', nameZh: '其他收入', kind: 'income', accountCode: 'other-income', sortOrder: 20 },
+  { nameEn: 'Purchases', nameZh: '进货', kind: 'expense', accountCode: 'purchases', sortOrder: 105 },
   { nameEn: 'Rent', nameZh: '租金', kind: 'expense', accountCode: 'rent', sortOrder: 110 },
   { nameEn: 'Salaries', nameZh: '薪资', kind: 'expense', accountCode: 'salaries', sortOrder: 120 },
   { nameEn: 'Utilities', nameZh: '水电', kind: 'expense', accountCode: 'utilities', sortOrder: 130 },
