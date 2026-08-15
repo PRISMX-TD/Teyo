@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
+import { can } from '@/server/domain/permissions';
 import { updatePeriodLock, updateOrganization } from '@/server/actions/organizations';
 import { getUserLocale } from '@/server/repositories/organizations';
 
@@ -21,39 +22,41 @@ export default async function GeneralSettingsPage({
       </Link>
       <h1>{t.settings.general}</h1>
 
-      <section>
-        <h2>{t.settings.lockTitle}</h2>
-        <p>{t.settings.lockHint}</p>
-        <p>
-          {context.lockedUntil
-            ? interpolate(t.settings.lockCurrent, { date: context.lockedUntil })
-            : t.settings.lockNone}
-        </p>
-        <form
-          action={async (formData: FormData) => {
-            'use server';
-            const lockDate = String(formData.get('lockDate') ?? '');
-            if (!lockDate) return;
-            await updatePeriodLock(orgSlug, { lockedUntil: lockDate || null });
-          }}
-        >
-          <input name="lockDate" type="date" required />
-          <button type="submit">{t.settings.save}</button>
-        </form>
-        <p>{t.settings.lockWarning}</p>
-        {context.lockedUntil && (
+      {can(context.role, 'period:lock') && (
+        <section>
+          <h2>{t.settings.lockTitle}</h2>
+          <p>{t.settings.lockHint}</p>
+          <p>
+            {context.lockedUntil
+              ? interpolate(t.settings.lockCurrent, { date: context.lockedUntil })
+              : t.settings.lockNone}
+          </p>
+          <p>{t.settings.lockWarning}</p>
           <form
-            action={async () => {
+            action={async (formData: FormData) => {
               'use server';
-              await updatePeriodLock(orgSlug, { lockedUntil: null });
+              const lockDate = String(formData.get('lockDate') ?? '');
+              if (!lockDate) return;
+              await updatePeriodLock(orgSlug, { lockedUntil: lockDate || null });
             }}
           >
-            <button type="submit" className="btn-danger">
-              {t.settings.lockRemove}
-            </button>
+            <input name="lockDate" type="date" required />
+            <button type="submit">{t.settings.save}</button>
           </form>
-        )}
-      </section>
+          {context.lockedUntil && (
+            <form
+              action={async () => {
+                'use server';
+                await updatePeriodLock(orgSlug, { lockedUntil: null });
+              }}
+            >
+              <button type="submit" className="btn-danger">
+                {t.settings.lockRemove}
+              </button>
+            </form>
+          )}
+        </section>
+      )}
 
       <section>
         <h2>{t.settings.general}</h2>
