@@ -1011,12 +1011,18 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
   .app-main h1 { font-size: var(--text-xl); }
   .kpi-value { font-size: var(--text-xl); }
 
-  /* Below 16px iOS zooms the viewport on focus. Amount is the most commonly entered field,
-     and being forced to pinch back every time makes the core flow feel broken. */
-  input, select, textarea { font-size: 16px; }
+  /* Accessibility floor: below 16px iOS auto-zooms the viewport on input focus.
+     This breaks the flagship transaction entry flow where amount is the most important field.
+     Using !important enforces this floor across all input variants (amount fields in budget,
+     reconciliation, GL, statement views, etc). This is a mobile-specific accessibility
+     requirement, not a design override. */
+  input, select, textarea { font-size: 16px !important; }
 
-  button, .primary-button, a.primary-button, a.secondary-button { min-height: 44px; }
-  .attachment-preview-btn, .attachment-delete-btn, .btn-small { min-height: 44px; }
+  /* Touch target minimum 44px on mobile for accessibility.
+     Using !important to ensure all button variants (inline edit, member row, etc) meet WCAG.
+     This applies to all interactive buttons regardless of their container specificity. */
+  button, .primary-button, a.primary-button, a.secondary-button { min-height: 44px !important; }
+  .attachment-preview-btn, .attachment-delete-btn, .btn-small { min-height: 44px !important; }
 }
 
 @media (max-width: 520px) {
