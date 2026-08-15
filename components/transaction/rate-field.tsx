@@ -20,10 +20,17 @@ export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount,
   const [source, setSource] = useState<'auto' | 'manual' | 'unavailable'>('auto');
   const [, startTransition] = useTransition();
 
-  // 币种或日期一变就重新拉汇率，除非用户已手动改过
+  // 币种或日期一变就重新拉汇率。这个 effect 只在 currency/occurredOn/orgSlug
+  // 变化时触发，所以每次触发都意味着：无论之前是自动填入还是用户手动改过，
+  // 那个值都是给旧的币种/日期配的，不能留在框里跟着新的一对一起提交。
+  // 因此这里不再按 source 是否为 'manual' 跳过，而是先无条件重置成
+  // 'auto' 并清空 rate，再为新的一对重新查询——不然「改成手动汇率后又切换
+  // 币种」会让旧数值原地变成新币种的手工汇率，静默记错账。
   useEffect(() => {
-    if (source === 'manual') return;
     if (!currency || !occurredOn) return;
+
+    setSource('auto');
+    setRate('');
 
     startTransition(async () => {
       const result = await lookupRate(orgSlug, currency, occurredOn);
