@@ -92,6 +92,7 @@ export const SEED_CATEGORIES: readonly SeedCategory[] = [
   { nameEn: 'Sales', nameZh: '销售收入', kind: 'income', accountCode: 'sales', sortOrder: 10 },
   { nameEn: 'Other Income', nameZh: '其他收入', kind: 'income', accountCode: 'other-income', sortOrder: 20 },
   { nameEn: 'Purchases', nameZh: '进货', kind: 'expense', accountCode: 'purchases', sortOrder: 105 },
+  { nameEn: 'Unsorted', nameZh: '待确认', kind: 'expense', accountCode: 'suspense', sortOrder: 103 },
   { nameEn: 'Rent', nameZh: '租金', kind: 'expense', accountCode: 'rent', sortOrder: 110 },
   { nameEn: 'Salaries', nameZh: '薪资', kind: 'expense', accountCode: 'salaries', sortOrder: 120 },
   { nameEn: 'Utilities', nameZh: '水电', kind: 'expense', accountCode: 'utilities', sortOrder: 130 },
