@@ -6,8 +6,14 @@ import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { RateField } from '@/components/transaction/rate-field';
 import { AttachmentPanel } from '@/components/transaction/attachment-panel';
-import { createTransaction, updateTransaction, voidTransaction } from '@/server/actions/transactions';
+import {
+  createJournal,
+  createTransaction,
+  updateTransaction,
+  voidTransaction,
+} from '@/server/actions/transactions';
 import { enqueueOfflineTransaction, isOnline, isRetriable } from '@/lib/offline-queue';
+import type { Scenario } from '@/server/domain/scenario';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null };
 
@@ -43,6 +49,19 @@ type Props = {
   mode?: 'create' | 'edit';
   initialData?: EditData;
   attachments?: Attachment[];
+  /** 场景卡片选中的场景（Task 14）。存在时表单按场景收窄字段。 */
+  scenario?: Scenario;
+  /**
+   * 场景预设的分类 id（如 buy-stock → 「进货」），由页面按
+   * scenario.defaultAccountCode 查出。scenario.needsCategory 为 false 且
+   * scenario.kind 不是 journal 时使用，此时不再渲染分类下拉。
+   */
+  presetCategoryId?: string;
+  /**
+   * 场景预设的科目 id（目前只有 not-sure → 悬置科目）。scenario.kind 为
+   * 'journal' 时使用：方向问题决定它落在借方还是贷方，绝不能预设方向。
+   */
+  presetAccountId?: string;
 };
 
 const KINDS = ['expense', 'income', 'transfer'] as const;
@@ -59,12 +78,22 @@ export function TransactionForm({
   mode = 'create',
   initialData,
   attachments = [],
+  scenario,
+  presetCategoryId,
+  presetAccountId,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
   const isEdit = mode === 'edit';
 
-  const [kind, setKind] = useState<Kind>(initialData?.kind ?? 'expense');
+  // not-sure is the only scenario with kind 'journal'. It doesn't fit the
+  // income/expense/transfer form at all — it posts through createJournal to
+  // a debit/credit pair, not through createTransaction with a category.
+  const isJournalScenario = scenario?.kind === 'journal';
+
+  const [kind, setKind] = useState<Kind>(
+    initialData?.kind ?? (scenario && scenario.kind !== 'journal' ? scenario.kind : 'expense'),
+  );
   const [currency, setCurrency] = useState(initialData?.currency ?? baseCurrency);
   const [occurredOn, setOccurredOn] = useState(
     () => initialData?.occurredOn ?? new Date().toISOString().slice(0, 10),
@@ -75,6 +104,10 @@ export function TransactionForm({
   const [savedOffline, setSavedOffline] = useState(false);
   const [voidDialog, setVoidDialog] = useState(false);
   const [voidReason, setVoidReason] = useState('');
+  // The not-sure direction question. Starts at null — never preset, never
+  // inferred. The suspense entry's debit/credit sides are derived from this
+  // and only this; see handleSubmit's isJournalScenario branch.
+  const [direction, setDirection] = useState<'in' | 'out' | null>(null);
 
   // 幂等键在表单整个生命周期内固定，重复提交不会产生重复账目
   const clientUuid = useMemo(() => crypto.randomUUID(), []);
@@ -90,6 +123,41 @@ export function TransactionForm({
     setPending(true);
     setError(null);
 
+    if (isJournalScenario) {
+      // Belt and suspenders on top of the disabled submit button and the
+      // native `required` radios below: this call cannot proceed without an
+      // explicit direction. There is no fallback value — a missing direction
+      // is a bug upstream, not something to paper over with a default.
+      if (direction === null || !presetAccountId) {
+        setError(t.scenario.directionRequired);
+        setPending(false);
+        return;
+      }
+
+      const moneyAccountId = String(formData.get('moneyAccountId') ?? '');
+      // Money in = debit the money account, credit suspense.
+      // Money out = debit suspense, credit the money account.
+      const debitAccountId = direction === 'in' ? moneyAccountId : presetAccountId;
+      const creditAccountId = direction === 'in' ? presetAccountId : moneyAccountId;
+
+      try {
+        await createJournal(orgSlug, {
+          occurredOn: String(formData.get('occurredOn') ?? ''),
+          amount: String(formData.get('amount') ?? ''),
+          currency: baseCurrency,
+          debitAccountId,
+          creditAccountId,
+          description: String(formData.get('description') ?? ''),
+        });
+        router.push(`/${orgSlug}/transactions`);
+      } catch (e) {
+        setError((e as Error)?.message ?? '');
+      } finally {
+        setPending(false);
+      }
+      return;
+    }
+
     const payload = {
       kind,
       occurredOn: String(formData.get('occurredOn') ?? ''),
@@ -99,7 +167,12 @@ export function TransactionForm({
       counterAccountId: formData.get('counterAccountId')
         ? String(formData.get('counterAccountId'))
         : undefined,
-      categoryId: formData.get('categoryId') ? String(formData.get('categoryId')) : undefined,
+      // A scenario with needsCategory=false (buy-stock) never renders the
+      // categoryId <select> below, so formData wouldn't carry one — fall
+      // back to the id the page resolved from the scenario's default account.
+      categoryId:
+        presetCategoryId ??
+        (formData.get('categoryId') ? String(formData.get('categoryId')) : undefined),
       description: String(formData.get('description') ?? ''),
       // RateField renders no exchangeRate field for domestic currency (see
       // components/transaction/rate-field.tsx) so createTransaction/updateTransaction
@@ -159,21 +232,23 @@ export function TransactionForm({
         </p>
       ) : null}
 
-      <fieldset>
-        <legend>{t.transaction.kind}</legend>
-        {KINDS.map((option) => (
-          <label key={option} className="kind-option">
-            <input
-              type="radio"
-              name="kind"
-              value={option}
-              checked={kind === option}
-              onChange={() => setKind(option)}
-            />
-            {kindLabels[option]}
-          </label>
-        ))}
-      </fieldset>
+      {!scenario ? (
+        <fieldset>
+          <legend>{t.transaction.kind}</legend>
+          {KINDS.map((option) => (
+            <label key={option} className="kind-option">
+              <input
+                type="radio"
+                name="kind"
+                value={option}
+                checked={kind === option}
+                onChange={() => setKind(option)}
+              />
+              {kindLabels[option]}
+            </label>
+          ))}
+        </fieldset>
+      ) : null}
 
       <label htmlFor="occurredOn">{t.transaction.date}</label>
       <input
@@ -195,28 +270,32 @@ export function TransactionForm({
         onChange={(event) => setAmount(event.target.value)}
       />
 
-      <label htmlFor="currency">{t.transaction.currency}</label>
-      <select
-        id="currency"
-        name="currency"
-        value={currency}
-        onChange={(event) => setCurrency(event.target.value)}
-      >
-        {currencies.map((code) => (
-          <option key={code} value={code}>
-            {code}
-          </option>
-        ))}
-      </select>
+      {!isJournalScenario ? (
+        <>
+          <label htmlFor="currency">{t.transaction.currency}</label>
+          <select
+            id="currency"
+            name="currency"
+            value={currency}
+            onChange={(event) => setCurrency(event.target.value)}
+          >
+            {currencies.map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
 
-      <RateField
-        orgSlug={orgSlug}
-        currency={currency}
-        baseCurrency={baseCurrency}
-        occurredOn={occurredOn}
-        amount={amount}
-        locale={locale}
-      />
+          <RateField
+            orgSlug={orgSlug}
+            currency={currency}
+            baseCurrency={baseCurrency}
+            occurredOn={occurredOn}
+            amount={amount}
+            locale={locale}
+          />
+        </>
+      ) : null}
 
       <label htmlFor="moneyAccountId">
         {kind === 'transfer' ? t.transaction.destinationAccount : t.transaction.chooseMoneyAccount}
@@ -232,7 +311,38 @@ export function TransactionForm({
         ))}
       </select>
 
-      {kind === 'transfer' ? (
+      {isJournalScenario ? (
+        // not-sure: the only thing left to ask is which way the money moved.
+        // Both radios start unchecked (direction === null) — no default,
+        // no inference. required on both means the browser itself won't
+        // submit until one is picked, on top of the disabled submit button
+        // and the handleSubmit guard above.
+        <fieldset>
+          <legend>{t.scenario.directionQuestion}</legend>
+          <label className="direction-option">
+            <input
+              type="radio"
+              name="direction"
+              value="in"
+              required
+              checked={direction === 'in'}
+              onChange={() => setDirection('in')}
+            />
+            {t.scenario.directionIn}
+          </label>
+          <label className="direction-option">
+            <input
+              type="radio"
+              name="direction"
+              value="out"
+              required
+              checked={direction === 'out'}
+              onChange={() => setDirection('out')}
+            />
+            {t.scenario.directionOut}
+          </label>
+        </fieldset>
+      ) : kind === 'transfer' ? (
         <>
           <label htmlFor="counterAccountId">{t.transaction.moneyAccount}</label>
           <select id="counterAccountId" name="counterAccountId" required defaultValue={initialData?.counterAccountId ?? ''}>
@@ -246,7 +356,7 @@ export function TransactionForm({
             ))}
           </select>
         </>
-      ) : (
+      ) : scenario && !scenario.needsCategory ? null : (
         <>
           <label htmlFor="categoryId">{t.transaction.chooseCategory}</label>
           <select id="categoryId" name="categoryId" required defaultValue={initialData?.categoryId ?? ''}>
@@ -272,7 +382,10 @@ export function TransactionForm({
       ) : null}
 
       <div className="form-actions">
-        <button type="submit" disabled={pending || savedOffline}>
+        <button
+          type="submit"
+          disabled={pending || savedOffline || (isJournalScenario && direction === null)}
+        >
           {pending ? t.common.loading : isEdit ? t.transaction.save : t.transaction.save}
         </button>
 

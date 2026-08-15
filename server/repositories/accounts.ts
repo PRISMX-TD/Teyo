@@ -50,6 +50,25 @@ export async function findAccount(
   return row ? mapAccount(row) : null;
 }
 
+/**
+ * 按 code 取科目，供场景卡片解析预置科目（如「进货」「待确认」）——
+ * 场景定义（server/domain/scenario.ts）只携带稳定的 code，不携带随公司
+ * 而异的 id，必须在这里按公司维度查回真正的 id。
+ */
+export async function findAccountByCode(
+  tx: Tx,
+  organizationId: string,
+  code: string,
+): Promise<AccountRow | null> {
+  const rows = await tx`
+    select id, code, name_en, name_zh, type, is_money_account, is_active
+    from accounts
+    where organization_id = ${organizationId} and code = ${code}
+  `;
+  const row = rows.at(0);
+  return row ? mapAccount(row) : null;
+}
+
 /** 按 id 取科目，取不到就抛错。改名与停用都要先读旧值写审计，故单列一个。 */
 export async function getAccount(
   tx: Tx,

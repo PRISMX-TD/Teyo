@@ -527,6 +527,42 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .void-dialog input { width: 100%; margin-bottom: var(--space-4); }
 .void-dialog-actions { display: flex; gap: var(--space-3); justify-content: flex-end; }
 
+/* not-sure's direction question: same visual language as .kind-option (an
+   accessible radio group styled as a segmented control), but its own class
+   since it is not a kind — journal isn't a member of the Kind union at all.
+   min-height is 44px unconditionally (kind-option's is 42px) to meet the
+   mobile touch-target floor without relying on the global button override,
+   which does not reach plain <label> elements. */
+.direction-option {
+  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
+  min-height: 44px; margin: 0; padding: var(--space-2) var(--space-4);
+  font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary);
+  background: var(--bg-elevated); border: 1px solid var(--border-input); cursor: pointer;
+  border-radius: var(--radius-sm);
+  transition: all var(--dur-fast) var(--ease);
+}
+.direction-option input[type='radio'] { position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; }
+.direction-option:hover { border-color: var(--border-secondary); color: var(--text-primary); }
+.direction-option:has(input:focus-visible) { outline: 2px solid var(--accent); outline-offset: 2px; z-index: 1; }
+.direction-option:has(input:checked) { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 550; }
+
+.transaction-form fieldset:has(.direction-option) { display: flex; flex-direction: column; gap: var(--space-2); }
+@media (min-width: 480px) {
+  .transaction-form fieldset:has(.direction-option) { flex-direction: row; }
+  .direction-option { flex: 1; }
+}
+
+/* ==========================================================================
+   Scenario Picker
+   ========================================================================== */
+
+.scenario-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: var(--space-4); margin-top: var(--space-5); }
+.scenario-card { display: flex; flex-direction: column; gap: var(--space-2); min-height: 96px; padding: var(--space-5); background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: var(--radius-md); color: var(--text-primary); transition: border-color var(--dur-fast) var(--ease); }
+.scenario-card:hover { border-color: var(--accent); text-decoration: none; }
+.scenario-card strong { font-size: var(--text-lg); font-weight: 600; }
+.scenario-card span { font-size: var(--text-sm); color: var(--text-secondary); }
+.scenario-card.scenario-secondary { background: transparent; border-style: dashed; }
+
 /* ==========================================================================
    Filters
    ========================================================================== */
