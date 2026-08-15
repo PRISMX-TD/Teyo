@@ -47,6 +47,10 @@ export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount,
   }
 
   const converted = (() => {
+    // Number('') is 0, not NaN -- without this guard, clearing the rate in the
+    // 'unavailable' state would render "Equals 0.00 MYR" directly under the
+    // message asking the user for a rate.
+    if (rate === '') return null;
     const parsedAmount = Number(amount.replace(/,/g, ''));
     const parsedRate = Number(rate);
     if (!Number.isFinite(parsedAmount) || !Number.isFinite(parsedRate)) return null;
@@ -56,17 +60,33 @@ export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount,
   return (
     <div className="rate-field">
       <label htmlFor="exchangeRate">{t.transaction.exchangeRate}</label>
-      <input
-        id="exchangeRate"
-        name="exchangeRate"
-        inputMode="decimal"
-        value={rate}
-        required
-        onChange={(event) => {
-          setRate(event.target.value);
-          setSource('manual');
-        }}
-      />
+      {source === 'auto' ? (
+        <div className="rate-field__row">
+          {/* Auto-fetched rate is shown but not submitted: no `name` attribute
+              means the server takes the currency !== baseCurrency cache-lookup
+              branch itself and stamps rate_source='auto'. Submitting this value
+              as `exchangeRate` would make resolveRate treat it as a manual entry
+              -- the same bug that made rate_source='manual' unconditional. */}
+          <p id="exchangeRate" className="rate-field__value" aria-live="polite">
+            {rate || '…'}
+          </p>
+          <button type="button" className="btn-small" onClick={() => setSource('manual')}>
+            {t.transaction.useOtherRate}
+          </button>
+        </div>
+      ) : (
+        <input
+          id="exchangeRate"
+          name="exchangeRate"
+          inputMode="decimal"
+          value={rate}
+          required
+          onChange={(event) => {
+            setRate(event.target.value);
+            setSource('manual');
+          }}
+        />
+      )}
       <p className="field-hint" role="status">
         {source === 'auto' ? t.transaction.rateAutoFilled : null}
         {source === 'manual' ? t.transaction.rateManual : null}
