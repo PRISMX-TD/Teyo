@@ -449,6 +449,8 @@ export type LedgerResult = {
   lines: LedgerLine[];
   openingBalance: bigint;
   closingBalance: bigint;
+  /** 期间内符合条件的分录总数（不受 limit/offset 影响），用于让调用方判断 lines 是否被截断。 */
+  total: number;
 };
 
 /** 总账单页行数上限。limit 来自用户输入，无上界即为 30 秒函数超时下最先失败的报表。 */
@@ -457,10 +459,13 @@ export const GENERAL_LEDGER_PAGE_MAX = 500;
 /**
  * 单科目的总账——按日期的分录列表 + 递进余额。
  *
- * 期间分录按 limit/offset 分页；未传 options 时取默认页（上限 500 行），
- * 与之前无上限的行为不同——超过一页的账户，closingBalance 只反映已取回
- * 的那部分行，不再是整个期间的真实期末余额（调用方目前都不传 options，
- * 见 general-ledger/page.tsx，尚未处理这种截断）。
+ * 期间分录（lines）按 limit/offset 分页；未传 options 时取默认页（上限 500 行）。
+ * closingBalance 和 total 都由独立的、不受 limit/offset 影响的聚合查询算出
+ * （与 openingBalance 同样的写法），所以即使 lines 被截断，closingBalance
+ * 依然是整个期间的真实期末余额，不会把「已取回部分的余额」冒充成期末余额。
+ * 调用方可以用 `total > lines.length` 判断本页是否发生了截断
+ * （目前唯一的调用方 general-ledger/page.tsx 不传 options，尚未处理这一信号，
+ * 由 general-ledger-view.tsx 负责把截断展示给用户）。
  */
 export async function getGeneralLedger(
   tx: Tx,
@@ -527,6 +532,29 @@ export async function getGeneralLedger(
     offset ${offset}
   `;
 
+  // 期间发生额合计 + 行数——同一个 where 谓词（account_id / organization_id /
+  // voided_at / occurred_on 区间）与上面的 lineRows 完全一致，但不带
+  // limit/offset，这样 closingBalance 和 total 都不受分页影响。
+  const periodRows = await tx`
+    select
+      coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                        else -l.base_amount_minor end), 0) as net,
+      count(*) as total
+    from journal_lines l
+    join transactions t on t.id = l.transaction_id
+    where l.account_id = ${accountId}
+      and l.organization_id = ${organizationId}
+      and t.voided_at is null
+      and t.occurred_on >= ${from}::date
+      and t.occurred_on < ${to}::date
+  `;
+  let periodNet = BigInt(periodRows[0].net as string);
+  const total = Number(periodRows[0].total as string);
+  if (acctType === 'liability' || acctType === 'equity' || acctType === 'revenue') {
+    periodNet = -periodNet;
+  }
+  const closingBalance = openingBalance + periodNet;
+
   const lines: LedgerLine[] = [];
   let runningBalance = openingBalance;
 
@@ -558,6 +586,7 @@ export async function getGeneralLedger(
     accountNameZh: (account.name_zh as string | null) ?? null,
     lines,
     openingBalance,
-    closingBalance: runningBalance,
+    closingBalance,
+    total,
   };
 }

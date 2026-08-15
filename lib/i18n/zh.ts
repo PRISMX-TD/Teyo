@@ -307,6 +307,7 @@ const zh: Translated<typeof en> = {
     openingBalance: '期初余额',
     closingBalance: '期末余额',
     empty: '该科目在所选期间内无交易。',
+    truncated: '共 {total} 笔，仅显示前 {shown} 笔。请缩短日期范围查看其余记录。',
   },
   invoices: {
     title: '发票',

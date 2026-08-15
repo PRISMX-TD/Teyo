@@ -296,6 +296,7 @@ const en = {
     openingBalance: 'Opening Balance',
     closingBalance: 'Closing Balance',
     empty: 'No transactions for this account in the selected period.',
+    truncated: 'Showing first {shown} of {total} entries. Narrow the date range to see the rest.',
   },
   invoices: {
     title: 'Invoices',

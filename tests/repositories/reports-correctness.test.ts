@@ -324,6 +324,46 @@ describe('getGeneralLedger - bounded reads', () => {
     expect(result.lines.length).toBe(2);
   });
 
+  it('keeps closingBalance and total correct when lines are truncated (regression pin)', async () => {
+    // 钉住之前的严重缺陷：closingBalance 曾经是对被截断的 lineRows 做递进求和，
+    // 行序是从早到晚，截断永远丢的是最新的交易——于是「期末余额」实际上是
+    // 期中某一笔的余额，被当作期末余额展示。closingBalance 现在必须来自一个
+    // 不带 limit/offset 的独立聚合查询，因此不管 lines 截不截断都必须是真实
+    // 期末余额；total 必须是期间内的真实行数（不受 limit/offset 影响）。
+    const glAssetId = await createScratchAccount('gl-trunc-asset', 'asset');
+    const glCounterId = await createScratchAccount('gl-trunc-counter', 'expense');
+
+    // 4 笔都是借记该资产科目，金额互不相同，方便算出确切的期末余额。
+    const amounts = [1000n, 2000n, 3000n, 4000n];
+    for (let i = 0; i < amounts.length; i++) {
+      await insertBalancedTransaction({
+        occurredOn: `2026-06-0${i + 1}`,
+        amountMinor: amounts[i],
+        debitAccountId: glAssetId,
+        creditAccountId: glCounterId,
+      });
+    }
+    const trueClosingBalance = amounts.reduce((sum, a) => sum + a, 0n); // 10000n
+
+    const truncated = await withTransaction(userId, (tx) =>
+      getGeneralLedger(tx, orgId, glAssetId, '2026-01-01', '2026-12-31', { limit: 2 }),
+    );
+
+    expect(truncated.lines.length).toBe(2);
+    expect(truncated.total).toBe(4);
+    // 如果 closingBalance 还是从截断后的 lines 递进求和算出来的，这里会是
+    // 1000n + 2000n = 3000n（只到第 2 笔），而不是完整期间的 10000n。
+    expect(truncated.closingBalance).toBe(trueClosingBalance);
+
+    // 不截断时应给出同一个 closingBalance，交叉验证聚合查询本身没有算错。
+    const full = await withTransaction(userId, (tx) =>
+      getGeneralLedger(tx, orgId, glAssetId, '2026-01-01', '2026-12-31'),
+    );
+    expect(full.lines.length).toBe(4);
+    expect(full.total).toBe(4);
+    expect(full.closingBalance).toBe(trueClosingBalance);
+  });
+
   it('rejects a limit above the page maximum', async () => {
     await expect(
       withTransaction(userId, (tx) =>
@@ -334,10 +374,38 @@ describe('getGeneralLedger - bounded reads', () => {
     ).rejects.toThrow();
   });
 
-  it('defaults to the page maximum when no limit is given', async () => {
-    const result = await withTransaction(userId, (tx) =>
-      getGeneralLedger(tx, orgId, cashId, '2026-01-01', '2026-12-31'),
+  it('applies GENERAL_LEDGER_PAGE_MAX as the default limit', async () => {
+    // cashId 在整个文件里都凑不够 500 行，所以 "<= GENERAL_LEDGER_PAGE_MAX"
+    // 这种断言即使默认值被改错成一个小得多的数字也照样会通过。改用独立科目，
+    // 插入一个明显大于「不小心传错默认值」这类缺陷会露馅的行数（10 行），
+    // 断言不传 options 时一行不少地全部拿到，并且与显式传
+    // { limit: GENERAL_LEDGER_PAGE_MAX } 的结果完全一致——直接证明默认值
+    // 确实被当成 limit 传下去了，而不是巧合地没有更多数据可截断。
+    const glAssetId = await createScratchAccount('gl-default-asset', 'asset');
+    const glCounterId = await createScratchAccount('gl-default-counter', 'expense');
+
+    const rowCount = 10;
+    for (let i = 0; i < rowCount; i++) {
+      await insertBalancedTransaction({
+        occurredOn: `2026-07-${String(i + 1).padStart(2, '0')}`,
+        amountMinor: 100n,
+        debitAccountId: glAssetId,
+        creditAccountId: glCounterId,
+      });
+    }
+
+    const defaulted = await withTransaction(userId, (tx) =>
+      getGeneralLedger(tx, orgId, glAssetId, '2026-01-01', '2026-12-31'),
     );
-    expect(result.lines.length).toBeLessThanOrEqual(GENERAL_LEDGER_PAGE_MAX);
+    const explicitMax = await withTransaction(userId, (tx) =>
+      getGeneralLedger(tx, orgId, glAssetId, '2026-01-01', '2026-12-31', {
+        limit: GENERAL_LEDGER_PAGE_MAX,
+      }),
+    );
+
+    expect(defaulted.total).toBe(rowCount);
+    expect(defaulted.lines.length).toBe(rowCount);
+    expect(defaulted.lines.length).toBe(explicitMax.lines.length);
+    expect(defaulted.closingBalance).toBe(explicitMax.closingBalance);
   });
 });

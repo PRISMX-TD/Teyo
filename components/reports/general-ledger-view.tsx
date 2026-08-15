@@ -2,7 +2,7 @@
 
 import { useRouter } from 'next/navigation';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName } from '@/lib/i18n';
+import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { LedgerResult } from '@/server/repositories/reports';
 
@@ -92,6 +92,14 @@ export function GeneralLedgerView({
           <p>
             {t.generalLedger.openingBalance}: {formatMoney(ledger.openingBalance, baseCurrency, locale)}
           </p>
+          {ledger.total > ledger.lines.length ? (
+            <p className="hint">
+              {interpolate(t.generalLedger.truncated, {
+                shown: ledger.lines.length,
+                total: ledger.total,
+              })}
+            </p>
+          ) : null}
           <table className="report-table">
             <thead>
               <tr>
