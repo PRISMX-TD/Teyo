@@ -107,6 +107,7 @@ const zh: Translated<typeof en> = {
     category: '分类',
     moneyAccount: '从哪个账户收付',
     destinationAccount: '转入账户',
+    sourceAccount: '从哪个账户转出',
     description: '备注',
     receipt: '收据',
     exchangeRate: '汇率',

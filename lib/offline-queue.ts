@@ -4,7 +4,7 @@ const DB_NAME = 'teyo-offline';
 const DB_VERSION = 1;
 const STORE = 'pending-transactions';
 
-export type QueuedPayload = {
+export type QueuedTransactionPayload = {
   kind: 'income' | 'expense' | 'transfer';
   occurredOn: string;
   amount: string;
@@ -18,6 +18,24 @@ export type QueuedPayload = {
   rateSource?: 'auto' | 'manual';
   clientUuid: string;
 };
+
+/**
+ * "不确定" 场景走 createJournal，不是 createTransaction：借贷两个科目，
+ * 不带分类、不带资金账户/对方账户的区分。离线时它和其余三种场景享有
+ * 同一个队列与同一套幂等保护，不应该是唯一一个悄悄丢单的入口。
+ */
+export type QueuedJournalPayload = {
+  kind: 'journal';
+  occurredOn: string;
+  amount: string;
+  currency?: string;
+  debitAccountId: string;
+  creditAccountId: string;
+  description: string;
+  clientUuid: string;
+};
+
+export type QueuedPayload = QueuedTransactionPayload | QueuedJournalPayload;
 
 export type QueuedTransaction = {
   clientUuid: string;

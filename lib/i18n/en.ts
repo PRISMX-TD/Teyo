@@ -94,6 +94,7 @@ const en = {
     category: 'Category',
     moneyAccount: 'Paid from / into',
     destinationAccount: 'Transfer into',
+    sourceAccount: 'Transfer out of',
     description: 'Note',
     receipt: 'Receipt',
     exchangeRate: 'Exchange rate',

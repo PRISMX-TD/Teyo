@@ -157,18 +157,36 @@ export function TransactionForm({
       const debitAccountId = direction === 'in' ? moneyAccountId : presetAccountId;
       const creditAccountId = direction === 'in' ? presetAccountId : moneyAccountId;
 
+      const journalPayload = {
+        kind: 'journal' as const,
+        occurredOn: String(formData.get('occurredOn') ?? ''),
+        amount: String(formData.get('amount') ?? ''),
+        currency: baseCurrency,
+        debitAccountId,
+        creditAccountId,
+        description: String(formData.get('description') ?? ''),
+        // Same clientUuid the form was created with — fixed for its lifetime,
+        // so a replay from the offline queue or a double-tap after a lost
+        // response dedupes on the server instead of posting twice.
+        clientUuid,
+      };
+
       try {
-        await createJournal(orgSlug, {
-          occurredOn: String(formData.get('occurredOn') ?? ''),
-          amount: String(formData.get('amount') ?? ''),
-          currency: baseCurrency,
-          debitAccountId,
-          creditAccountId,
-          description: String(formData.get('description') ?? ''),
-        });
+        await createJournal(orgSlug, journalPayload);
         router.push(`/${orgSlug}/transactions`);
       } catch (e) {
-        setError((e as Error)?.message ?? '');
+        const message = (e as Error)?.message ?? '';
+        const isNetwork = !isOnline() || isRetriable(e);
+
+        if (isNetwork) {
+          // Same offline safety net as every other scenario card gets below —
+          // this branch used to return before ever reaching it, so a lost
+          // response here meant a silently dropped entry instead of a queued one.
+          await enqueueOfflineTransaction(orgSlug, journalPayload);
+          setSavedOffline(true);
+          return;
+        }
+        setError(message);
       } finally {
         setPending(false);
       }
@@ -367,7 +385,14 @@ export function TransactionForm({
         </fieldset>
       ) : kind === 'transfer' ? (
         <>
-          <label htmlFor="counterAccountId">{t.transaction.moneyAccount}</label>
+          {/* counterAccountId is the transfer's source — buildJournalLines
+              credits it (see server/domain/ledger.ts). moneyAccountId above
+              is the destination ("Transfer into"). Sharing the generic
+              moneyAccount label here made both fields read as destinations
+              top to bottom, and a reversed source/destination entry still
+              balances and still leaves the dashboard's total unchanged, so
+              nothing on screen would look wrong. */}
+          <label htmlFor="counterAccountId">{t.transaction.sourceAccount}</label>
           <select id="counterAccountId" name="counterAccountId" required defaultValue={initialData?.counterAccountId ?? ''}>
             <option value="" disabled>
               {t.transaction.choosePlaceholder}

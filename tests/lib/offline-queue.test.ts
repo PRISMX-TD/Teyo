@@ -22,6 +22,24 @@ function payload(overrides: Record<string, unknown> = {}) {
   };
 }
 
+// The "not sure" scenario posts through createJournal, not createTransaction:
+// no moneyAccountId/categoryId, a debit/credit pair instead. It needs the
+// same offline safety net as the other three kinds — this shape is what
+// lets it actually fit in the queue.
+function journalPayload(overrides: Record<string, unknown> = {}) {
+  return {
+    kind: 'journal' as const,
+    occurredOn: '2026-08-01',
+    amount: '150.00',
+    currency: 'MYR',
+    debitAccountId: '00000000-0000-4000-8000-000000000003',
+    creditAccountId: '00000000-0000-4000-8000-000000000004',
+    description: 'Offline unsorted deposit',
+    clientUuid: crypto.randomUUID(),
+    ...overrides,
+  };
+}
+
 beforeEach(async () => {
   for (const item of await listQueuedTransactions()) {
     await removeQueuedTransaction(item.clientUuid);
@@ -131,5 +149,49 @@ describe('flushQueue', () => {
     const submit = vi.fn();
     expect(await flushQueue(submit)).toEqual({ sent: 0, dropped: 0, retrying: 0 });
     expect(submit).not.toHaveBeenCalled();
+  });
+});
+
+describe('journal payloads (the "not sure" scenario)', () => {
+  it('can be queued and read back with their debit/credit shape intact', async () => {
+    const data = journalPayload();
+    await enqueueOfflineTransaction('acme', data);
+
+    const queued = await listQueuedTransactions();
+    expect(queued).toHaveLength(1);
+    expect(queued[0].payload).toMatchObject({
+      kind: 'journal',
+      debitAccountId: data.debitAccountId,
+      creditAccountId: data.creditAccountId,
+    });
+    // Never had a money/category split to begin with — confirms this isn't
+    // a transaction payload wearing a 'journal' kind.
+    expect(queued[0].payload).not.toHaveProperty('moneyAccountId');
+    expect(queued[0].payload).not.toHaveProperty('categoryId');
+  });
+
+  it('flushes alongside ordinary transaction payloads in one queue', async () => {
+    await enqueueOfflineTransaction('acme', payload({ description: 'Expense' }));
+    await enqueueOfflineTransaction('acme', journalPayload({ description: 'Journal' }));
+
+    const submit = vi.fn().mockResolvedValue({ id: 'x', deduplicated: false });
+    const result = await flushQueue(submit);
+
+    expect(result).toEqual({ sent: 2, dropped: 0, retrying: 0 });
+    expect(submit).toHaveBeenCalledWith('acme', expect.objectContaining({ kind: 'expense' }));
+    expect(submit).toHaveBeenCalledWith('acme', expect.objectContaining({ kind: 'journal' }));
+  });
+
+  it('dedupes a replayed journal entry on its clientUuid like any other kind', async () => {
+    const data = journalPayload();
+    await enqueueOfflineTransaction('acme', data);
+
+    const submit = vi.fn().mockResolvedValue({ id: 'x', deduplicated: true });
+    await flushQueue(submit);
+
+    expect(submit).toHaveBeenCalledWith(
+      'acme',
+      expect.objectContaining({ clientUuid: data.clientUuid }),
+    );
   });
 });

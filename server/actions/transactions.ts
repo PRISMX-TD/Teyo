@@ -216,6 +216,7 @@ export type CreateJournalInput = {
   debitAccountId: string;
   creditAccountId: string;
   description?: string;
+  clientUuid: string;
 };
 
 /**
@@ -235,7 +236,7 @@ export async function createJournal(
   const context = await requirePermission(orgSlug, 'transaction:create');
   assertPeriodOpen(input.occurredOn, context.lockedUntil);
 
-  const clientUuid = crypto.randomUUID();
+  const clientUuid = input.clientUuid;
   const baseCurrency = context.baseCurrency;
 
   const result = await withTransaction(context.userId, async (tx) => {

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
@@ -35,6 +35,10 @@ export function JournalForm({ orgSlug, baseCurrency, locale, accounts }: Props) 
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  // 幂等键在表单整个生命周期内固定，重复提交不会产生重复账目——与
+  // transaction-form.tsx 的 clientUuid 同一道理。
+  const clientUuid = useMemo(() => crypto.randomUUID(), []);
+
   async function handleSubmit(event: React.FormEvent) {
     event.preventDefault();
     setPending(true);
@@ -48,6 +52,7 @@ export function JournalForm({ orgSlug, baseCurrency, locale, accounts }: Props) 
         debitAccountId,
         creditAccountId,
         description,
+        clientUuid,
       });
       router.push(`/${orgSlug}/transactions`);
     } catch (e) {
