@@ -1,4 +1,4 @@
-import { convertToBaseMinor } from './exchange-rate';
+import { RATE_SCALE, convertToBaseMinor, type RateSource } from './exchange-rate';
 import { sumMinor } from './money';
 
 export class LedgerError extends Error {
@@ -89,5 +89,52 @@ export function assertBalanced(lines: DraftJournalLine[]): void {
   }
   if (pick('debit', 'baseAmountMinor') !== pick('credit', 'baseAmountMinor')) {
     throw new LedgerError('Journal lines are not balanced in base currency.');
+  }
+}
+
+export type LineInvariantContext = {
+  currency: string;
+  baseCurrency: string;
+  scaledRate: bigint;
+  rateSource: RateSource;
+};
+
+/**
+ * 行级不变量。数据库的配平触发器只比较借贷两边的合计，
+ * 两边错得一样多可以通过，因此必须在行级另行断言。
+ *
+ * I3：每行的 baseAmountMinor 必须与所记汇率自洽。
+ * I4：外币交易的汇率不得恰好为 1，除非用户手工输入了 1。
+ *
+ * I4 检查的是汇率本身而不是两个金额是否相等：小数位不同的币种对
+ * （JPY 到 MYR、汇率 0.01）转换后可以合法地得到相同的数值。
+ */
+export function assertLineInvariants(
+  lines: DraftJournalLine[],
+  ctx: LineInvariantContext,
+): void {
+  const { currency, baseCurrency, scaledRate, rateSource } = ctx;
+
+  if (currency !== baseCurrency && scaledRate === RATE_SCALE && rateSource !== 'manual') {
+    throw new LedgerError(
+      `Refusing to record ${currency} against base ${baseCurrency} at an automatic rate of exactly 1. ` +
+        'Resolve a real rate or record the rate as manual.',
+    );
+  }
+
+  for (const line of lines) {
+    const expected = convertToBaseMinor({
+      amountMinor: line.amountMinor,
+      currency,
+      baseCurrency,
+      scaledRate,
+    });
+
+    if (line.baseAmountMinor !== expected) {
+      throw new LedgerError(
+        `Journal line on account ${line.accountId} records base amount ${line.baseAmountMinor}, ` +
+          `but ${line.amountMinor} ${currency} at the recorded rate converts to ${expected} ${baseCurrency}.`,
+      );
+    }
   }
 }
