@@ -62,6 +62,8 @@ const zh: Translated<typeof en> = {
     inventory: '库存',
     purchaseOrders: '采购订单',
     projects: '项目',
+    toggleTheme: '切换深浅色',
+    primaryNavigation: '主导航',
   },
   overview: {
     title: '概览',

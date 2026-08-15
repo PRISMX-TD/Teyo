@@ -1043,6 +1043,10 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
     min-height: 44px; min-width: 44px; padding: var(--space-1) var(--space-2);
     font-size: var(--text-2xs); color: var(--text-secondary);
     background: none; border: none; border-radius: var(--radius-sm);
+    /* 显式 min-width 会顶掉 flex item 默认的 min-content 下限，窄屏下
+       "Transactions" 这类不可断行的单词会挤出盒子、糊到相邻按钮上；
+       裁切成省略号比让文字互相打架要体面。 */
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
   .floating-dock a.active { color: var(--accent); font-weight: 600; }
   .floating-dock .topbar-cta {

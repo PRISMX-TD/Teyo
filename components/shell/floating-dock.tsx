@@ -22,7 +22,7 @@ export function FloatingDock({ orgSlug, i18n }: Props) {
   const { theme, toggle } = useTheme();
 
   return (
-    <nav className="floating-dock">
+    <nav className="floating-dock" aria-label={i18n.nav.primaryNavigation}>
       {NAV_ITEMS.map((item) => {
         const href = item.href(orgSlug);
         const isActive =
@@ -49,7 +49,12 @@ export function FloatingDock({ orgSlug, i18n }: Props) {
 
       <span className="floating-dock-separator" />
 
-      <button type="button" className="dock-theme-btn" onClick={toggle}>
+      <button
+        type="button"
+        className="dock-theme-btn"
+        onClick={toggle}
+        aria-label={i18n.nav.toggleTheme}
+      >
         {theme === 'dark' ? '☀' : '☾'}
       </button>
 

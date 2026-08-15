@@ -49,6 +49,8 @@ const en = {
     tax: 'Tax',
     switchCompany: 'Switch company',
     account: 'My account',
+    toggleTheme: 'Toggle theme',
+    primaryNavigation: 'Primary navigation',
   },
   overview: {
     title: 'Overview',
