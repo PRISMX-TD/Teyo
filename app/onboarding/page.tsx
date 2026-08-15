@@ -1,7 +1,7 @@
 import { redirect } from 'next/navigation';
 import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
-import { listUserOrganizations } from '@/server/repositories/organizations';
+import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 import { createOrganization } from '@/server/actions/organizations';
 
 export default async function OnboardingPage() {
@@ -13,7 +13,8 @@ export default async function OnboardingPage() {
     redirect(`/${existingOrgs[0].slug}`);
   }
 
-  const t = getMessages('en');
+  const locale = (await getUserLocale(userId)) as 'en' | 'zh';
+  const t = getMessages(locale);
 
   return (
     <main className="onboarding-page">

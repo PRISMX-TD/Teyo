@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
-import { listUserOrganizations } from '@/server/repositories/organizations';
+import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 
 /** 有公司就跳第一家公司，没有就跳 /onboarding，只有一家则展示链接。 */
 export default async function HomePage() {
@@ -17,7 +17,8 @@ export default async function HomePage() {
     redirect(`/${orgs[0].slug}`);
   }
 
-  const t = getMessages('en');
+  const locale = (await getUserLocale(userId)) as 'en' | 'zh';
+  const t = getMessages(locale);
 
   return (
     <main className="landing">
