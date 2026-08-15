@@ -13,7 +13,8 @@ export type QueuedPayload = {
   counterAccountId?: string;
   categoryId?: string;
   description: string;
-  exchangeRate: string;
+  // 本币交易不带汇率字段（见 rate-field.tsx），留空让服务端按 source 'auto' 处理。
+  exchangeRate?: string;
   rateSource?: 'auto' | 'manual';
   clientUuid: string;
 };
@@ -74,7 +75,7 @@ export async function removeQueuedTransaction(clientUuid: string): Promise<void>
  * 校验类错误（期间锁定、分类不匹配等）无论重试多少次都不会成功，必须出队，
  * 否则队列会被一条坏记录永久堵住。
  */
-function isRetriable(error: unknown): boolean {
+export function isRetriable(error: unknown): boolean {
   if (error instanceof TypeError) return true;
   const message = (error as Error)?.message ?? '';
   return /network|fetch|timeout|econnreset|503|502/i.test(message);

@@ -103,6 +103,7 @@ const zh: Translated<typeof en> = {
     createdBy: '记录人',
     save: '保存',
     saved: '已保存。',
+    savedOffline: '已存在这台设备上，联网后会自动同步。',
     void: '作废这笔记录',
     voidReason: '作废原因',
     voided: '已作废',

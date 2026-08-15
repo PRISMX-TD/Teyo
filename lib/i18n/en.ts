@@ -90,6 +90,7 @@ const en = {
     createdBy: 'Added by',
     save: 'Save',
     saved: 'Saved.',
+    savedOffline: 'Saved on this device. It will sync when you are back online.',
     void: 'Void this record',
     voidReason: 'Why are you voiding it?',
     voided: 'Voided',

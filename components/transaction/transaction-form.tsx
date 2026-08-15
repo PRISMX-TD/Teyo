@@ -7,6 +7,7 @@ import { getMessages, localizedName } from '@/lib/i18n';
 import { RateField } from '@/components/transaction/rate-field';
 import { AttachmentPanel } from '@/components/transaction/attachment-panel';
 import { createTransaction, updateTransaction, voidTransaction } from '@/server/actions/transactions';
+import { enqueueOfflineTransaction, isOnline, isRetriable } from '@/lib/offline-queue';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null };
 
@@ -71,6 +72,7 @@ export function TransactionForm({
   const [amount, setAmount] = useState(initialData?.amount ?? '');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  const [savedOffline, setSavedOffline] = useState(false);
   const [voidDialog, setVoidDialog] = useState(false);
   const [voidReason, setVoidReason] = useState('');
 
@@ -116,7 +118,18 @@ export function TransactionForm({
       }
       router.push(`/${orgSlug}/transactions`);
     } catch (e) {
-      setError((e as Error).message);
+      const message = (e as Error)?.message ?? '';
+      const isNetwork = !isOnline() || isRetriable(e);
+
+      if (isNetwork && !isEdit) {
+        // clientUuid is fixed for the lifetime of this form instance and the
+        // server dedupes on it, so replaying this entry from the queue is safe.
+        // Offline is create-only: editing needs conflict-merge UI, deferred per spec.
+        await enqueueOfflineTransaction(orgSlug, payload);
+        setSavedOffline(true);
+        return;
+      }
+      setError(message);
     } finally {
       setPending(false);
     }
@@ -140,6 +153,12 @@ export function TransactionForm({
   return (
     <>
     <form action={handleSubmit} className="transaction-form">
+      {savedOffline ? (
+        <p role="status" className="form-success">
+          {t.transaction.savedOffline}
+        </p>
+      ) : null}
+
       <fieldset>
         <legend>{t.transaction.kind}</legend>
         {KINDS.map((option) => (
@@ -253,7 +272,7 @@ export function TransactionForm({
       ) : null}
 
       <div className="form-actions">
-        <button type="submit" disabled={pending}>
+        <button type="submit" disabled={pending || savedOffline}>
           {pending ? t.common.loading : isEdit ? t.transaction.save : t.transaction.save}
         </button>
 
