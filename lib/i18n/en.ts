@@ -95,6 +95,7 @@ const en = {
     editTitle: 'Edit record',
     listTitle: 'Transactions',
     empty: 'Nothing matches these filters.',
+    pagination: 'Pagination',
   },
   filters: {
     from: 'From',
@@ -574,6 +575,9 @@ const en = {
     loading: 'Loading',
     offline: 'Offline',
     pendingSync: '{count} record(s) waiting to sync',
+    previous: 'Previous',
+    next: 'Next',
+    pageN: 'Page {page}',
   },
   bankImport: {
     title: 'Bank Import',

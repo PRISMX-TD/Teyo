@@ -1,7 +1,7 @@
 import { TransactionFilters } from '@/components/transaction/transaction-filters';
 import { TransactionTable } from '@/components/transaction/transaction-table';
 import Link from 'next/link';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
@@ -36,15 +36,31 @@ export default async function TransactionsListPage({
     includeVoided: raw.includeVoided === 'true',
   };
 
+  const PAGE_SIZE = 50;
+  const pageParam = Number(raw.page ?? '1');
+  const page = Number.isFinite(pageParam) && pageParam >= 1 ? Math.floor(pageParam) : 1;
+  const offset = (page - 1) * PAGE_SIZE;
+
+  // 保留除 page 以外的全部查询参数，翻页时筛选条件不丢。
+  // searchParams 的值可能是 string[]（重复参数），只取第一个。
+  const currentQuery: Record<string, string> = {};
+  for (const [key, value] of Object.entries(raw)) {
+    if (key === 'page' || value === undefined) continue;
+    currentQuery[key] = Array.isArray(value) ? value[0] : value;
+  }
+
   const data = await withTransaction(context.userId, async (tx) => {
     const [accounts, categories, members, transactions] = await Promise.all([
       listMoneyAccounts(tx, context.organizationId),
       listCategories(tx, context.organizationId),
       listMembershipsByOrg(tx, context.organizationId),
-      listTransactions(tx, context.organizationId, filters, { limit: 50, offset: 0 }),
+      listTransactions(tx, context.organizationId, filters, { limit: PAGE_SIZE + 1, offset }),
     ]);
     return { accounts, categories, members, transactions };
   });
+
+  const hasNextPage = data.transactions.rows.length > PAGE_SIZE;
+  const pageRows = hasNextPage ? data.transactions.rows.slice(0, PAGE_SIZE) : data.transactions.rows;
 
   const toOption = (row: { id: string; nameEn: string | null; nameZh: string | null }) => ({
     id: row.id,
@@ -76,11 +92,37 @@ export default async function TransactionsListPage({
 
       <TransactionTable
         orgSlug={orgSlug}
-        rows={data.transactions.rows}
+        rows={pageRows}
         locale={locale}
         baseCurrency={context.baseCurrency}
         emptyLabel={t.transaction.empty}
       />
+
+      <nav className="pagination" aria-label={t.transaction.pagination}>
+        {page > 1 ? (
+          <Link
+            className="secondary-button"
+            href={`/${orgSlug}/transactions?${new URLSearchParams({
+              ...currentQuery,
+              page: String(page - 1),
+            })}`}
+          >
+            {t.common.previous}
+          </Link>
+        ) : null}
+        <span className="pagination-page">{interpolate(t.common.pageN, { page })}</span>
+        {hasNextPage ? (
+          <Link
+            className="secondary-button"
+            href={`/${orgSlug}/transactions?${new URLSearchParams({
+              ...currentQuery,
+              page: String(page + 1),
+            })}`}
+          >
+            {t.common.next}
+          </Link>
+        ) : null}
+      </nav>
     </>
   );
 }

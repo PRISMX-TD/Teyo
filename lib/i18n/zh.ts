@@ -108,6 +108,7 @@ const zh: Translated<typeof en> = {
     editTitle: '编辑记录',
     listTitle: '流水',
     empty: '没有符合条件的记录。',
+    pagination: '分页',
   },
   filters: {
     from: '起始日期',
@@ -599,6 +600,9 @@ const zh: Translated<typeof en> = {
     loading: '加载中',
     offline: '离线',
     pendingSync: '{count} 条记录待同步',
+    previous: '上一页',
+    next: '下一页',
+    pageN: '第 {page} 页',
   },
 };
 
