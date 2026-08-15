@@ -2,12 +2,18 @@
 
 import React, { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName } from '@/lib/i18n';
+import { localizedName, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { TrialBalanceRow } from '@/server/repositories/reports';
 import type { ProfitLossResult, BalanceSheetResult, CashFlowResult } from '@/server/repositories/reports';
 import type { ArAgingRow, ApAgingRow, CustomerStatement } from '@/server/repositories/aging';
 import type { ContactRow } from '@/server/repositories/contacts';
+import {
+  checkBalanceSheet,
+  checkCashFlow,
+  checkTrialBalance,
+  type BalanceCheck,
+} from '@/server/domain/report-invariants';
 
 type Tab = 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ar-aging' | 'ap-aging' | 'customer-statement' | 'vendor-statement';
 
@@ -29,8 +35,31 @@ function toOption(row: { nameEn: string | null; nameZh: string | null }) {
   return { name_en: row.nameEn, name_zh: row.nameZh };
 }
 
-function fmtMinor(amount: bigint): string {
-  return (Number(amount) / 100).toFixed(2);
+function BalanceCheckRow({
+  check,
+  colSpan,
+  locale,
+  baseCurrency,
+  t,
+}: {
+  check: BalanceCheck;
+  colSpan: number;
+  locale: Locale;
+  baseCurrency: string;
+  t: Messages;
+}) {
+  return (
+    <tr>
+      <th>{t.reports.balanceCheck}</th>
+      <th className="numeric" colSpan={colSpan}>
+        {check.balanced
+          ? t.reports.balanced
+          : interpolate(t.reports.outOfBalanceBy, {
+              amount: formatMoney(check.differenceMinor, baseCurrency, locale),
+            })}
+      </th>
+    </tr>
+  );
 }
 
 export function ReportsView({
@@ -138,7 +167,10 @@ function TrialBalanceTable({
       <tbody>
         {rows.map((row) => (
           <tr key={row.code}>
-            <td>{localizedName(toOption(row), locale)}</td>
+            <td>
+              {localizedName(toOption(row), locale)}
+              {row.isActive ? null : <span className="badge badge-voided">{t.reports.archived}</span>}
+            </td>
             <td className="numeric mono">
               {row.debitMinor > 0n ? formatMoney(row.debitMinor, baseCurrency, locale) : ''}
             </td>
@@ -154,6 +186,13 @@ function TrialBalanceTable({
           <th className="numeric mono">{formatMoney(totalDebit, baseCurrency, locale)}</th>
           <th className="numeric mono">{formatMoney(totalCredit, baseCurrency, locale)}</th>
         </tr>
+        <BalanceCheckRow
+          check={checkTrialBalance(rows)}
+          colSpan={2}
+          locale={locale}
+          baseCurrency={baseCurrency}
+          t={t}
+        />
       </tfoot>
     </table>
   );
@@ -301,6 +340,17 @@ function CashFlowTable({
           <td>{t.reports.closingCash}</td>
           <td className="numeric mono">{formatMoney(data.closingCash, baseCurrency, locale)}</td>
         </tr>
+        <BalanceCheckRow
+          check={checkCashFlow({
+            openingCash: data.openingCash,
+            netChange: data.netChange,
+            closingCash: data.closingCash,
+          })}
+          colSpan={1}
+          locale={locale}
+          baseCurrency={baseCurrency}
+          t={t}
+        />
       </tfoot>
     </table>
   );
@@ -382,12 +432,36 @@ function BalanceSheetTable({
           </>
         )}
 
+        <tr>
+          <td>{t.reports.currentYearEarnings}</td>
+          <td className="numeric mono">
+            {formatMoney(data.currentYearEarnings, baseCurrency, locale)}
+          </td>
+        </tr>
+
         <tr className="total-row">
           <th>{t.reports.liabilitiesAndEquity}</th>
           <th className="numeric mono">
-            {formatMoney(data.liabilityTotal + data.equityTotal, baseCurrency, locale)}
+            {formatMoney(
+              data.liabilityTotal + data.equityTotal + data.currentYearEarnings,
+              baseCurrency,
+              locale,
+            )}
           </th>
         </tr>
+
+        <BalanceCheckRow
+          check={checkBalanceSheet({
+            assetTotal: data.assetTotal,
+            liabilityTotal: data.liabilityTotal,
+            equityTotal: data.equityTotal,
+            currentYearEarnings: data.currentYearEarnings,
+          })}
+          colSpan={1}
+          locale={locale}
+          baseCurrency={baseCurrency}
+          t={t}
+        />
       </tbody>
     </table>
   );
@@ -439,22 +513,22 @@ function AgingTable({
         {rows.map((row) => (
           <tr key={row.contactId}>
             <td>{row.contactName}</td>
-            <td className="numeric mono">{fmtMinor(row.current)}</td>
-            <td className="numeric mono">{fmtMinor(row.d31_60)}</td>
-            <td className="numeric mono">{fmtMinor(row.d61_90)}</td>
-            <td className="numeric mono">{fmtMinor(row.over90)}</td>
-            <td className="numeric mono">{fmtMinor(row.total)}</td>
+            <td className="numeric mono">{formatMoney(row.current, baseCurrency, locale)}</td>
+            <td className="numeric mono">{formatMoney(row.d31_60, baseCurrency, locale)}</td>
+            <td className="numeric mono">{formatMoney(row.d61_90, baseCurrency, locale)}</td>
+            <td className="numeric mono">{formatMoney(row.over90, baseCurrency, locale)}</td>
+            <td className="numeric mono">{formatMoney(row.total, baseCurrency, locale)}</td>
           </tr>
         ))}
       </tbody>
       <tfoot>
         <tr>
           <th>{t.reports.total}</th>
-          <th className="numeric mono">{fmtMinor(totals.current)}</th>
-          <th className="numeric mono">{fmtMinor(totals.d31_60)}</th>
-          <th className="numeric mono">{fmtMinor(totals.d61_90)}</th>
-          <th className="numeric mono">{fmtMinor(totals.over90)}</th>
-          <th className="numeric mono">{fmtMinor(totals.total)}</th>
+          <th className="numeric mono">{formatMoney(totals.current, baseCurrency, locale)}</th>
+          <th className="numeric mono">{formatMoney(totals.d31_60, baseCurrency, locale)}</th>
+          <th className="numeric mono">{formatMoney(totals.d61_90, baseCurrency, locale)}</th>
+          <th className="numeric mono">{formatMoney(totals.over90, baseCurrency, locale)}</th>
+          <th className="numeric mono">{formatMoney(totals.total, baseCurrency, locale)}</th>
         </tr>
       </tfoot>
     </table>
@@ -557,7 +631,7 @@ function StatementTab({
               <tr className="opening-balance">
                 <td colSpan={3}>{t.statement.openingBalance}</td>
                 <td className="numeric mono" />
-                <td className="numeric mono">{fmtMinor(data.openingBalance)}</td>
+                <td className="numeric mono">{formatMoney(data.openingBalance, baseCurrency, locale)}</td>
               </tr>
             )}
             {data.lines.length === 0 && !loading ? (
@@ -572,8 +646,8 @@ function StatementTab({
                   <td className="mono">{line.date}</td>
                   <td>{line.description}</td>
                   <td className="mono">{line.reference}</td>
-                  <td className="numeric mono">{fmtMinor(line.amount)}</td>
-                  <td className="numeric mono">{fmtMinor(line.balance)}</td>
+                  <td className="numeric mono">{formatMoney(line.amount, baseCurrency, locale)}</td>
+                  <td className="numeric mono">{formatMoney(line.balance, baseCurrency, locale)}</td>
                 </tr>
               ))
             )}
@@ -581,7 +655,7 @@ function StatementTab({
           <tfoot>
             <tr>
               <th colSpan={4}>{t.statement.closingBalance}</th>
-              <th className="numeric mono">{fmtMinor(data.closingBalance)}</th>
+              <th className="numeric mono">{formatMoney(data.closingBalance, baseCurrency, locale)}</th>
             </tr>
           </tfoot>
         </table>

@@ -250,6 +250,7 @@ const zh: Translated<typeof en> = {
     balanceCheck: '平衡校验',
     balanced: '已平',
     outOfBalanceBy: '差额 {amount}',
+    archived: '已归档',
     empty: '该期间暂无数据。',
     cashFlow: '现金流量表',
     operating: '经营活动',

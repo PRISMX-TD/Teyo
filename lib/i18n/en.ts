@@ -237,6 +237,7 @@ const en = {
     balanceCheck: 'Balance check',
     balanced: 'Balanced',
     outOfBalanceBy: 'Out of balance by {amount}',
+    archived: 'Archived',
     empty: 'No data for this period.',
     cashFlow: 'Cash Flow',
     operating: 'Operating Activities',
