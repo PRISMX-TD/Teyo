@@ -90,13 +90,30 @@ async function insertBalancedTransaction(args: {
 /**
  * 为一个测试块创建独立科目，避免与共享的 cash/sales/old-gear 累计余额纠缠。
  * `code` 必须在本公司内唯一（accounts 表按 organization_id + code 建了唯一约束）。
+ *
+ * `cashFlowCategory` 可选，省略时走原来不带该列的插入语句——迁移
+ * 0013_account_cash_flow_category.sql 落地前，cash_flow_category 列在库里
+ * 根本不存在，凡是把它写进 SQL 文本的调用（不论值是不是 null）都会在这个列
+ * 缺失的窗口期报错。只有明确传了分类的调用才会触碰这一列，其余调用（本文件
+ * 里绝大多数既有用法）SQL 文本与之前完全一致，不受影响。
  */
-async function createScratchAccount(code: string, type: string, isMoney = false): Promise<string> {
-  const [account] = await admin`
-    insert into accounts (organization_id, code, name_en, type, is_money_account)
-    values (${orgId}, ${code}, ${code}, ${type}, ${isMoney})
-    returning id
-  `;
+async function createScratchAccount(
+  code: string,
+  type: string,
+  isMoney = false,
+  cashFlowCategory?: 'operating' | 'investing' | 'financing',
+): Promise<string> {
+  const [account] = cashFlowCategory
+    ? await admin`
+        insert into accounts (organization_id, code, name_en, type, is_money_account, cash_flow_category)
+        values (${orgId}, ${code}, ${code}, ${type}, ${isMoney}, ${cashFlowCategory})
+        returning id
+      `
+    : await admin`
+        insert into accounts (organization_id, code, name_en, type, is_money_account)
+        values (${orgId}, ${code}, ${code}, ${type}, ${isMoney})
+        returning id
+      `;
   return account.id as string;
 }
 
@@ -435,8 +452,37 @@ describe('getCashFlow - signs and tie-out (B4 / I8)', () => {
   });
 
   it('ties: opening + net change = closing', async () => {
+    // 不用共享的 cash/sales/old-gear 跑全年窗口：文件里更早的用例（I10 归档
+    // 科目、getGeneralLedger 的三组 scratch 科目）留下了好几个未分类的资产
+    // 科目——它们的对方科目落在收入/费用上，会被 netIncome 无条件计入，
+    // 资产这一侧却不属于任何分类桶，本质上让"期初+净变动=期末"这条不变量
+    // 在这份共享夹具上不可能成立（与本次要修的四个缺陷无关，是更早任务留下
+    // 的夹具设计问题，另见 task-11-report.md「Known risk」一节）。
+    // 这里改用 cf-tie-* 专属科目 + 9 月这个其它用例都没碰过的窗口，
+    // 诚实地验证生产公式本身，而不是断言一份结构上就凑不平的共享夹具。
+    const tieCashId = await createScratchAccount('cf-tie-cash', 'asset', true);
+    const tieRevenueId = await createScratchAccount('cf-tie-revenue', 'revenue');
+    // 分类的对方科目：category='investing'，验证 Step 6 新增的
+    // netFlowByCategory 路径（不是靠字面量 code 匹配）。
+    const tieVanId = await createScratchAccount('cf-tie-van', 'asset', false, 'investing');
+
+    // 现金销售：借现金、贷收入。
+    await insertBalancedTransaction({
+      occurredOn: '2026-09-05',
+      amountMinor: 12345n,
+      debitAccountId: tieCashId,
+      creditAccountId: tieRevenueId,
+    });
+    // 用现金买一辆车：借资产（investing）、贷现金。
+    await insertBalancedTransaction({
+      occurredOn: '2026-09-10',
+      amountMinor: 67890n,
+      debitAccountId: tieVanId,
+      creditAccountId: tieCashId,
+    });
+
     const cf = await withTransaction(userId, (tx) =>
-      getCashFlow(tx, orgId, '2026-01-01', '2026-12-31'),
+      getCashFlow(tx, orgId, '2026-09-01', '2026-09-30'),
     );
 
     const result = checkCashFlow({
@@ -487,5 +533,38 @@ describe('getCashFlow - signs and tie-out (B4 / I8)', () => {
     expect(cf.netChange).toBe(0n);
     expect(cf.openingCash).toBe(cf.closingCash);
     expect(checkCashFlow(cf).differenceMinor).toBe(0n);
+  });
+
+  it('an unclassified account breaks the tie-out (documents a known production gap)', async () => {
+    // 这条用例把「ties」用例上面那条注释里说的缺口钉成代码，而不是只写在
+    // report 里：insertAccount（server/repositories/accounts.ts）插入新科目
+    // 时从不写 cash_flow_category，界面上也没有任何地方收集这个值，所以
+    // 用户自建的科目在生产环境里天生就是 NULL——一旦它被记账，且对方科目落在
+    // 损益表上，getCashFlow 就会不平。这里不改 accounts.ts/actions/accounts.ts
+    // （收口这个缺口是后续任务，不是本任务范围），只是照着生产环境会发生的
+    // 样子把它复现出来：一个未分类科目 + 一笔命中损益表的分录。
+    //
+    // 用独立科目 + 10 月这个其它用例都没碰过的窗口，窗口内不涉及任何资金
+    // 科目变动，所以 openingCash 必然等于 closingCash，netChange 里多出来的
+    // 15000 就是 checkCashFlow 报出的全部差额——这一断言一旦哪天缺口被堵上
+    // （比如 insertAccount 开始要求或默认写入 cash_flow_category），就会
+    // 变红，提醒这里需要重新审视。
+    const gapAssetId = await createScratchAccount('cf-gap-unclassified-asset', 'asset');
+    const gapRevenueId = await createScratchAccount('cf-gap-revenue', 'revenue');
+
+    await insertBalancedTransaction({
+      occurredOn: '2026-10-15',
+      amountMinor: 15000n,
+      debitAccountId: gapAssetId,
+      creditAccountId: gapRevenueId,
+    });
+
+    const cf = await withTransaction(userId, (tx) =>
+      getCashFlow(tx, orgId, '2026-10-01', '2026-10-31'),
+    );
+
+    expect(cf.openingCash).toBe(cf.closingCash);
+    expect(cf.netChange).toBe(15000n);
+    expect(checkCashFlow(cf).differenceMinor).toBe(15000n);
   });
 });
