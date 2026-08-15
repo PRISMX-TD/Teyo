@@ -2,8 +2,8 @@
 
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
-import { useState, useEffect, useCallback } from 'react';
 import { getMessages } from '@/lib/i18n';
+import { useTheme } from './use-theme';
 
 type Props = {
   orgSlug: string;
@@ -14,31 +14,6 @@ type NavGroup = {
   label: string;
   items: { href: string; label: string }[];
 };
-
-function useTheme() {
-  const [theme, setTheme] = useState<'dark' | 'light'>('dark');
-
-  useEffect(() => {
-    const stored = localStorage.getItem('teyo-theme') as 'dark' | 'light' | null;
-    if (stored) {
-      setTheme(stored);
-    } else {
-      const preferred = window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark';
-      setTheme(preferred);
-    }
-  }, []);
-
-  const toggle = useCallback(() => {
-    setTheme((prev) => {
-      const next = prev === 'dark' ? 'light' : 'dark';
-      localStorage.setItem('teyo-theme', next);
-      document.documentElement.setAttribute('data-theme', next);
-      return next;
-    });
-  }, []);
-
-  return { theme, toggle };
-}
 
 export function Sidebar({ orgSlug, i18n }: Props) {
   const pathname = usePathname();

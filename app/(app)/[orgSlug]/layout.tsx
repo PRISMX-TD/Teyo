@@ -3,6 +3,7 @@ import { resolveOrgContext } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 import { Sidebar } from '@/components/shell/sidebar';
+import { FloatingDock } from '@/components/shell/floating-dock';
 import { OrgSwitcher } from '@/components/shell/org-switcher';
 import React from 'react';
 
@@ -38,6 +39,7 @@ export default async function AppLayout({
         />
         {children}
       </main>
+      <FloatingDock orgSlug={orgSlug} i18n={t} />
     </div>
   );
 }

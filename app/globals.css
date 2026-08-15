@@ -975,21 +975,11 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 
 @media (max-width: 767px) {
   .app-shell { flex-direction: column; }
-  .sidebar {
-    position: sticky; bottom: 0; top: auto;
-    width: 100%; height: auto; padding: 0; gap: 0;
-    padding-bottom: env(safe-area-inset-bottom);
-    border-right: none; border-top: 1px solid var(--border-primary);
-    flex-direction: row;
-  }
-  .sidebar-brand, .sidebar-footer, .sidebar-group-label { display: none; }
-  .sidebar-nav { flex-direction: row; gap: 0; overflow-x: auto; }
-  .sidebar-group { flex-direction: row; gap: 0; }
-  .sidebar-group + .sidebar-group { margin-top: 0; padding-top: 0; border-top: none; }
-  .sidebar-nav a { flex: 0 0 auto; min-height: 52px; border-radius: 0; font-size: var(--text-2xs); text-align: center; padding: var(--space-2) var(--space-2); }
-  .sidebar-action { display: none; }
+  /* 移动端导航交给 .floating-dock（见下方 Floating Dock 小节），
+     侧栏在这个宽度下直接隐藏，避免两个底栏打架。 */
+  .sidebar { display: none; }
 
-  .app-main { padding: var(--space-5) var(--space-4); padding-bottom: var(--space-16); }
+  .app-main { padding: var(--space-5) var(--space-4); }
   /* 移动端顶栏：恢复 org switcher 和品牌 */
   .mobile-top-bar {
     display: flex; align-items: center; justify-content: space-between;
@@ -1031,6 +1021,40 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 }
 
 @media (min-width: 1280px) { .app-main { padding: var(--space-10); } }
+
+/* ==========================================================================
+   Floating Dock (mobile only)
+   ========================================================================== */
+
+.floating-dock { display: none; }
+
+@media (max-width: 767px) {
+  .floating-dock {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 30;
+    display: flex; align-items: center; justify-content: space-around;
+    gap: var(--space-1);
+    padding: var(--space-2) var(--space-2);
+    padding-bottom: calc(var(--space-2) + env(safe-area-inset-bottom));
+    background: var(--bg-secondary);
+    border-top: 1px solid var(--border-primary);
+  }
+  .floating-dock a, .floating-dock button {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-height: 44px; min-width: 44px; padding: var(--space-1) var(--space-2);
+    font-size: var(--text-2xs); color: var(--text-secondary);
+    background: none; border: none; border-radius: var(--radius-sm);
+  }
+  .floating-dock a.active { color: var(--accent); font-weight: 600; }
+  .floating-dock .topbar-cta {
+    color: #fff; background: var(--accent);
+    font-size: var(--text-lg); font-weight: 600;
+    min-width: 48px; border-radius: var(--radius-md);
+  }
+  .floating-dock-separator { display: none; }
+  .dock-theme-btn { color: var(--text-tertiary); }
+  /* dock 会盖住内容，给主区留出高度 */
+  .app-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
+}
 
 /* ==========================================================================
    Reduced Motion
