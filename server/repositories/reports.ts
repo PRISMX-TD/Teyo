@@ -92,7 +92,10 @@ export type ProfitLossResult = {
  * 损益表：收入 - 费用 = 净利润。
  *
  * 金额取 base_amount_minor（本位币），这样不同币种的交易可以加在一起。
- * 只算未作废交易，期间用半开区间 [start, end)。
+ * 只算未作废交易。
+ * 期间为闭区间 [from, to]，与资产负债表的 asOf 语义一致。
+ * 两者口径必须相同，否则当天记录的交易会进资产负债表而不进损益表，
+ * 使两张报表在当天必然不平。
  */
 export async function getProfitLoss(
   tx: Tx,
@@ -114,7 +117,7 @@ export async function getProfitLoss(
     where l.organization_id = ${organizationId}
       and t.voided_at is null
       and t.occurred_on >= ${from}::date
-      and t.occurred_on < ${to}::date
+      and t.occurred_on <= ${to}::date
       and (a.type = 'revenue' or a.type = 'expense')
     group by a.id, a.code, a.name_en, a.name_zh, a.type, a.sort_order
     order by a.sort_order, a.id

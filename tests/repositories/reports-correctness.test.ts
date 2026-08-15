@@ -22,7 +22,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { admin, createTestUser, deleteTestUser, deleteTestOrganizations } from '@/tests/helpers/db';
 import { withTransaction } from '@/server/db/transaction';
-import { getBalanceSheet, getTrialBalance } from '@/server/repositories/reports';
+import { getBalanceSheet, getProfitLoss, getTrialBalance } from '@/server/repositories/reports';
 import { checkTrialBalance } from '@/server/domain/report-invariants';
 
 let userId: string;
@@ -234,5 +234,29 @@ describe('getBalanceSheet - I9 / I10', () => {
     );
     const cash = bs.assetRows.find((r) => r.code === 'cash')!;
     expect(cash.totalMinor).toBe(100000n);
+  });
+});
+
+describe('getProfitLoss - inclusive upper bound (B2)', () => {
+  it('includes a transaction dated exactly on the to-date', async () => {
+    const pl = await withTransaction(userId, (tx) =>
+      getProfitLoss(tx, orgId, '2026-01-01', '2026-03-01'),
+    );
+    // 3/1 记了 100000 的销售收入，闭区间下必须计入
+    expect(pl.revenueTotal).toBe(100000n);
+  });
+
+  it('agrees with the balance sheet on the same date', async () => {
+    const to = '2026-03-01';
+    const pl = await withTransaction(userId, (tx) =>
+      getProfitLoss(tx, orgId, '2026-01-01', to),
+    );
+    const bs = await withTransaction(userId, (tx) =>
+      getBalanceSheet(tx, orgId, to, pl.netIncome),
+    );
+    const cash = bs.assetRows.find((r) => r.code === 'cash')!;
+    // 同一天的销售，现金与收入必须同时出现
+    expect(cash.totalMinor).toBe(100000n);
+    expect(pl.revenueTotal).toBe(100000n);
   });
 });
