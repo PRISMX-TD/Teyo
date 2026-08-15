@@ -451,8 +451,16 @@ export type LedgerResult = {
   closingBalance: bigint;
 };
 
+/** 总账单页行数上限。limit 来自用户输入，无上界即为 30 秒函数超时下最先失败的报表。 */
+export const GENERAL_LEDGER_PAGE_MAX = 500;
+
 /**
  * 单科目的总账——按日期的分录列表 + 递进余额。
+ *
+ * 期间分录按 limit/offset 分页；未传 options 时取默认页（上限 500 行），
+ * 与之前无上限的行为不同——超过一页的账户，closingBalance 只反映已取回
+ * 的那部分行，不再是整个期间的真实期末余额（调用方目前都不传 options，
+ * 见 general-ledger/page.tsx，尚未处理这种截断）。
  */
 export async function getGeneralLedger(
   tx: Tx,
@@ -460,7 +468,18 @@ export async function getGeneralLedger(
   accountId: string,
   from: string,
   to: string,
+  options?: { limit?: number; offset?: number },
 ): Promise<LedgerResult> {
+  const limit = options?.limit ?? GENERAL_LEDGER_PAGE_MAX;
+  const offset = options?.offset ?? 0;
+
+  if (!Number.isInteger(limit) || limit < 1 || limit > GENERAL_LEDGER_PAGE_MAX) {
+    throw new Error(`General ledger limit must be between 1 and ${GENERAL_LEDGER_PAGE_MAX}.`);
+  }
+  if (!Number.isInteger(offset) || offset < 0) {
+    throw new Error('General ledger offset must be a non-negative integer.');
+  }
+
   // 科目信息 + 期初余额
   const accountRows = await tx`
     select code, name_en, name_zh, type from accounts
@@ -504,6 +523,8 @@ export async function getGeneralLedger(
       and t.occurred_on >= ${from}::date
       and t.occurred_on < ${to}::date
     order by t.occurred_on, t.created_at, t.id
+    limit ${limit}
+    offset ${offset}
   `;
 
   const lines: LedgerLine[] = [];

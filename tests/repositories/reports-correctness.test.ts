@@ -22,7 +22,13 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { admin, createTestUser, deleteTestUser, deleteTestOrganizations } from '@/tests/helpers/db';
 import { withTransaction } from '@/server/db/transaction';
-import { getBalanceSheet, getProfitLoss, getTrialBalance } from '@/server/repositories/reports';
+import {
+  GENERAL_LEDGER_PAGE_MAX,
+  getBalanceSheet,
+  getGeneralLedger,
+  getProfitLoss,
+  getTrialBalance,
+} from '@/server/repositories/reports';
 import { checkBalanceSheet, checkTrialBalance } from '@/server/domain/report-invariants';
 
 let userId: string;
@@ -292,5 +298,46 @@ describe('getBalanceSheet - synthetic current-year earnings (B3 / I5)', () => {
     });
     expect(result.differenceMinor).toBe(0n);
     expect(result.balanced).toBe(true);
+  });
+});
+
+describe('getGeneralLedger - bounded reads', () => {
+  it('caps the number of rows returned', async () => {
+    // 用独立科目而非 cashId：要造出比 limit 更多的行数才能真正验证截断生效，
+    // 复用共享科目会与前面用例对 cash/sales 绝对值的断言纠缠。
+    const glAssetId = await createScratchAccount('gl-scratch-asset', 'asset');
+    const glCounterId = await createScratchAccount('gl-scratch-counter', 'expense');
+
+    for (let i = 0; i < 3; i++) {
+      await insertBalancedTransaction({
+        occurredOn: `2026-05-0${i + 1}`,
+        amountMinor: 1000n,
+        debitAccountId: glAssetId,
+        creditAccountId: glCounterId,
+      });
+    }
+
+    const result = await withTransaction(userId, (tx) =>
+      getGeneralLedger(tx, orgId, glAssetId, '2026-01-01', '2026-12-31', { limit: 2 }),
+    );
+    // 3 行分录存在，但 limit 是 2——如果没截断，这里会是 3。
+    expect(result.lines.length).toBe(2);
+  });
+
+  it('rejects a limit above the page maximum', async () => {
+    await expect(
+      withTransaction(userId, (tx) =>
+        getGeneralLedger(tx, orgId, cashId, '2026-01-01', '2026-12-31', {
+          limit: GENERAL_LEDGER_PAGE_MAX + 1,
+        }),
+      ),
+    ).rejects.toThrow();
+  });
+
+  it('defaults to the page maximum when no limit is given', async () => {
+    const result = await withTransaction(userId, (tx) =>
+      getGeneralLedger(tx, orgId, cashId, '2026-01-01', '2026-12-31'),
+    );
+    expect(result.lines.length).toBeLessThanOrEqual(GENERAL_LEDGER_PAGE_MAX);
   });
 });
