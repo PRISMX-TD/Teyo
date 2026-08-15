@@ -7,6 +7,7 @@ export type TrialBalanceRow = {
   nameEn: string | null;
   nameZh: string | null;
   type: AccountType;
+  isActive: boolean;
   debitMinor: bigint;
   creditMinor: bigint;
 };
@@ -32,8 +33,11 @@ type AssetOrLiabilityOrEquity = 'asset' | 'liability' | 'equity';
 /**
  * 试算平衡表：每个科目的借/贷方发生额汇总。
  *
- * 只算未作废交易。direction 本身就在分录行上，不必 join transactions 表拿 kind，
- * 也天然把转账两行按各自的 direction 算进对应科目。
+ * 先用内连接子查询把作废与截止日期条件做在 journal_lines/transactions 上
+ * （内连接才能让这两个条件真正生效——挂在 LEFT JOIN 的 ON 子句上对驱动表
+ * 不起过滤作用），按科目聚合出 movement；再 LEFT JOIN 回 accounts，
+ * 保留零余额科目。where 的后半段 `a.is_active or 有余额` 保留仍有余额的
+ * 归档科目（I10），只丢弃真正零余额的归档科目。
  */
 export async function getTrialBalance(
   tx: Tx,
@@ -41,20 +45,26 @@ export async function getTrialBalance(
   asOf: string,
 ): Promise<TrialBalanceRow[]> {
   const rows = await tx`
+    with movement as (
+      select
+        l.account_id,
+        sum(case when l.direction = 'debit'  then l.base_amount_minor else 0 end) as debit,
+        sum(case when l.direction = 'credit' then l.base_amount_minor else 0 end) as credit
+      from journal_lines l
+      join transactions t on t.id = l.transaction_id
+      where l.organization_id = ${organizationId}
+        and t.voided_at is null
+        and t.occurred_on <= ${asOf}::date
+      group by l.account_id
+    )
     select
-      a.code,
-      a.name_en,
-      a.name_zh,
-      a.type,
-      coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor else 0 end), 0) as debit,
-      coalesce(sum(case when l.direction = 'credit' then l.base_amount_minor else 0 end), 0) as credit
+      a.code, a.name_en, a.name_zh, a.type, a.is_active,
+      coalesce(m.debit, 0)  as debit,
+      coalesce(m.credit, 0) as credit
     from accounts a
-    left join journal_lines l on l.account_id = a.id and l.organization_id = ${organizationId}
-    left join transactions t on t.id = l.transaction_id and t.organization_id = ${organizationId}
-      and t.voided_at is null
-      and t.occurred_on <= ${asOf}::date
-    where a.organization_id = ${organizationId} and a.is_active
-    group by a.id, a.code, a.name_en, a.name_zh, a.type, a.sort_order
+    left join movement m on m.account_id = a.id
+    where a.organization_id = ${organizationId}
+      and (a.is_active or coalesce(m.debit, 0) <> coalesce(m.credit, 0))
     order by a.sort_order, a.id
   `;
 
@@ -63,6 +73,7 @@ export async function getTrialBalance(
     nameEn: (r.name_en as string | null) ?? null,
     nameZh: (r.name_zh as string | null) ?? null,
     type: r.type as AccountType,
+    isActive: r.is_active as boolean,
     debitMinor: BigInt(r.debit as string),
     creditMinor: BigInt(r.credit as string),
   }));
