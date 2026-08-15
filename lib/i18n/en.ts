@@ -96,6 +96,9 @@ const en = {
     listTitle: 'Transactions',
     empty: 'Nothing matches these filters.',
     pagination: 'Pagination',
+    choosePlaceholder: 'Choose…',
+    chooseMoneyAccount: 'Which account did the money come from or go into?',
+    chooseCategory: 'What was this for?',
   },
   filters: {
     from: 'From',

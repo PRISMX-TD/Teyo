@@ -195,9 +195,12 @@ export function TransactionForm({
       />
 
       <label htmlFor="moneyAccountId">
-        {kind === 'transfer' ? t.transaction.destinationAccount : t.transaction.moneyAccount}
+        {kind === 'transfer' ? t.transaction.destinationAccount : t.transaction.chooseMoneyAccount}
       </label>
-      <select id="moneyAccountId" name="moneyAccountId" required defaultValue={initialData?.moneyAccountId ?? undefined}>
+      <select id="moneyAccountId" name="moneyAccountId" required defaultValue={initialData?.moneyAccountId ?? ''}>
+        <option value="" disabled>
+          {t.transaction.choosePlaceholder}
+        </option>
         {moneyAccounts.map((account) => (
           <option key={account.id} value={account.id}>
             {localizedName(account, locale)}
@@ -208,7 +211,10 @@ export function TransactionForm({
       {kind === 'transfer' ? (
         <>
           <label htmlFor="counterAccountId">{t.transaction.moneyAccount}</label>
-          <select id="counterAccountId" name="counterAccountId" required defaultValue={initialData?.counterAccountId ?? undefined}>
+          <select id="counterAccountId" name="counterAccountId" required defaultValue={initialData?.counterAccountId ?? ''}>
+            <option value="" disabled>
+              {t.transaction.choosePlaceholder}
+            </option>
             {moneyAccounts.map((account) => (
               <option key={account.id} value={account.id}>
                 {localizedName(account, locale)}
@@ -218,8 +224,11 @@ export function TransactionForm({
         </>
       ) : (
         <>
-          <label htmlFor="categoryId">{t.transaction.category}</label>
-          <select id="categoryId" name="categoryId" required defaultValue={initialData?.categoryId ?? undefined}>
+          <label htmlFor="categoryId">{t.transaction.chooseCategory}</label>
+          <select id="categoryId" name="categoryId" required defaultValue={initialData?.categoryId ?? ''}>
+            <option value="" disabled>
+              {t.transaction.choosePlaceholder}
+            </option>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {localizedName(category, locale)}

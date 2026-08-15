@@ -109,6 +109,9 @@ const zh: Translated<typeof en> = {
     listTitle: '流水',
     empty: '没有符合条件的记录。',
     pagination: '分页',
+    choosePlaceholder: '请选择…',
+    chooseMoneyAccount: '这笔钱从哪个账户出、或进了哪个账户？',
+    chooseCategory: '这笔钱是做什么用的？',
   },
   filters: {
     from: '起始日期',
