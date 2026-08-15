@@ -1,4 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
+import { toIsoDate } from '@/lib/format';
 
 export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
 
@@ -278,6 +279,8 @@ export type CashFlowResult = {
   operating: CashFlowSection;
   investing: CashFlowSection;
   financing: CashFlowSection;
+  /** 三个分类都没有覆盖到的现金变动——见下方 unclassified 的计算注释。 */
+  unclassified: bigint;
   netChange: bigint;
   openingCash: bigint;
   closingCash: bigint;
@@ -296,6 +299,18 @@ export type CashFlowResult = {
  * 期初现金取严格小于 from 的余额，与期间流量的 >= from 互补，
  * 避免 from 当天的交易被两边重复计入；期末现金取小于等于 to 的余额，
  * 与期间流量的 <= to 对齐。
+ *
+ * unclassified（补充调节行）：
+ * 经营/投资/融资三段只覆盖了已知字面量 code 和已打上 cash_flow_category
+ * 标签的科目。种子科目里的 tax-payable（打了 'operating' 标签但没有任何
+ * 查询项读它）、故意留 NULL 的 retained-earnings，以及所有用户自建科目
+ * （insertAccount 从不写 cash_flow_category）都不在覆盖范围内——手工记账
+ * 分录可以任意选科目做对方科目，"Dr 现金 / Cr 留存收益" 这类最普通的开
+ * 帐分录就足以在三段分类之外产生现金变动。与其让这部分缺口悄悄导致
+ * openingCash + netChange !== closingCash（界面上表现为一条无法解释的
+ * "不平" 提示），不如显式算出这个残差并把它计入 netChange、单独命名展示：
+ * unclassified = (closingCash - openingCash) - (operatingTotal + investingTotal + financingTotal)。
+ * 这样 tie-out 恒成立，但缺口不会被隐藏，而是被诚实地摆在一行上。
  */
 export async function getCashFlow(
   tx: Tx,
@@ -451,18 +466,25 @@ export async function getCashFlow(
     ],
   };
 
-  const netChange = operatingTotal + investingTotal + financingTotal;
-
   // 期初现金：严格小于 from，与期间流量（>= from）互补，避免边界当天
   // 被两边重复计入。期末现金：小于等于 to，与期间流量（<= to）对齐。
   // 按 is_money_account 聚合，不再按 'cash'/'bank' 字面量编码。
   const openingCash = await moneyBalanceAsOf(from, false);
   const closingCash = await moneyBalanceAsOf(to, true);
 
+  // 三段分类没能解释的现金变动——见函数顶部注释。按定义补足残差，
+  // 使 openingCash + netChange === closingCash 恒成立，不平永远不会
+  // 是"经营/投资/融资没加起来"，只会是这一行有非零值。
+  const unclassified =
+    (closingCash - openingCash) - (operatingTotal + investingTotal + financingTotal);
+
+  const netChange = operatingTotal + investingTotal + financingTotal + unclassified;
+
   return {
     operating,
     investing,
     financing,
+    unclassified,
     netChange,
     openingCash,
     closingCash,
@@ -499,6 +521,9 @@ export const GENERAL_LEDGER_PAGE_MAX = 500;
 /**
  * 单科目的总账——按日期的分录列表 + 递进余额。
  *
+ * 期间口径：闭区间 [from, to]，与 getTrialBalance/getBalanceSheet/getProfitLoss/
+ * getCashFlow 一致——`to` 当天的分录必须计入，否则总账会比同一截止日期的
+ * 试算平衡表少算最后一天，两份报表的期末余额就会对不上。
  * 期间分录（lines）按 limit/offset 分页；未传 options 时取默认页（上限 500 行）。
  * closingBalance 和 total 都由独立的、不受 limit/offset 影响的聚合查询算出
  * （与 openingBalance 同样的写法），所以即使 lines 被截断，closingBalance
@@ -566,7 +591,7 @@ export async function getGeneralLedger(
       and l.organization_id = ${organizationId}
       and t.voided_at is null
       and t.occurred_on >= ${from}::date
-      and t.occurred_on < ${to}::date
+      and t.occurred_on <= ${to}::date
     order by t.occurred_on, t.created_at, t.id
     limit ${limit}
     offset ${offset}
@@ -586,7 +611,7 @@ export async function getGeneralLedger(
       and l.organization_id = ${organizationId}
       and t.voided_at is null
       and t.occurred_on >= ${from}::date
-      and t.occurred_on < ${to}::date
+      and t.occurred_on <= ${to}::date
   `;
   let periodNet = BigInt(periodRows[0].net as string);
   const total = Number(periodRows[0].total as string);
@@ -611,7 +636,12 @@ export async function getGeneralLedger(
     }
 
     lines.push({
-      date: typeof r.occurred_on === 'string' ? r.occurred_on.slice(0, 10) : String(r.occurred_on).slice(0, 10),
+      // postgres.js 把 date 列解析成 Date 对象而不是字符串——旧代码在这个分支
+      // 用 String(r.occurred_on) 兜底，产出的是 `Thu Aug 06 2026 ...` 这种
+      // JS 默认格式而不是 ISO 日期，总账页面因此把每一行的日期都显示错了。
+      // 复用 toIsoDate（与 guard.ts 的 toDateOnly 同一个坑、同一个修法）
+      // 正确处理 Date | string 两种情况。
+      date: toIsoDate(r.occurred_on as Date | string),
       description: (r.description as string) || '',
       kind: r.kind as string,
       debitMinor,

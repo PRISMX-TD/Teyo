@@ -275,6 +275,8 @@ const zh: Translated<typeof en> = {
     capital_cf: '股本投入',
     loans_cf: '贷款（净额）',
     ownersDraw_cf: '股东提取',
+    unclassified_cf: '未分类变动',
+    unclassifiedHint_cf: '这笔金额来自尚未设置现金流量分类的科目，请让会计师为这些科目指定分类。',
   },
   account: {
     title: '我的账号',

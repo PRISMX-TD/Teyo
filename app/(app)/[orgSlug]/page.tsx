@@ -46,6 +46,7 @@ export default async function OverviewPage({
         expenses={expenses}
         balances={balances}
         locale={locale}
+        baseCurrency={context.baseCurrency}
         i18n={t}
       />
     </>

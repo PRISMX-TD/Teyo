@@ -428,6 +428,48 @@ describe('getGeneralLedger - bounded reads', () => {
   });
 });
 
+describe('getGeneralLedger - inclusive upper bound (Finding 1)', () => {
+  it('includes a transaction dated exactly on the to-date and matches the trial balance at the same asOf', async () => {
+    // `to` 曾经是半开区间的排他端点（occurred_on < to），是全文件里最后一个
+    // 还没收口的报表口径——试算平衡表/资产负债表/损益表/现金流量表都已经是
+    // 闭区间 [from, to]。用 2 月这个文件里其它用例都没碰过的窗口插两笔分录，
+    // 其中一笔恰好落在 to 当天，断言：(1) 它必须出现在 lines 里；(2) 总账的
+    // closingBalance 必须与同一 asOf 下试算平衡表算出的净额一致——这正是
+    // finding 里「总账与试算平衡表在同一天对不上」的那道题。
+    const glBoundAssetId = await createScratchAccount('gl-bound-asset', 'asset');
+    const glBoundCounterId = await createScratchAccount('gl-bound-counter', 'expense');
+
+    await insertBalancedTransaction({
+      occurredOn: '2026-02-10',
+      amountMinor: 4200n,
+      debitAccountId: glBoundAssetId,
+      creditAccountId: glBoundCounterId,
+    });
+    // 恰好落在 to 当天的一笔——半开区间会把它漏掉，closingBalance 也会因此
+    // 少 800n。
+    await insertBalancedTransaction({
+      occurredOn: '2026-02-15',
+      amountMinor: 800n,
+      debitAccountId: glBoundAssetId,
+      creditAccountId: glBoundCounterId,
+    });
+
+    const ledger = await withTransaction(userId, (tx) =>
+      getGeneralLedger(tx, orgId, glBoundAssetId, '2026-02-01', '2026-02-15'),
+    );
+
+    expect(ledger.lines.some((l) => l.date === '2026-02-15')).toBe(true);
+    expect(ledger.total).toBe(2);
+    expect(ledger.closingBalance).toBe(5000n);
+
+    const trialBalance = await withTransaction(userId, (tx) =>
+      getTrialBalance(tx, orgId, '2026-02-15'),
+    );
+    const row = trialBalance.find((r) => r.code === 'gl-bound-asset')!;
+    expect(row.debitMinor - row.creditMinor).toBe(ledger.closingBalance);
+  });
+});
+
 describe('getCashFlow - signs and tie-out (B4 / I8)', () => {
   it('shows a loan drawdown as positive financing cash flow', async () => {
     const [loans] = await admin`
@@ -535,20 +577,28 @@ describe('getCashFlow - signs and tie-out (B4 / I8)', () => {
     expect(checkCashFlow(cf).differenceMinor).toBe(0n);
   });
 
-  it('an unclassified account breaks the tie-out (documents a known production gap)', async () => {
-    // 这条用例把「ties」用例上面那条注释里说的缺口钉成代码，而不是只写在
-    // report 里：insertAccount（server/repositories/accounts.ts）插入新科目
-    // 时从不写 cash_flow_category，界面上也没有任何地方收集这个值，所以
-    // 用户自建的科目在生产环境里天生就是 NULL——一旦它被记账，且对方科目落在
-    // 损益表上，getCashFlow 就会不平。这里不改 accounts.ts/actions/accounts.ts
-    // （收口这个缺口是后续任务，不是本任务范围），只是照着生产环境会发生的
-    // 样子把它复现出来：一个未分类科目 + 一笔命中损益表的分录。
+  it('an unclassified account now surfaces as `unclassified` instead of breaking the tie-out (Finding 2)', async () => {
+    // 这条用例钉住的生产缺口没有变：insertAccount（server/repositories/
+    // accounts.ts）插入新科目时从不写 cash_flow_category，界面上也没有任何
+    // 地方收集这个值，所以用户自建的科目在生产环境里天生就是 NULL——一旦它
+    // 被记账，且对方科目落在损益表上，经营/投资/融资三段就有覆盖不到的
+    // 现金变动。这里仍然不改 accounts.ts/actions/accounts.ts（收口这个缺口
+    // 是后续任务，不是本任务范围）。
     //
-    // 用独立科目 + 10 月这个其它用例都没碰过的窗口，窗口内不涉及任何资金
-    // 科目变动，所以 openingCash 必然等于 closingCash，netChange 里多出来的
-    // 15000 就是 checkCashFlow 报出的全部差额——这一断言一旦哪天缺口被堵上
-    // （比如 insertAccount 开始要求或默认写入 cash_flow_category），就会
-    // 变红，提醒这里需要重新审视。
+    // 变的是产出的形状：以前这个缺口直接体现为 checkCashFlow 报非零差额
+    // （界面上是一条无法解释的"不平"提示）；Finding 2 之后，getCashFlow
+    // 把这个残差算成具名的 unclassified 字段并计入 netChange，tie-out 恒
+    // 成立，缺口改为在报表上以独立一行诚实地展示出来，而不是消失。
+    //
+    // 用独立科目 + 10 月这个其它用例都没碰过的窗口：gapAsset/gapRevenue 都
+    // 不是资金账户，这笔分录完全不触碰任何资金账户，所以窗口内 openingCash
+    // 必然等于 closingCash（真实现金变动为 0）。但 netIncome 把这笔收入
+    // 算成经营活动流入了 +15000（间接法默认收入等价现金），而它的对方科目
+    // gapAsset 既不是字面量 code、也没有 cash_flow_category，没有任何working
+    // capital 调整项能把这 +15000 冲销掉——三段合计因此虚报了 +15000 的现金
+    // 流入。unclassified = 真实变动(0) - 三段合计(15000) = -15000，把三段
+    // 合计里这笔从未真正发生的现金流入原样冲销回去，netChange 因此变回 0，
+    // 与真实的现金变动一致，checkCashFlow 应该读平。
     const gapAssetId = await createScratchAccount('cf-gap-unclassified-asset', 'asset');
     const gapRevenueId = await createScratchAccount('cf-gap-revenue', 'revenue');
 
@@ -564,7 +614,42 @@ describe('getCashFlow - signs and tie-out (B4 / I8)', () => {
     );
 
     expect(cf.openingCash).toBe(cf.closingCash);
-    expect(cf.netChange).toBe(15000n);
-    expect(checkCashFlow(cf).differenceMinor).toBe(15000n);
+    expect(cf.unclassified).toBe(-15000n);
+    expect(cf.netChange).toBe(0n);
+    expect(checkCashFlow(cf).differenceMinor).toBe(0n);
+  });
+
+  it('a Dr Cash / Cr Retained Earnings opening entry surfaces as unclassified and still ties (Finding 2)', async () => {
+    // 这是 finding 里点名的失败场景：手工记账分录可以任意选科目做对方科目，
+    // 而"借现金、贷留存收益"是一家真实企业最普通的第一笔分录（开帐资本）。
+    // retained-earnings 在种子数据里故意不打 cash_flow_category（见
+    // server/services/account-seed.ts 的注释），用户自建科目更是天生没有——
+    // 这里用等价的 scratch 科目复现同样的形状：一个资金账户 + 一个既不是
+    // 字面量匹配项、也没有 cash_flow_category 标签的权益科目。
+    //
+    // 用独立科目 + 12 月这个其它用例都没碰过的窗口。这笔分录只触碰资金
+    // 账户和一个未分类权益科目，不触碰任何损益表科目，所以 netIncome、
+    // 营运资金调整、investingTotal、financingTotal 全部为零——50000 的
+    // 现金变动应该整个落在 unclassified 上，而不是让报表报出一个无法解释
+    // 的"不平"。
+    const scratchCashId = await createScratchAccount('cf-unclass-cash', 'asset', true);
+    const scratchRetainedId = await createScratchAccount('cf-unclass-retained', 'equity');
+
+    const amountMinor = 5_000_000n; // RM 50,000.00
+
+    await insertBalancedTransaction({
+      occurredOn: '2026-12-01',
+      amountMinor,
+      debitAccountId: scratchCashId,
+      creditAccountId: scratchRetainedId,
+    });
+
+    const cf = await withTransaction(userId, (tx) =>
+      getCashFlow(tx, orgId, '2026-12-01', '2026-12-31'),
+    );
+
+    expect(cf.unclassified).toBe(amountMinor);
+    expect(cf.netChange).toBe(amountMinor);
+    expect(checkCashFlow(cf).differenceMinor).toBe(0n);
   });
 });

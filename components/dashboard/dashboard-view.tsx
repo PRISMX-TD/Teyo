@@ -3,6 +3,7 @@
 import React from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
+import { formatMoney } from '@/lib/format';
 import type {
   DashboardKpis,
   MonthlyTrend,
@@ -10,16 +11,13 @@ import type {
   BankBalance,
 } from '@/server/repositories/dashboard';
 
-function fmtMinor(amount: bigint): string {
-  return (Number(amount) / 100).toFixed(2);
-}
-
 type Props = {
   kpis: DashboardKpis;
   trends: MonthlyTrend[];
   expenses: ExpenseByCategory[];
   balances: BankBalance[];
   locale: Locale;
+  baseCurrency: string;
   i18n: Messages;
 };
 
@@ -32,23 +30,33 @@ const MONTH_LABELS_ZH = [
   '7月', '8月', '9月', '10月', '11月', '12月',
 ];
 
-export function DashboardView({ kpis, trends, expenses, balances, locale, i18n }: Props) {
+export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, i18n }: Props) {
   const monthLabels = locale === 'zh' ? MONTH_LABELS_ZH : MONTH_LABELS_EN;
 
   return (
     <div className="dashboard">
-      <KpiHeroStrip kpis={kpis} i18n={i18n} />
+      <KpiHeroStrip kpis={kpis} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
       <div className="dashboard-grid">
         <MonthlyTrendsChart trends={trends} monthLabels={monthLabels} i18n={i18n} />
-        <ExpenseBreakdown expenses={expenses} locale={locale} i18n={i18n} />
+        <ExpenseBreakdown expenses={expenses} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
       </div>
-      <BankBalancesSection balances={balances} locale={locale} i18n={i18n} />
-      <RecentActivity kpis={kpis} i18n={i18n} />
+      <BankBalancesSection balances={balances} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
+      <RecentActivity kpis={kpis} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
     </div>
   );
 }
 
-function KpiHeroStrip({ kpis, i18n }: { kpis: DashboardKpis; i18n: Messages }) {
+function KpiHeroStrip({
+  kpis,
+  locale,
+  baseCurrency,
+  i18n,
+}: {
+  kpis: DashboardKpis;
+  locale: Locale;
+  baseCurrency: string;
+  i18n: Messages;
+}) {
   const cards: { label: string; value: bigint; className: string }[] = [
     { label: i18n.overview.monthIncome, value: kpis.monthIncome, className: 'money-in' },
     { label: i18n.overview.monthExpense, value: kpis.monthExpense, className: 'money-out' },
@@ -63,7 +71,7 @@ function KpiHeroStrip({ kpis, i18n }: { kpis: DashboardKpis; i18n: Messages }) {
       {cards.map((card) => (
         <article key={card.label} className="kpi-card">
           <h3>{card.label}</h3>
-          <p className={`kpi-value ${card.className}`}>{fmtMinor(card.value)}</p>
+          <p className={`kpi-value ${card.className}`}>{formatMoney(card.value, baseCurrency, locale)}</p>
         </article>
       ))}
     </section>
@@ -147,10 +155,12 @@ function MonthlyTrendsChart({
 function ExpenseBreakdown({
   expenses,
   locale,
+  baseCurrency,
   i18n,
 }: {
   expenses: ExpenseByCategory[];
   locale: Locale;
+  baseCurrency: string;
   i18n: Messages;
 }) {
   const maxVal = Math.max(1, ...expenses.map((e) => Number(e.total)));
@@ -178,7 +188,7 @@ function ExpenseBreakdown({
               <div className="expense-bar-track">
                 <div className="expense-bar-fill" style={{ width: `${pct}%` }} />
               </div>
-              <span className="expense-amount">{fmtMinor(exp.total)}</span>
+              <span className="expense-amount">{formatMoney(exp.total, baseCurrency, locale)}</span>
             </div>
           );
         })}
@@ -190,10 +200,12 @@ function ExpenseBreakdown({
 function BankBalancesSection({
   balances,
   locale,
+  baseCurrency,
   i18n,
 }: {
   balances: BankBalance[];
   locale: Locale;
+  baseCurrency: string;
   i18n: Messages;
 }) {
   return (
@@ -206,7 +218,7 @@ function BankBalancesSection({
           {balances.map((b) => (
             <li key={b.accountId}>
               <span>{localizedName({ name_en: b.accountNameEn, name_zh: b.accountNameZh }, locale)}</span>
-              <span className="mono">{fmtMinor(b.balance)}</span>
+              <span className="mono">{formatMoney(b.balance, baseCurrency, locale)}</span>
             </li>
           ))}
         </ul>
@@ -215,7 +227,17 @@ function BankBalancesSection({
   );
 }
 
-function RecentActivity({ kpis, i18n }: { kpis: DashboardKpis; i18n: Messages }) {
+function RecentActivity({
+  kpis,
+  locale,
+  baseCurrency,
+  i18n,
+}: {
+  kpis: DashboardKpis;
+  locale: Locale;
+  baseCurrency: string;
+  i18n: Messages;
+}) {
   const invoiceUnpaid = kpis.unpaidInvoices > 0n;
   const billUnpaid = kpis.unpaidBills > 0n;
 
@@ -238,8 +260,8 @@ function RecentActivity({ kpis, i18n }: { kpis: DashboardKpis; i18n: Messages })
             <span>
               {i18n.overview.unpaidInvoices}:{' '}
               {i18n.overview.unpaidCount
-                .replace('{unpaid}', fmtMinor(kpis.unpaidInvoices))
-                .replace('{overdue}', fmtMinor(kpis.overdueInvoices))}
+                .replace('{unpaid}', formatMoney(kpis.unpaidInvoices, baseCurrency, locale))
+                .replace('{overdue}', formatMoney(kpis.overdueInvoices, baseCurrency, locale))}
             </span>
           </div>
         )}
@@ -249,8 +271,8 @@ function RecentActivity({ kpis, i18n }: { kpis: DashboardKpis; i18n: Messages })
             <span>
               {i18n.overview.unpaidBills}:{' '}
               {i18n.overview.unpaidCount
-                .replace('{unpaid}', fmtMinor(kpis.unpaidBills))
-                .replace('{overdue}', fmtMinor(kpis.overdueBills))}
+                .replace('{unpaid}', formatMoney(kpis.unpaidBills, baseCurrency, locale))
+                .replace('{overdue}', formatMoney(kpis.overdueBills, baseCurrency, locale))}
             </span>
           </div>
         )}

@@ -326,6 +326,20 @@ function CashFlowTable({
             ))}
           </React.Fragment>
         ))}
+        {/* checkCashFlow now always reads balanced by construction (unclassified
+            folds into netChange) — the row below is what surfaces the gap honestly,
+            instead of the self-check silently reading "out of balance". */}
+        {data.unclassified !== 0n && (
+          <>
+            <tr className="section-header">
+              <td colSpan={2}>{t.reports.unclassified_cf}</td>
+            </tr>
+            <tr>
+              <td>{t.reports.unclassifiedHint_cf}</td>
+              <td className="numeric mono">{formatMoney(data.unclassified, baseCurrency, locale)}</td>
+            </tr>
+          </>
+        )}
       </tbody>
       <tfoot>
         <tr>

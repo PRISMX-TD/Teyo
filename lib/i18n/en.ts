@@ -262,6 +262,8 @@ const en = {
     capital_cf: 'Capital Contributions',
     loans_cf: 'Loans (Net)',
     ownersDraw_cf: "Owner's Draw",
+    unclassified_cf: 'Unclassified movement',
+    unclassifiedHint_cf: 'This amount comes from accounts not yet classified for cash flow. Ask your accountant to categorise these accounts.',
   },
   account: {
     title: 'My account',
