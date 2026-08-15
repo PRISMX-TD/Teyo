@@ -119,25 +119,23 @@ export async function updateRecurring(
     nextDueDate?: string;
   },
 ): Promise<void> {
-  const sets: string[] = [];
-  const values: unknown[] = [];
+  const patch: Record<string, unknown> = {};
 
   for (const [key, value] of Object.entries(fields)) {
     if (value === undefined) continue;
     const column = key.replace(/([A-Z])/g, '_$1').toLowerCase();
-    if (key === 'endDate' || key === 'startDate' || key === 'nextDueDate') {
-      sets.push(`${column} = ?::date`);
-    } else {
-      sets.push(`${column} = ?`);
-    }
-    values.push(value);
+    patch[column] = value;
   }
 
-  if (sets.length === 0) return;
+  const columns = Object.keys(patch);
+  if (columns.length === 0) return;
 
+  // postgres.js 的 tx(obj, ...cols) 形式生成参数化的 "col" = $n 列表，
+  // 日期列传字符串即可，Postgres 会按目标列类型隐式转换，
+  // 不需要（也不能）内联 ::date —— 内联会退回字符串拼接。
   await tx`
     update recurring_transactions
-    set ${tx.unsafe(sets.join(', '))}
+    set ${tx(patch, ...columns)}
     where id = ${id} and organization_id = ${orgId}
   `;
 }
