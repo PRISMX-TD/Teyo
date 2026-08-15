@@ -1010,6 +1010,13 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 
   .app-main h1 { font-size: var(--text-xl); }
   .kpi-value { font-size: var(--text-xl); }
+
+  /* Below 16px iOS zooms the viewport on focus. Amount is the most commonly entered field,
+     and being forced to pinch back every time makes the core flow feel broken. */
+  input, select, textarea { font-size: 16px; }
+
+  button, .primary-button, a.primary-button, a.secondary-button { min-height: 44px; }
+  .attachment-preview-btn, .attachment-delete-btn, .btn-small { min-height: 44px; }
 }
 
 @media (max-width: 520px) {
