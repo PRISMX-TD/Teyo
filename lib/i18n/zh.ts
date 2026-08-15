@@ -155,8 +155,8 @@ const zh: Translated<typeof en> = {
     title: '待确认',
     empty: '没有待处理的。你记的账都已经分好类了。',
     badge: '{count} 笔待确认',
-    explain: '这些是你当时不确定的笔。账是平的，只是在交给会计之前需要给它们定个分类。',
-    resolve: '去分类',
+    explain: '这些是你当时不确定的笔。账是平的——要给它定分类，先把它作废，再按正常的收支重新记一笔。',
+    resolve: '作废重录',
   },
   filters: {
     from: '起始日期',

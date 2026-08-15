@@ -60,6 +60,19 @@ export default async function UncertainPage({
                 <span className="uncertain-row-amount mono">
                   {formatMoney(row.amountMinor, row.currency, locale)}
                 </span>
+                {/*
+                  This is NOT a recategorise-in-place link, and must not become one without
+                  also fixing updateTransaction. The row behind it has kind = 'journal'.
+                  updateTransaction() pins kind to existing.kind and then calls
+                  resolveCounterAccountId({ kind: 'journal', ... }), which unconditionally
+                  throws LedgerError('Journal entries do not use categories.') — so saving a
+                  category change on this page always fails, regardless of what the user
+                  picks. The only path that actually works today is the void button already
+                  on that page (transaction-form.tsx's handleVoid): void this entry, then
+                  re-enter it as a normal money-in/money-out. t.uncertain.resolve and
+                  t.uncertain.explain describe that void-and-re-enter path on purpose — do not
+                  reword them back to implying in-place editing works.
+                */}
                 <Link
                   href={`/${orgSlug}/transactions/${row.id}`}
                   className="secondary-button"

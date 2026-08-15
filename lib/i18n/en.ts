@@ -142,8 +142,8 @@ const en = {
     title: 'Needs a decision',
     empty: 'Nothing waiting. Everything you have recorded is sorted.',
     badge: '{count} to sort',
-    explain: 'These are entries you were not sure about. Your books still balance — these just need a category before you hand them to your accountant.',
-    resolve: 'Sort this out',
+    explain: 'These are entries you were not sure about. Your books still balance — to give one a category, void it and re-enter it as a normal money in or money out.',
+    resolve: 'Void & re-enter',
   },
   filters: {
     from: 'From',
