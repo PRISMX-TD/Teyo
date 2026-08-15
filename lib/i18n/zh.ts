@@ -131,6 +131,7 @@ const zh: Translated<typeof en> = {
     choosePlaceholder: '请选择…',
     chooseMoneyAccount: '这笔钱从哪个账户出、或进了哪个账户？',
     chooseCategory: '这笔钱是做什么用的？',
+    otherCategory: '其他分类',
   },
   scenario: {
     title: '发生了什么？',

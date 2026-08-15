@@ -118,6 +118,7 @@ const en = {
     choosePlaceholder: 'Choose…',
     chooseMoneyAccount: 'Which account did the money come from or go into?',
     chooseCategory: 'What was this for?',
+    otherCategory: 'Other category',
   },
   scenario: {
     title: 'What happened?',

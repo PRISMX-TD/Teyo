@@ -552,6 +552,17 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
   .direction-option { flex: 1; }
 }
 
+/* Task 15: recently-used category chips — a shortcut in front of the
+   category <select>, not a replacement for it. min-height 44px meets the
+   mobile touch-target floor unconditionally, same rationale as .direction-option. */
+.category-chips { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-2); }
+.category-chip { min-height: 44px; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); color: var(--text-secondary); background: var(--bg-elevated); border: 1px solid var(--border-input); border-radius: var(--radius-sm); }
+.category-chip.selected { color: #fff; background: var(--accent); border-color: var(--accent); font-weight: 550; }
+/* Without this, the base `button:hover` rule (higher specificity than a
+   two-class selector) repaints the selected chip gray on hover, same reason
+   .primary-button/button[type=submit] need their own :hover override above. */
+.category-chip.selected:hover { background: var(--accent); border-color: var(--accent); color: #fff; }
+
 /* ==========================================================================
    Scenario Picker
    ========================================================================== */

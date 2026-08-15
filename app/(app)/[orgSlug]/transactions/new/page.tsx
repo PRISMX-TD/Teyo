@@ -4,7 +4,11 @@ import { getMessages, type Locale } from '@/lib/i18n';
 import { requirePermission, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { findAccountByCode, listMoneyAccounts } from '@/server/repositories/accounts';
-import { listSelectableCategories, type CategoryRow } from '@/server/repositories/categories';
+import {
+  listRecentCategories,
+  listSelectableCategories,
+  type CategoryRow,
+} from '@/server/repositories/categories';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { scenarioById, type Scenario } from '@/server/domain/scenario';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
@@ -22,12 +26,26 @@ const toOption = (row: { id: string; nameEn: string | null; nameZh: string | nul
 });
 
 async function loadFormData(tx: Tx, organizationId: string) {
-  const [moneyAccounts, incomeCategories, expenseCategories] = await Promise.all([
+  const [
+    moneyAccounts,
+    incomeCategories,
+    expenseCategories,
+    recentIncomeCategories,
+    recentExpenseCategories,
+  ] = await Promise.all([
     listMoneyAccounts(tx, organizationId),
     listSelectableCategories(tx, organizationId, 'income'),
     listSelectableCategories(tx, organizationId, 'expense'),
+    listRecentCategories(tx, organizationId, 'income'),
+    listRecentCategories(tx, organizationId, 'expense'),
   ]);
-  return { moneyAccounts, incomeCategories, expenseCategories };
+  return {
+    moneyAccounts,
+    incomeCategories,
+    expenseCategories,
+    recentIncomeCategories,
+    recentExpenseCategories,
+  };
 }
 
 export default async function NewTransactionPage({
@@ -49,10 +67,13 @@ export default async function NewTransactionPage({
   // category dropdown and all. Reachable from the scenario picker's
   // "skip this" link so an experienced user is never forced through a card.
   if (scenarioParam === ADVANCED) {
-    const { moneyAccounts, incomeCategories, expenseCategories } = await withTransaction(
-      context.userId,
-      (tx) => loadFormData(tx, context.organizationId),
-    );
+    const {
+      moneyAccounts,
+      incomeCategories,
+      expenseCategories,
+      recentIncomeCategories,
+      recentExpenseCategories,
+    } = await withTransaction(context.userId, (tx) => loadFormData(tx, context.organizationId));
 
     return (
       <>
@@ -64,6 +85,8 @@ export default async function NewTransactionPage({
           moneyAccounts={moneyAccounts.map(toOption)}
           incomeCategories={incomeCategories.map(toOption)}
           expenseCategories={expenseCategories.map(toOption)}
+          recentIncomeCategories={recentIncomeCategories.map(toOption)}
+          recentExpenseCategories={recentExpenseCategories.map(toOption)}
           currencies={[...SUPPORTED_CURRENCIES]}
         />
       </>
@@ -77,10 +100,15 @@ export default async function NewTransactionPage({
     return <ScenarioPicker orgSlug={orgSlug} locale={locale} />;
   }
 
-  const { moneyAccounts, incomeCategories, expenseCategories, presetCategoryId, presetAccountId } =
-    await withTransaction(context.userId, (tx) =>
-      loadScenarioFormData(tx, context, scenario),
-    );
+  const {
+    moneyAccounts,
+    incomeCategories,
+    expenseCategories,
+    recentIncomeCategories,
+    recentExpenseCategories,
+    presetCategoryId,
+    presetAccountId,
+  } = await withTransaction(context.userId, (tx) => loadScenarioFormData(tx, context, scenario));
 
   return (
     <>
@@ -92,6 +120,8 @@ export default async function NewTransactionPage({
         moneyAccounts={moneyAccounts.map(toOption)}
         incomeCategories={incomeCategories.map(toOption)}
         expenseCategories={expenseCategories.map(toOption)}
+        recentIncomeCategories={recentIncomeCategories.map(toOption)}
+        recentExpenseCategories={recentExpenseCategories.map(toOption)}
         currencies={[...SUPPORTED_CURRENCIES]}
         scenario={scenario}
         presetCategoryId={presetCategoryId}
@@ -102,7 +132,10 @@ export default async function NewTransactionPage({
 }
 
 async function loadScenarioFormData(tx: Tx, context: OrgContext, scenario: Scenario) {
-  const [{ moneyAccounts, incomeCategories, expenseCategories }, presetAccount] = await Promise.all([
+  const [
+    { moneyAccounts, incomeCategories, expenseCategories, recentIncomeCategories, recentExpenseCategories },
+    presetAccount,
+  ] = await Promise.all([
     loadFormData(tx, context.organizationId),
     scenario.defaultAccountCode
       ? findAccountByCode(tx, context.organizationId, scenario.defaultAccountCode)
@@ -125,5 +158,13 @@ async function loadScenarioFormData(tx: Tx, context: OrgContext, scenario: Scena
     }
   }
 
-  return { moneyAccounts, incomeCategories, expenseCategories, presetCategoryId, presetAccountId };
+  return {
+    moneyAccounts,
+    incomeCategories,
+    expenseCategories,
+    recentIncomeCategories,
+    recentExpenseCategories,
+    presetCategoryId,
+    presetAccountId,
+  };
 }

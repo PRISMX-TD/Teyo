@@ -6,6 +6,7 @@ import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { RateField } from '@/components/transaction/rate-field';
 import { AttachmentPanel } from '@/components/transaction/attachment-panel';
+import { CategoryChips } from '@/components/transaction/category-chips';
 import {
   createJournal,
   createTransaction,
@@ -44,6 +45,13 @@ type Props = {
   moneyAccounts: Option[];
   incomeCategories: Option[];
   expenseCategories: Option[];
+  /**
+   * 该公司最近 90 天用得最多的分类（Task 15），已经按 kind 分好、排除了
+   * 只应由系统过账的分类。缺省为空数组——CategoryChips 空数组时不渲染
+   * 芯片行，下拉照常独立工作，编辑页目前就是这么用的（未传这两个 prop）。
+   */
+  recentIncomeCategories?: Option[];
+  recentExpenseCategories?: Option[];
   currencies: string[];
   /** 编辑模式时传入已有数据 */
   mode?: 'create' | 'edit';
@@ -74,6 +82,8 @@ export function TransactionForm({
   moneyAccounts,
   incomeCategories,
   expenseCategories,
+  recentIncomeCategories = [],
+  recentExpenseCategories = [],
   currencies,
   mode = 'create',
   initialData,
@@ -94,6 +104,12 @@ export function TransactionForm({
   const [kind, setKind] = useState<Kind>(
     initialData?.kind ?? (scenario && scenario.kind !== 'journal' ? scenario.kind : 'expense'),
   );
+  // Lifted out of the <select> (was defaultValue/uncontrolled) so a chip
+  // click and picking from the dropdown are the same action: both just set
+  // this value, and the select mirrors it back via value=. See handleSubmit
+  // below — it still reads categoryId from formData, untouched, because the
+  // select still carries name="categoryId" and this state drives its value.
+  const [categoryId, setCategoryId] = useState(initialData?.categoryId ?? '');
   const [currency, setCurrency] = useState(initialData?.currency ?? baseCurrency);
   const [occurredOn, setOccurredOn] = useState(
     () => initialData?.occurredOn ?? new Date().toISOString().slice(0, 10),
@@ -113,6 +129,7 @@ export function TransactionForm({
   const clientUuid = useMemo(() => crypto.randomUUID(), []);
 
   const categories = kind === 'income' ? incomeCategories : expenseCategories;
+  const recentCategories = kind === 'income' ? recentIncomeCategories : recentExpenseCategories;
   const kindLabels: Record<Kind, string> = {
     expense: t.transaction.expense,
     income: t.transaction.income,
@@ -242,7 +259,13 @@ export function TransactionForm({
                 name="kind"
                 value={option}
                 checked={kind === option}
-                onChange={() => setKind(option)}
+                onChange={() => {
+                  setKind(option);
+                  // income/expense draw from different category pools; a
+                  // categoryId picked under the old kind won't exist as an
+                  // <option> under the new one.
+                  setCategoryId('');
+                }}
               />
               {kindLabels[option]}
             </label>
@@ -358,8 +381,24 @@ export function TransactionForm({
         </>
       ) : scenario && !scenario.needsCategory ? null : (
         <>
-          <label htmlFor="categoryId">{t.transaction.chooseCategory}</label>
-          <select id="categoryId" name="categoryId" required defaultValue={initialData?.categoryId ?? ''}>
+          {/* Describes the chips + fallback select as a pair, so it is not
+              `for`-bound to either one specifically — the select below has
+              its own label immediately above it. */}
+          <label>{t.transaction.chooseCategory}</label>
+          <CategoryChips
+            categories={recentCategories}
+            selectedId={categoryId}
+            onSelect={setCategoryId}
+            locale={locale}
+          />
+          <label htmlFor="categoryId">{t.transaction.otherCategory}</label>
+          <select
+            id="categoryId"
+            name="categoryId"
+            required
+            value={categoryId}
+            onChange={(event) => setCategoryId(event.target.value)}
+          >
             <option value="" disabled>
               {t.transaction.choosePlaceholder}
             </option>

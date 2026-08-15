@@ -201,6 +201,44 @@ export async function listSelectableCategories(
   }));
 }
 
+/**
+ * 供录入表单的快捷芯片使用：按该公司最近 90 天内的使用频次取前 `limit`
+ * 个分类（默认 6）。
+ *
+ * 与 listSelectableCategories 一样排除只应由系统过账的分类——芯片比下拉
+ * 更容易被误触，把折旧/摊销这类分类摆成一键可选的芯片，比留在下拉里更危险。
+ */
+export async function listRecentCategories(
+  tx: Tx,
+  organizationId: string,
+  kind: 'income' | 'expense',
+  limit = 6,
+): Promise<CategoryRow[]> {
+  const rows = await tx`
+    select c.id, c.name_en, c.name_zh, c.kind, c.account_id, c.is_active,
+           count(t.id) as uses
+    from categories c
+    join transactions t on t.category_id = c.id
+    where c.organization_id = ${organizationId}
+      and c.kind = ${kind}
+      and c.is_active
+      and not c.is_system_only
+      and t.voided_at is null
+      and t.occurred_on >= current_date - interval '90 days'
+    group by c.id, c.name_en, c.name_zh, c.kind, c.account_id, c.is_active
+    order by uses desc, c.sort_order
+    limit ${limit}
+  `;
+  return rows.map((row) => ({
+    id: row.id as string,
+    nameEn: (row.name_en as string | null) ?? null,
+    nameZh: (row.name_zh as string | null) ?? null,
+    kind: row.kind as CategoryRow['kind'],
+    accountId: row.account_id as string,
+    isActive: row.is_active as boolean,
+  }));
+}
+
 /** 列出全部分类（含已隐藏），供设置页管理。 */
 export async function listAllCategories(
   tx: Tx,
