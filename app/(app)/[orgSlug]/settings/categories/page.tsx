@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { NamedList } from '@/components/settings/named-list';
 import { getMessages } from '@/lib/i18n';
-import { createCategory, renameCategory, setCategoryActive } from '@/server/actions/categories';
+import { createCategoryFromNamedList, renameCategory, setCategoryActive } from '@/server/actions/categories';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listAllCategories } from '@/server/repositories/categories';
+import { listAllAccounts } from '@/server/repositories/accounts';
 
 export default async function CategoriesSettingsPage({
   params,
@@ -21,6 +22,10 @@ export default async function CategoriesSettingsPage({
     listAllCategories(tx, context.organizationId),
   );
 
+  const accounts = await withTransaction(context.userId, (tx) =>
+    listAllAccounts(tx, context.organizationId),
+  );
+
   const items = categories.map((c) => ({
     id: c.id,
     nameEn: c.nameEn,
@@ -28,6 +33,13 @@ export default async function CategoriesSettingsPage({
     isActive: c.isActive,
     kind: c.kind,
   }));
+
+  const incomeAccounts = accounts
+    .filter((a) => a.type === 'revenue' && a.isActive)
+    .map((a) => ({ id: a.id, nameEn: a.nameEn, nameZh: a.nameZh }));
+  const expenseAccounts = accounts
+    .filter((a) => a.type === 'expense' && a.isActive)
+    .map((a) => ({ id: a.id, nameEn: a.nameEn, nameZh: a.nameZh }));
 
   return (
     <>
@@ -39,9 +51,10 @@ export default async function CategoriesSettingsPage({
         orgSlug={orgSlug}
         items={items}
         locale={locale}
-        onCreate={createCategory as unknown as (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>}
-        onRename={renameCategory as unknown as (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>}
-        onToggle={setCategoryActive as unknown as (orgSlug: string, id: string, active: boolean) => Promise<unknown>}
+        categoryOptions={{ incomeAccounts, expenseAccounts }}
+        onCreate={createCategoryFromNamedList}
+        onRename={renameCategory}
+        onToggle={setCategoryActive}
       />
     </>
   );

@@ -19,9 +19,8 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 const { createMoneyAccount, renameAccount, setAccountActive } = await import(
   '@/server/actions/accounts'
 );
-const { createCategory, renameCategory, setCategoryActive } = await import(
-  '@/server/actions/categories'
-);
+const { createCategory, createCategoryFromNamedList, renameCategory, setCategoryActive } =
+  await import('@/server/actions/categories');
 
 let ownerId: string;
 let adminId: string;
@@ -285,6 +284,55 @@ describe('createCategory', () => {
         accountId: accountsByCode.rent,
       }),
     ).rejects.toMatchObject({ code: 'forbidden' });
+  });
+});
+
+describe('createCategoryFromNamedList', () => {
+  // NamedList 是通用组件，onCreate 的 payload 里 kind/accountId 是可选的；
+  // 分类页通过 categoryOptions 收集这两个字段后再传进来。这里测的是那条
+  // Server Action 适配层本身，而不是 createCategory 的校验规则（上面已覆盖）。
+  it('creates a category when kind and account are both chosen', async () => {
+    currentUserId = ownerId;
+    const { id } = await createCategoryFromNamedList(orgSlug, {
+      nameEn: 'Stock Purchases',
+      nameZh: '进货补充',
+      kind: 'expense',
+      accountId: accountsByCode.purchases,
+    });
+
+    const [row] = await admin`
+      select organization_id, kind, account_id, is_active
+      from categories where id = ${id}
+    `;
+    expect(row.organization_id).toBe(orgId);
+    expect(row.kind).toBe('expense');
+    expect(row.account_id).toBe(accountsByCode.purchases);
+    expect(row.is_active).toBe(true);
+  });
+
+  it('refuses a payload missing kind or account with a readable message, not a raw ZodError', async () => {
+    currentUserId = ownerId;
+    // 删掉 as unknown as 之前，client 只发 nameEn/nameZh 两个字段，
+    // categorySchema.parse 直接抛 ZodError，用户看到的是一坨 JSON。
+    // 这里确认收窄失败时给的是一句能看懂的话。
+    await expect(
+      createCategoryFromNamedList(orgSlug, { nameEn: 'No Kind' }),
+    ).rejects.toThrow(/choose income or expense/i);
+
+    await expect(
+      createCategoryFromNamedList(orgSlug, { nameEn: 'No Account', kind: 'expense' }),
+    ).rejects.toThrow(/choose income or expense/i);
+  });
+
+  it('still enforces that an income category maps to a revenue account', async () => {
+    currentUserId = ownerId;
+    await expect(
+      createCategoryFromNamedList(orgSlug, {
+        nameEn: 'Wrong',
+        kind: 'income',
+        accountId: accountsByCode.rent,
+      }),
+    ).rejects.toThrow(/must map to a revenue account/i);
   });
 });
 

@@ -13,32 +13,75 @@ type Item = {
   kind?: string;
 };
 
+type AccountOption = { id: string; nameEn: string | null; nameZh: string | null };
+
+type CreatePayload = {
+  nameEn?: string;
+  nameZh?: string;
+  kind?: 'income' | 'expense';
+  accountId?: string;
+};
+
 type Props = {
   orgSlug: string;
   items: Item[];
   locale: Locale;
-  onCreate: (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>;
+  /** 仅分类页传入：需要额外采集 kind 与 accountId。 */
+  categoryOptions?: {
+    incomeAccounts: AccountOption[];
+    expenseAccounts: AccountOption[];
+  };
+  onCreate: (orgSlug: string, payload: CreatePayload) => Promise<unknown>;
   onRename: (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>;
   onToggle: (orgSlug: string, id: string, active: boolean) => Promise<unknown>;
 };
 
-export function NamedList({ orgSlug, items, locale, onCreate, onRename, onToggle }: Props) {
+export function NamedList({
+  orgSlug,
+  items,
+  locale,
+  categoryOptions,
+  onCreate,
+  onRename,
+  onToggle,
+}: Props) {
   const t = getMessages(locale);
   const [nameEn, setNameEn] = useState('');
   const [nameZh, setNameZh] = useState('');
+  const [kind, setKind] = useState<'' | 'income' | 'expense'>('');
+  const [accountId, setAccountId] = useState('');
   const [editing, setEditing] = useState<string | null>(null);
   const [editEn, setEditEn] = useState('');
   const [editZh, setEditZh] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
+  const accountsForKind: AccountOption[] =
+    kind === 'income'
+      ? categoryOptions?.incomeAccounts ?? []
+      : kind === 'expense'
+        ? categoryOptions?.expenseAccounts ?? []
+        : [];
+
   async function handleCreate() {
+    if (categoryOptions && (!kind || !accountId)) {
+      setError(t.errors.validation);
+      return;
+    }
+
     setPending(true);
     setError(null);
     try {
-      await onCreate(orgSlug, { nameEn: nameEn.trim(), nameZh: nameZh.trim() });
+      const payload: CreatePayload = { nameEn: nameEn.trim(), nameZh: nameZh.trim() };
+      if (categoryOptions) {
+        payload.kind = kind as 'income' | 'expense';
+        payload.accountId = accountId;
+      }
+      await onCreate(orgSlug, payload);
       setNameEn('');
       setNameZh('');
+      setKind('');
+      setAccountId('');
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -100,6 +143,35 @@ export function NamedList({ orgSlug, items, locale, onCreate, onRename, onToggle
       <div className="add-form">
         <input placeholder={t.settings.nameEn} value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
         <input placeholder={t.settings.nameZh} value={nameZh} onChange={(e) => setNameZh(e.target.value)} />
+        {categoryOptions ? (
+          <>
+            <select
+              aria-label={t.settings.categoryKind}
+              value={kind}
+              onChange={(e) => {
+                setKind(e.target.value as '' | 'income' | 'expense');
+                setAccountId('');
+              }}
+            >
+              <option value="">{t.transaction.choosePlaceholder}</option>
+              <option value="income">{t.settings.kindIncome}</option>
+              <option value="expense">{t.settings.kindExpense}</option>
+            </select>
+            <select
+              aria-label={t.settings.categoryAccount}
+              value={accountId}
+              onChange={(e) => setAccountId(e.target.value)}
+              disabled={!kind}
+            >
+              <option value="">{t.transaction.choosePlaceholder}</option>
+              {accountsForKind.map((account) => (
+                <option key={account.id} value={account.id}>
+                  {localizedName({ name_en: account.nameEn, name_zh: account.nameZh }, locale)}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : null}
         <button onClick={handleCreate} disabled={pending}>{t.settings.addCategory}</button>
       </div>
     </div>

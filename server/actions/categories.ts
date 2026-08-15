@@ -21,6 +21,38 @@ export async function createCategory(
 ): Promise<{ id: string }> {
   const context = await requirePermission(orgSlug, 'category:manage');
   const parsed = categorySchema.parse(input);
+  return createCategoryChecked(orgSlug, context, parsed);
+}
+
+/**
+ * `NamedList` 是通用组件，`onCreate` 的 payload 里 kind/accountId 是可选的——
+ * 其它复用它的列表（科目、联系人等）根本不需要这两个字段。分类这边它们其实
+ * 是必填的，所以在跨越 Server/Client 组件边界之前，在这里做一次运行时收窄，
+ * 而不是放宽 `createCategory` 本身的类型或者用 `as` 把类型系统压下去——
+ * 那样 tsc 就又检查不到这条链路了。
+ */
+export async function createCategoryFromNamedList(
+  orgSlug: string,
+  input: { nameEn?: string; nameZh?: string; kind?: 'income' | 'expense'; accountId?: string },
+): Promise<{ id: string }> {
+  const context = await requirePermission(orgSlug, 'category:manage');
+  if (!input.kind || !input.accountId) {
+    throw new CategoryError('Choose income or expense and an account before adding a category.');
+  }
+  const parsed = categorySchema.parse({
+    nameEn: input.nameEn,
+    nameZh: input.nameZh,
+    kind: input.kind,
+    accountId: input.accountId,
+  });
+  return createCategoryChecked(orgSlug, context, parsed);
+}
+
+async function createCategoryChecked(
+  orgSlug: string,
+  context: Awaited<ReturnType<typeof requirePermission>>,
+  parsed: { nameEn?: string; nameZh?: string; kind: 'income' | 'expense'; accountId: string },
+): Promise<{ id: string }> {
 
   const result = await withTransaction(context.userId, async (tx) => {
     const account = await getAccount(tx, context.organizationId, parsed.accountId);
