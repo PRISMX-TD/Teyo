@@ -25,7 +25,7 @@ where not exists (
 );
 
 insert into accounts (organization_id, code, name_en, name_zh, type, is_money_account, is_system, sort_order, cash_flow_category)
-select o.id, 'purchases', 'Purchases', '进货', 'expense', false, false, 405, 'operating'
+select o.id, 'purchases', 'Purchases', '进货', 'expense', false, true, 405, 'operating'
 from organizations o
 where not exists (
   select 1 from accounts a where a.organization_id = o.id and a.code = 'purchases'
