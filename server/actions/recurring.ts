@@ -13,7 +13,8 @@ import {
   computeNextDueDate,
 } from '@/server/repositories/recurring';
 import { recordAudit } from '@/server/repositories/audit-logs';
-import type { TransactionKind } from '@/server/domain/ledger';
+import { assertLineInvariants, type TransactionKind } from '@/server/domain/ledger';
+import { RATE_SCALE } from '@/server/domain/exchange-rate';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 
 export async function createRecurring(
@@ -153,27 +154,38 @@ export async function generateDueRecurring(
         currency: entry.currency,
         amountMinor,
         baseAmountMinor: amountMinor,
-        scaledRate: 100000000n,
+        scaledRate: RATE_SCALE,
         rateSource: 'manual',
         categoryId: entry.categoryId,
         createdBy: context.userId,
         clientUuid: crypto.randomUUID(),
       });
 
-      await insertJournalLines(tx, context.organizationId, txnId, [
+      const lines = [
         {
           accountId: entry.debitAccountId,
-          direction: 'debit',
+          direction: 'debit' as const,
           amountMinor,
           baseAmountMinor: amountMinor,
         },
         {
           accountId: entry.creditAccountId,
-          direction: 'credit',
+          direction: 'credit' as const,
           amountMinor,
           baseAmountMinor: amountMinor,
         },
-      ]);
+      ];
+
+      // 阶段 2 会把这条路径并入 postJournal，届时汇率由 resolveRate 解析。
+      // 在那之前，外币模板会在此明确失败，而不是静默按 1:1 记账。
+      assertLineInvariants(lines, {
+        currency: entry.currency,
+        baseCurrency: context.baseCurrency,
+        scaledRate: RATE_SCALE,
+        rateSource: 'auto',
+      });
+
+      await insertJournalLines(tx, context.organizationId, txnId, lines);
 
       // Update next due date
       const nextDue = computeNextDueDate(

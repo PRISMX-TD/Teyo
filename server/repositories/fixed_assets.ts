@@ -1,5 +1,6 @@
 import type { Tx } from '@/server/db/transaction';
-import type { DraftJournalLine } from '@/server/domain/ledger';
+import { assertLineInvariants, type DraftJournalLine } from '@/server/domain/ledger';
+import { RATE_SCALE } from '@/server/domain/exchange-rate';
 
 export type DepreciationMethod = 'straight_line' | 'declining_balance';
 
@@ -439,7 +440,6 @@ export async function postDepreciation(
   const accumAccountId = asset.depn_accum_account_id as string;
   const occurredOn = period;
 
-  const SCALE = 100_000_000n;
   const clientUuid = crypto.randomUUID();
 
   const lines: DraftJournalLine[] = [
@@ -455,11 +455,18 @@ export async function postDepreciation(
     currency: opts.baseCurrency,
     amountMinor: depnMinor,
     baseAmountMinor: depnMinor,
-    scaledRate: SCALE,
+    scaledRate: RATE_SCALE,
     rateSource: 'auto',
     categoryId: null,
     createdBy: opts.userId,
     clientUuid,
+  });
+
+  assertLineInvariants(lines, {
+    currency: opts.baseCurrency,
+    baseCurrency: opts.baseCurrency,
+    scaledRate: RATE_SCALE,
+    rateSource: 'auto',
   });
 
   await opts.insertJournalLines(tx, organizationId, transactionId, lines);

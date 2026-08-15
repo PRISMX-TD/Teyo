@@ -13,6 +13,7 @@ import {
   setPoStatus,
   getNextPoNumber,
 } from '@/server/repositories/purchase_orders';
+import { RATE_SCALE } from '@/server/domain/exchange-rate';
 
 export async function createPurchaseOrder(
   orgSlug: string,
@@ -37,7 +38,7 @@ export async function createPurchaseOrder(
   const result = await withTransaction(context.userId, async (tx) => {
     const poNumber = await getNextPoNumber(tx, context.organizationId);
 
-    const exchangeRate = input.exchangeRate ? BigInt(input.exchangeRate) : 100_000_000n;
+    const exchangeRate = input.exchangeRate ? BigInt(input.exchangeRate) : RATE_SCALE;
 
     // 计算 baseTotalMinor = sum of item amountMinor
     const baseTotalMinor = input.items.reduce((sum, item) => {

@@ -3,7 +3,12 @@
 import { revalidatePath } from 'next/cache';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission } from '@/server/auth/guard';
-import { buildJournalLines, LedgerError, type TransactionKind } from '@/server/domain/ledger';
+import {
+  assertLineInvariants,
+  buildJournalLines,
+  LedgerError,
+  type TransactionKind,
+} from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import {
   parseRateToScaled,
@@ -170,6 +175,13 @@ export async function createTransaction(
       clientUuid: input.clientUuid,
     });
 
+    assertLineInvariants(lines, {
+      currency: input.currency,
+      baseCurrency: context.baseCurrency,
+      scaledRate,
+      rateSource: source,
+    });
+
     await insertJournalLines(tx, context.organizationId, id, lines);
 
     await recordAudit(tx, {
@@ -272,6 +284,13 @@ export async function createJournal(
       categoryId: null,
       createdBy: context.userId,
       clientUuid,
+    });
+
+    assertLineInvariants(lines, {
+      currency,
+      baseCurrency,
+      scaledRate: RATE_SCALE,
+      rateSource: 'auto',
     });
 
     await insertJournalLines(tx, context.organizationId, id, lines);
@@ -387,6 +406,13 @@ export async function updateTransaction(
       scaledRate,
       rateSource: source,
       categoryId: kind === 'transfer' ? null : (input.categoryId as string),
+    });
+
+    assertLineInvariants(lines, {
+      currency: input.currency,
+      baseCurrency: context.baseCurrency,
+      scaledRate,
+      rateSource: source,
     });
 
     await deleteJournalLines(tx, context.organizationId, id);
