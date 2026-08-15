@@ -6,6 +6,7 @@
 
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { admin, createTestUser, deleteTestUser, deleteTestOrganizations } from '@/tests/helpers/db';
+import { toIsoDate } from '@/lib/format';
 import { withTransaction } from '@/server/db/transaction';
 import { updateRecurring } from '@/server/repositories/recurring';
 
@@ -66,7 +67,9 @@ describe('updateRecurring', () => {
     const [row] = await admin`
       select next_due_date from recurring_transactions where id = ${recurringId}
     `;
-    expect(String(row.next_due_date).slice(0, 10)).toBe('2026-02-01');
+    // postgres.js 把 date 列解析成 Date 对象，String(d).slice(0,10) 得到的是
+    // "Sun Feb 01" 而不是 ISO 日期 —— 与 getGeneralLedger 里修掉的是同一个坑。
+    expect(toIsoDate(row.next_due_date as Date)).toBe('2026-02-01');
   });
 
   it('updates a non-date column', async () => {
