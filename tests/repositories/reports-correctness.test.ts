@@ -23,7 +23,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { admin, createTestUser, deleteTestUser, deleteTestOrganizations } from '@/tests/helpers/db';
 import { withTransaction } from '@/server/db/transaction';
 import { getBalanceSheet, getProfitLoss, getTrialBalance } from '@/server/repositories/reports';
-import { checkTrialBalance } from '@/server/domain/report-invariants';
+import { checkBalanceSheet, checkTrialBalance } from '@/server/domain/report-invariants';
 
 let userId: string;
 let orgId: string;
@@ -258,5 +258,39 @@ describe('getProfitLoss - inclusive upper bound (B2)', () => {
     // 同一天的销售，现金与收入必须同时出现
     expect(cash.totalMinor).toBe(100000n);
     expect(pl.revenueTotal).toBe(100000n);
+  });
+});
+
+describe('getBalanceSheet - synthetic current-year earnings (B3 / I5)', () => {
+  it('returns current-year earnings separately from equity', async () => {
+    const to = '2026-12-31';
+    const pl = await withTransaction(userId, (tx) =>
+      getProfitLoss(tx, orgId, '2026-01-01', to),
+    );
+    const bs = await withTransaction(userId, (tx) =>
+      getBalanceSheet(tx, orgId, to, pl.netIncome),
+    );
+
+    expect(bs.currentYearEarnings).toBe(pl.netIncome);
+    expect(bs.equityRows.some((r) => r.code === 'retained-earnings')).toBe(false);
+  });
+
+  it('balances: assets = liabilities + equity + current-year earnings', async () => {
+    const to = '2026-12-31';
+    const pl = await withTransaction(userId, (tx) =>
+      getProfitLoss(tx, orgId, '2026-01-01', to),
+    );
+    const bs = await withTransaction(userId, (tx) =>
+      getBalanceSheet(tx, orgId, to, pl.netIncome),
+    );
+
+    const result = checkBalanceSheet({
+      assetTotal: bs.assetTotal,
+      liabilityTotal: bs.liabilityTotal,
+      equityTotal: bs.equityTotal,
+      currentYearEarnings: bs.currentYearEarnings,
+    });
+    expect(result.differenceMinor).toBe(0n);
+    expect(result.balanced).toBe(true);
   });
 });

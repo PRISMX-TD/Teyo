@@ -165,12 +165,12 @@ export type BalanceSheetResult = {
   equityRows: BalanceSheetRow[];
   assetTotal: bigint;
   liabilityTotal: bigint;
-  equityTotal: bigint;
-  netIncome: bigint;
+  equityTotal: bigint;          // 不含本年利润
+  currentYearEarnings: bigint;  // 合成行，独立于 equityTotal
 };
 
 /**
- * 资产负债表：资产 = 负债 + 权益。
+ * 资产负债表：资产 = 负债 + 权益 + 本年利润。
  *
  * 与 getTrialBalance 同样的写法：先用内连接子查询把作废与截止日期条件做在
  * journal_lines/transactions 上（内连接才能让这两个条件真正生效——挂在
@@ -182,13 +182,17 @@ export type BalanceSheetResult = {
  * - 资产类：借方合计 - 贷方合计（正常余额在借方）
  * - 负债/权益类：贷方合计 - 借方合计（正常余额在贷方）
  *
- * 权益中包含了当期净利润（损益表结果），所以 A = L + E 自然平衡。
+ * 「本年利润」是合成行，不是科目：它不产生分录、不落库，
+ * 由调用方传入的当期损益结果原样带出。年结（把它转入留存收益）在阶段 6。
+ *
+ * 因此平衡等式是 资产 = 负债 + 权益 + 本年利润，
+ * 而不是把利润并进权益后再比较。
  */
 export async function getBalanceSheet(
   tx: Tx,
   organizationId: string,
   asOf: string,
-  netIncome: bigint,
+  currentYearEarnings: bigint,
 ): Promise<BalanceSheetResult> {
   const rows = await tx`
     with movement as (
@@ -232,11 +236,6 @@ export async function getBalanceSheet(
       totalMinor = creditMinor - debitMinor;
     }
 
-    // 留存收益科目：叠加当期净利润
-    if (r.code === 'retained-earnings') {
-      totalMinor = totalMinor + netIncome;
-    }
-
     const row: BalanceSheetRow = {
       code: r.code as string,
       nameEn: (r.name_en as string | null) ?? null,
@@ -255,7 +254,15 @@ export async function getBalanceSheet(
   const liabilityTotal = liabilityRows.reduce((sum, r) => sum + r.totalMinor, 0n);
   const equityTotal = equityRows.reduce((sum, r) => sum + r.totalMinor, 0n);
 
-  return { assetRows, liabilityRows, equityRows, assetTotal, liabilityTotal, equityTotal, netIncome };
+  return {
+    assetRows,
+    liabilityRows,
+    equityRows,
+    assetTotal,
+    liabilityTotal,
+    equityTotal,
+    currentYearEarnings,
+  };
 }
 
 /* =========================================================================
