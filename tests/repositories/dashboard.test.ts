@@ -114,6 +114,59 @@ describe('getFirstRunChecklistState', () => {
     expect(state.hasMoneyAccount).toBe(false);
   });
 
+  it('un-ticks hasMoneyAccount once the qualifying account is archived — it reflects current state, not history', async () => {
+    currentUserId = ownerId;
+    const { createMoneyAccount, setAccountActive } = await import('@/server/actions/accounts');
+
+    // is_system = false 分支：新建一个自定义资金账户为 true 之后，把它
+    // 停用（cash/bank 仍在，不会撞「不能停用最后一个资金账户」的规则），
+    // 必须变回 false——不然一旦建过就是单向棘轮，即便这个账户早就不用了，
+    // 清单也永远显示「已完成」。
+    const createdOrg = await createTestOrgWithSeed(
+      ownerId,
+      'Ratchet Created Co',
+      `ratchet-created-co-${suffix}`,
+      'MYR',
+    );
+    const { id: spareWalletId } = await createMoneyAccount(createdOrg.slug, {
+      nameEn: 'Spare Wallet',
+    });
+
+    let state = await withTransaction(ownerId, (tx) =>
+      getFirstRunChecklistState(tx, createdOrg.id, 'owner'),
+    );
+    expect(state.hasMoneyAccount).toBe(true);
+
+    await setAccountActive(createdOrg.slug, spareWalletId, false);
+    state = await withTransaction(ownerId, (tx) =>
+      getFirstRunChecklistState(tx, createdOrg.id, 'owner'),
+    );
+    expect(state.hasMoneyAccount).toBe(false);
+
+    // 改名分支：同样的道理。改名让它为 true 之后，停用那个改过名的账户
+    // （cash 仍在，同样不会撞最后一个资金账户的规则），也必须变回 false。
+    const renamedOrg = await createTestOrgWithSeed(
+      ownerId,
+      'Ratchet Renamed Co',
+      `ratchet-renamed-co-${suffix}`,
+      'MYR',
+    );
+    await renameAccount(renamedOrg.slug, renamedOrg.accountsByCode.bank, {
+      nameEn: 'Renamed Bank',
+    });
+
+    state = await withTransaction(ownerId, (tx) =>
+      getFirstRunChecklistState(tx, renamedOrg.id, 'owner'),
+    );
+    expect(state.hasMoneyAccount).toBe(true);
+
+    await setAccountActive(renamedOrg.slug, renamedOrg.accountsByCode.bank, false);
+    state = await withTransaction(ownerId, (tx) =>
+      getFirstRunChecklistState(tx, renamedOrg.id, 'owner'),
+    );
+    expect(state.hasMoneyAccount).toBe(false);
+  });
+
   it('completes hasContact and hasFirstTransaction once each action really happens', async () => {
     currentUserId = ownerId;
     await createContact(orgSlug, { type: 'customer', name: 'Acme Supplies' });

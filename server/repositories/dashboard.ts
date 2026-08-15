@@ -316,6 +316,7 @@ export async function getFirstRunChecklistState(
             where organization_id = ${organizationId}
               and is_money_account = true
               and is_system = false
+              and is_active = true
           )
           or exists(
             -- 光新建账户会漏掉最自然的第一反应：把种子里的 Cash / Bank
@@ -326,6 +327,12 @@ export async function getFirstRunChecklistState(
             -- 失效。用 jsonb 的 ?| 运算符挑出 after 里带 nameEn/nameZh 键的记录，
             -- 把它和 setAccountActive 写的 after: {isActive} 区分开，
             -- 只有改名才算数，停用/恢复不算。
+            --
+            -- 两支都要求 is_active = true：这一项问的是「用户现在有没有一个
+            -- 明确认领的资金账户」，是当下状态，不是历史上发生过什么。
+            -- 建过、或者改过名之后又把它停用了，不该继续算数——不然一旦
+            -- 满足过就是单向棘轮，永远打勾，即便这家公司此刻实际上一个
+            -- 自定义/已改名的资金账户都没有在用。
             select 1 from audit_logs al
             join accounts a on a.id = al.entity_id
             where al.organization_id = ${organizationId}
@@ -333,6 +340,7 @@ export async function getFirstRunChecklistState(
               and al.action = 'account.updated'
               and al.after ?| array['nameEn', 'nameZh']
               and a.is_money_account = true
+              and a.is_active = true
           )
         ) as done
       `,
