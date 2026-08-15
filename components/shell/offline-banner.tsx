@@ -9,6 +9,9 @@ export function OfflineBanner({ locale }: { locale: Locale }) {
   const t = getMessages(locale);
   const [offline, setOffline] = useState(false);
   const [pendingCount, setPendingCount] = useState(0);
+  // 累计计数，不随后续（哪怕是空的）flush 而清零：一旦有记录同步失败，
+  // 用户必须持续看到提示直到重新记录，否则就是"已保存"的谎言换了个地方重演。
+  const [failedCount, setFailedCount] = useState(0);
 
   useEffect(() => {
     async function refreshCount() {
@@ -21,7 +24,10 @@ export function OfflineBanner({ locale }: { locale: Locale }) {
       // server action 的模块图（含 postgres 客户端）拉进每个页面的
       // 客户端 bundle，导致所有路由渲染失败。
       const { createTransaction } = await import('@/server/actions/transactions');
-      await flushQueue((orgSlug, payload) => createTransaction(orgSlug, payload));
+      const result = await flushQueue((orgSlug, payload) => createTransaction(orgSlug, payload));
+      if (result.failed > 0) {
+        setFailedCount((prev) => prev + result.failed);
+      }
       await refreshCount();
     }
 
@@ -40,7 +46,7 @@ export function OfflineBanner({ locale }: { locale: Locale }) {
     };
   }, []);
 
-  if (!offline && pendingCount === 0) return null;
+  if (!offline && pendingCount === 0 && failedCount === 0) return null;
 
   return (
     <div role="status" className="offline-banner">
@@ -49,6 +55,9 @@ export function OfflineBanner({ locale }: { locale: Locale }) {
         <span>{t.common.pendingSync.replace('{count}', String(pendingCount))}</span>
       ) : null}
       {offline ? <span>{t.errors.offlineEditBlocked}</span> : null}
+      {failedCount > 0 ? (
+        <span role="alert">{t.common.syncFailed.replace('{count}', String(failedCount))}</span>
+      ) : null}
     </div>
   );
 }

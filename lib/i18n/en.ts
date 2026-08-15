@@ -593,6 +593,7 @@ const en = {
     loading: 'Loading',
     offline: 'Offline',
     pendingSync: '{count} record(s) waiting to sync',
+    syncFailed: '{count} record(s) could not be synced. Please check and re-enter them.',
     previous: 'Previous',
     next: 'Next',
     pageN: 'Page {page}',
