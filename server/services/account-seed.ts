@@ -3,6 +3,8 @@ import type { Tx } from '@/server/db/transaction';
 
 export type AccountType = 'asset' | 'liability' | 'equity' | 'revenue' | 'expense';
 
+export type CashFlowCategory = 'operating' | 'investing' | 'financing';
+
 export type SeedAccount = {
   code: string;
   nameEn: string;
@@ -10,6 +12,11 @@ export type SeedAccount = {
   type: AccountType;
   isMoneyAccount: boolean;
   sortOrder: number;
+  /**
+   * 现金流量表分类：分类的是现金的对方科目，不是资金账户本身。
+   * 资金账户（isMoneyAccount = true）留空——它们是现金本身，不是现金的去向。
+   */
+  cashFlowCategory?: CashFlowCategory;
 };
 
 export type SeedCategory = {
@@ -26,38 +33,38 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   { code: 'bank', nameEn: 'Bank Account', nameZh: '银行账户', type: 'asset', isMoneyAccount: true, sortOrder: 20 },
   { code: 'accounts-receivable', nameEn: 'Accounts Receivable', nameZh: '应收账款', type: 'asset', isMoneyAccount: false, sortOrder: 30 },
   { code: 'inventory', nameEn: 'Inventory', nameZh: '库存', type: 'asset', isMoneyAccount: false, sortOrder: 40 },
-  { code: 'equipment', nameEn: 'Equipment', nameZh: '设备', type: 'asset', isMoneyAccount: false, sortOrder: 50 },
-  { code: 'furniture', nameEn: 'Furniture & Fixtures', nameZh: '家具及装修', type: 'asset', isMoneyAccount: false, sortOrder: 60 },
-  { code: 'vehicles', nameEn: 'Vehicles', nameZh: '车辆', type: 'asset', isMoneyAccount: false, sortOrder: 70 },
-  { code: 'software-intangible', nameEn: 'Software (Intangible)', nameZh: '无形资产·软件', type: 'asset', isMoneyAccount: false, sortOrder: 80 },
+  { code: 'equipment', nameEn: 'Equipment', nameZh: '设备', type: 'asset', isMoneyAccount: false, sortOrder: 50, cashFlowCategory: 'investing' },
+  { code: 'furniture', nameEn: 'Furniture & Fixtures', nameZh: '家具及装修', type: 'asset', isMoneyAccount: false, sortOrder: 60, cashFlowCategory: 'investing' },
+  { code: 'vehicles', nameEn: 'Vehicles', nameZh: '车辆', type: 'asset', isMoneyAccount: false, sortOrder: 70, cashFlowCategory: 'investing' },
+  { code: 'software-intangible', nameEn: 'Software (Intangible)', nameZh: '无形资产·软件', type: 'asset', isMoneyAccount: false, sortOrder: 80, cashFlowCategory: 'investing' },
   { code: 'ad-equipment', nameEn: 'Accum. Depr. - Equipment', nameZh: '累计折旧·设备', type: 'asset', isMoneyAccount: false, sortOrder: 85 },
   { code: 'ad-furniture', nameEn: 'Accum. Depr. - Furniture', nameZh: '累计折旧·家具', type: 'asset', isMoneyAccount: false, sortOrder: 86 },
   { code: 'ad-vehicles', nameEn: 'Accum. Depr. - Vehicles', nameZh: '累计折旧·车辆', type: 'asset', isMoneyAccount: false, sortOrder: 87 },
   { code: 'ad-software', nameEn: 'Accum. Amort. - Software', nameZh: '累计摊销·软件', type: 'asset', isMoneyAccount: false, sortOrder: 88 },
   { code: 'prepaid-expenses', nameEn: 'Prepaid Expenses', nameZh: '预付费用', type: 'asset', isMoneyAccount: false, sortOrder: 90 },
   // 负债
-  { code: 'accounts-payable', nameEn: 'Accounts Payable', nameZh: '应付账款', type: 'liability', isMoneyAccount: false, sortOrder: 110 },
-  { code: 'loans', nameEn: 'Loans', nameZh: '贷款', type: 'liability', isMoneyAccount: false, sortOrder: 120 },
-  { code: 'tax-payable', nameEn: 'Tax Payable', nameZh: '待缴税款', type: 'liability', isMoneyAccount: false, sortOrder: 130 },
-  { code: 'deferred-revenue', nameEn: 'Deferred Revenue', nameZh: '递延收入', type: 'liability', isMoneyAccount: false, sortOrder: 140 },
+  { code: 'accounts-payable', nameEn: 'Accounts Payable', nameZh: '应付账款', type: 'liability', isMoneyAccount: false, sortOrder: 110, cashFlowCategory: 'operating' },
+  { code: 'loans', nameEn: 'Loans', nameZh: '贷款', type: 'liability', isMoneyAccount: false, sortOrder: 120, cashFlowCategory: 'financing' },
+  { code: 'tax-payable', nameEn: 'Tax Payable', nameZh: '待缴税款', type: 'liability', isMoneyAccount: false, sortOrder: 130, cashFlowCategory: 'operating' },
+  { code: 'deferred-revenue', nameEn: 'Deferred Revenue', nameZh: '递延收入', type: 'liability', isMoneyAccount: false, sortOrder: 140, cashFlowCategory: 'operating' },
   // 权益
-  { code: 'capital', nameEn: 'Capital', nameZh: '股本', type: 'equity', isMoneyAccount: false, sortOrder: 210 },
+  { code: 'capital', nameEn: 'Capital', nameZh: '股本', type: 'equity', isMoneyAccount: false, sortOrder: 210, cashFlowCategory: 'financing' },
   { code: 'retained-earnings', nameEn: 'Retained Earnings', nameZh: '留存收益', type: 'equity', isMoneyAccount: false, sortOrder: 220 },
-  { code: 'owners-draw', nameEn: "Owner's Draw", nameZh: '股东提取', type: 'equity', isMoneyAccount: false, sortOrder: 230 },
+  { code: 'owners-draw', nameEn: "Owner's Draw", nameZh: '股东提取', type: 'equity', isMoneyAccount: false, sortOrder: 230, cashFlowCategory: 'financing' },
   // 收入
-  { code: 'sales', nameEn: 'Sales', nameZh: '销售收入', type: 'revenue', isMoneyAccount: false, sortOrder: 310 },
-  { code: 'other-income', nameEn: 'Other Income', nameZh: '其他收入', type: 'revenue', isMoneyAccount: false, sortOrder: 320 },
+  { code: 'sales', nameEn: 'Sales', nameZh: '销售收入', type: 'revenue', isMoneyAccount: false, sortOrder: 310, cashFlowCategory: 'operating' },
+  { code: 'other-income', nameEn: 'Other Income', nameZh: '其他收入', type: 'revenue', isMoneyAccount: false, sortOrder: 320, cashFlowCategory: 'operating' },
   // 费用
-  { code: 'rent', nameEn: 'Rent', nameZh: '租金', type: 'expense', isMoneyAccount: false, sortOrder: 410 },
-  { code: 'salaries', nameEn: 'Salaries', nameZh: '薪资', type: 'expense', isMoneyAccount: false, sortOrder: 420 },
-  { code: 'utilities', nameEn: 'Utilities', nameZh: '水电', type: 'expense', isMoneyAccount: false, sortOrder: 430 },
-  { code: 'marketing', nameEn: 'Marketing', nameZh: '市场推广', type: 'expense', isMoneyAccount: false, sortOrder: 440 },
-  { code: 'transport', nameEn: 'Transport', nameZh: '交通', type: 'expense', isMoneyAccount: false, sortOrder: 450 },
-  { code: 'professional-fees', nameEn: 'Professional Fees', nameZh: '专业服务', type: 'expense', isMoneyAccount: false, sortOrder: 460 },
-  { code: 'ai-llm-costs', nameEn: 'AI & LLM Costs', nameZh: 'AI/LLM 费用', type: 'expense', isMoneyAccount: false, sortOrder: 470 },
-  { code: 'depreciation', nameEn: 'Depreciation', nameZh: '折旧', type: 'expense', isMoneyAccount: false, sortOrder: 480 },
-  { code: 'amortization', nameEn: 'Amortization', nameZh: '摊销', type: 'expense', isMoneyAccount: false, sortOrder: 490 },
-  { code: 'other-expenses', nameEn: 'Other Expenses', nameZh: '其他', type: 'expense', isMoneyAccount: false, sortOrder: 500 },
+  { code: 'rent', nameEn: 'Rent', nameZh: '租金', type: 'expense', isMoneyAccount: false, sortOrder: 410, cashFlowCategory: 'operating' },
+  { code: 'salaries', nameEn: 'Salaries', nameZh: '薪资', type: 'expense', isMoneyAccount: false, sortOrder: 420, cashFlowCategory: 'operating' },
+  { code: 'utilities', nameEn: 'Utilities', nameZh: '水电', type: 'expense', isMoneyAccount: false, sortOrder: 430, cashFlowCategory: 'operating' },
+  { code: 'marketing', nameEn: 'Marketing', nameZh: '市场推广', type: 'expense', isMoneyAccount: false, sortOrder: 440, cashFlowCategory: 'operating' },
+  { code: 'transport', nameEn: 'Transport', nameZh: '交通', type: 'expense', isMoneyAccount: false, sortOrder: 450, cashFlowCategory: 'operating' },
+  { code: 'professional-fees', nameEn: 'Professional Fees', nameZh: '专业服务', type: 'expense', isMoneyAccount: false, sortOrder: 460, cashFlowCategory: 'operating' },
+  { code: 'ai-llm-costs', nameEn: 'AI & LLM Costs', nameZh: 'AI/LLM 费用', type: 'expense', isMoneyAccount: false, sortOrder: 470, cashFlowCategory: 'operating' },
+  { code: 'depreciation', nameEn: 'Depreciation', nameZh: '折旧', type: 'expense', isMoneyAccount: false, sortOrder: 480, cashFlowCategory: 'operating' },
+  { code: 'amortization', nameEn: 'Amortization', nameZh: '摊销', type: 'expense', isMoneyAccount: false, sortOrder: 490, cashFlowCategory: 'operating' },
+  { code: 'other-expenses', nameEn: 'Other Expenses', nameZh: '其他', type: 'expense', isMoneyAccount: false, sortOrder: 500, cashFlowCategory: 'operating' },
 ] as const;
 
 export const SEED_CATEGORIES: readonly SeedCategory[] = [
@@ -98,6 +105,7 @@ export async function seedChartOfAccounts(tx: Tx, organizationId: string): Promi
         is_money_account: account.isMoneyAccount,
         is_system: true,
         sort_order: account.sortOrder,
+        cash_flow_category: account.cashFlowCategory ?? null,
       })),
     )}
   `;

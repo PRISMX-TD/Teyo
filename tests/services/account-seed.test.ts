@@ -101,3 +101,25 @@ describe('SEED_CATEGORIES', () => {
     }
   });
 });
+
+describe('seeded accounts carry a cash-flow category', () => {
+  it('classifies non-money accounts and leaves money accounts null', () => {
+    for (const account of SEED_ACCOUNTS) {
+      if (account.isMoneyAccount) {
+        expect(account.cashFlowCategory, `${account.code} is a money account`).toBeUndefined();
+      } else if (account.type === 'revenue' || account.type === 'expense') {
+        expect(account.cashFlowCategory, `${account.code} should be operating`).toBe('operating');
+      }
+    }
+  });
+
+  it('classifies fixed-asset accounts as investing', () => {
+    const equipment = SEED_ACCOUNTS.find((a) => a.code === 'equipment');
+    expect(equipment?.cashFlowCategory).toBe('investing');
+  });
+
+  it('classifies capital and loans as financing', () => {
+    expect(SEED_ACCOUNTS.find((a) => a.code === 'capital')?.cashFlowCategory).toBe('financing');
+    expect(SEED_ACCOUNTS.find((a) => a.code === 'loans')?.cashFlowCategory).toBe('financing');
+  });
+});
