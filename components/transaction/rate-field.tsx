@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useTransition } from 'react';
 import type { Locale } from '@/lib/i18n';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, interpolate } from '@/lib/i18n';
 import { lookupRate } from '@/server/actions/rates';
 
 type Props = {
@@ -16,7 +16,7 @@ type Props = {
 
 export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount, locale }: Props) {
   const t = getMessages(locale);
-  const [rate, setRate] = useState('1.00000000');
+  const [rate, setRate] = useState('');
   const [source, setSource] = useState<'auto' | 'manual' | 'unavailable'>('auto');
   const [, startTransition] = useTransition();
 
@@ -31,6 +31,7 @@ export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount,
         setRate(result.rate);
         setSource('auto');
       } else {
+        setRate('');
         setSource('unavailable');
       }
     });
@@ -39,7 +40,10 @@ export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount,
 
   const isForeign = currency !== baseCurrency;
   if (!isForeign) {
-    return <input type="hidden" name="exchangeRate" value="1" />;
+    // 不发 exchangeRate：让服务端走 currency === baseCurrency 分支，
+    // 该分支返回 source 'auto'。发一个 "1" 会被判成手工汇率，
+    // 使 rate_source 这一列对每一笔交易都恒为 'manual'。
+    return null;
   }
 
   const converted = (() => {
@@ -63,12 +67,12 @@ export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount,
           setSource('manual');
         }}
       />
-      <input type="hidden" name="rateSource" value={source === 'manual' ? 'manual' : 'auto'} />
-
       <p className="field-hint" role="status">
         {source === 'auto' ? t.transaction.rateAutoFilled : null}
         {source === 'manual' ? t.transaction.rateManual : null}
-        {source === 'unavailable' ? t.transaction.rateUnavailable : null}
+        {source === 'unavailable'
+          ? interpolate(t.transaction.rateNeeded, { currency, base: baseCurrency })
+          : null}
       </p>
 
       {converted ? (

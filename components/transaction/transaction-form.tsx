@@ -99,7 +99,12 @@ export function TransactionForm({
         : undefined,
       categoryId: formData.get('categoryId') ? String(formData.get('categoryId')) : undefined,
       description: String(formData.get('description') ?? ''),
-      exchangeRate: String(formData.get('exchangeRate') ?? '1'),
+      // RateField renders no exchangeRate field for domestic currency (see
+      // components/transaction/rate-field.tsx) so createTransaction/updateTransaction
+      // can take the currency === baseCurrency branch and record source 'auto'.
+      // Defaulting this to '1' would resurrect the bug the field's removal fixes:
+      // every transaction would be stamped rate_source='manual' again.
+      exchangeRate: formData.get('exchangeRate') ? String(formData.get('exchangeRate')) : undefined,
       clientUuid,
     };
 

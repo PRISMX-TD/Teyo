@@ -97,6 +97,7 @@ const zh: Translated<typeof en> = {
     rateAutoFilled: '汇率已自动填入。',
     rateManual: '汇率为手动填写。',
     rateUnavailable: '这一天的汇率取不到，请手动填写。',
+    rateNeeded: '查不到那天的汇率。那天 1 {currency} 值多少 {base}？看一下你的银行单据。',
     convertedAmount: '折合',
     createdBy: '记录人',
     save: '保存',

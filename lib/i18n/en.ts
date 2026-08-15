@@ -84,6 +84,7 @@ const en = {
     rateAutoFilled: 'Rate filled automatically.',
     rateManual: 'Rate entered manually.',
     rateUnavailable: 'We could not fetch a rate for this date. Please enter it.',
+    rateNeeded: "We could not look up that day's rate. How many {base} did 1 {currency} cost that day? Check your bank slip.",
     convertedAmount: 'Equals',
     createdBy: 'Added by',
     save: 'Save',
