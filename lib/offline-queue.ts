@@ -81,12 +81,21 @@ export function isRetriable(error: unknown): boolean {
   return /network|fetch|timeout|econnreset|503|502/i.test(message);
 }
 
+/**
+ * sent：成功同步并已出队。
+ * dropped：校验类错误，已出队，这条记录真的丢了——调用方必须单独告知用户，
+ *   不能和 retrying 合并成一个数字，否则会把"稍后自动重试"和"永久丢失，
+ *   需要手动补录"混为一谈，害用户重复录入。
+ * retrying：网络类错误，仍在队列里等下次 flush；pendingCount 已经如实
+ *   反映这部分，调用方不需要为它再单独提示。
+ */
 export async function flushQueue(
   submit: (orgSlug: string, payload: QueuedPayload) => Promise<unknown>,
-): Promise<{ sent: number; failed: number }> {
+): Promise<{ sent: number; dropped: number; retrying: number }> {
   const queued = await listQueuedTransactions();
   let sent = 0;
-  let failed = 0;
+  let dropped = 0;
+  let retrying = 0;
 
   for (const item of queued) {
     try {
@@ -94,12 +103,14 @@ export async function flushQueue(
       await removeQueuedTransaction(item.clientUuid);
       sent += 1;
     } catch (error) {
-      failed += 1;
-      if (!isRetriable(error)) {
+      if (isRetriable(error)) {
+        retrying += 1;
+      } else {
+        dropped += 1;
         await removeQueuedTransaction(item.clientUuid);
       }
     }
   }
 
-  return { sent, failed };
+  return { sent, dropped, retrying };
 }
