@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { updatePeriodLock, updateOrganization } from '@/server/actions/organizations';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -24,6 +24,11 @@ export default async function GeneralSettingsPage({
       <section>
         <h2>{t.settings.lockTitle}</h2>
         <p>{t.settings.lockHint}</p>
+        <p>
+          {context.lockedUntil
+            ? interpolate(t.settings.lockCurrent, { date: context.lockedUntil })
+            : t.settings.lockNone}
+        </p>
         <form
           action={async (formData: FormData) => {
             'use server';
@@ -35,6 +40,19 @@ export default async function GeneralSettingsPage({
           <input name="lockDate" type="date" required />
           <button type="submit">{t.settings.save}</button>
         </form>
+        <p>{t.settings.lockWarning}</p>
+        {context.lockedUntil && (
+          <form
+            action={async () => {
+              'use server';
+              await updatePeriodLock(orgSlug, { lockedUntil: null });
+            }}
+          >
+            <button type="submit" className="btn-danger">
+              {t.settings.lockRemove}
+            </button>
+          </form>
+        )}
       </section>
 
       <section>

@@ -160,6 +160,11 @@ const en = {
     lockHint: 'Nobody can change records dated on or before this day.',
     lockedUntil: 'Locked through',
     unlock: 'Remove lock',
+    lockCurrent: 'Currently locked through {date}',
+    lockNone: 'No period is locked',
+    lockRemove: 'Remove lock',
+    lockWarning:
+      'Locking means nobody — including you — can add or change any record dated on or before this date, until the lock is removed.',
     name: 'Name',
     active: 'Active',
     inactive: 'Hidden',
