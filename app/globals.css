@@ -1020,9 +1020,15 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 
   /* Touch target minimum 44px on mobile for accessibility.
      Using !important to ensure all button variants (inline edit, member row, etc) meet WCAG.
-     This applies to all interactive buttons regardless of their container specificity. */
-  button, .primary-button, a.primary-button, a.secondary-button { min-height: 44px !important; }
+     This applies to all interactive buttons regardless of their container specificity.
+     Exception: .text-button is explicitly excluded because it is used for dense inline
+     controls within table cells (e.g., bank import Match/Cancel/Ignore/Reset actions in
+     a <table> that does not get the mobile card-layout transformation). Forcing 44px on
+     these would break the UI. */
+  button:not(.text-button), .primary-button, a.primary-button, a.secondary-button { min-height: 44px !important; }
   .attachment-preview-btn, .attachment-delete-btn, .btn-small { min-height: 44px !important; }
+  /* Explicitly preserve .text-button's min-height: auto to protect dense inline controls. */
+  .text-button { min-height: auto !important; }
 }
 
 @media (max-width: 520px) {
