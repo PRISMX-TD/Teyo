@@ -1,6 +1,7 @@
 'use client';
 
 import React from 'react';
+import Link from 'next/link';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -18,6 +19,7 @@ type Props = {
   balances: BankBalance[];
   locale: Locale;
   baseCurrency: string;
+  orgSlug: string;
   i18n: Messages;
 };
 
@@ -30,12 +32,12 @@ const MONTH_LABELS_ZH = [
   '7月', '8月', '9月', '10月', '11月', '12月',
 ];
 
-export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, i18n }: Props) {
+export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, orgSlug, i18n }: Props) {
   const monthLabels = locale === 'zh' ? MONTH_LABELS_ZH : MONTH_LABELS_EN;
 
   return (
     <div className="dashboard">
-      <KpiHeroStrip kpis={kpis} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
+      <DashboardQuestions kpis={kpis} locale={locale} baseCurrency={baseCurrency} orgSlug={orgSlug} i18n={i18n} />
       <div className="dashboard-grid">
         <MonthlyTrendsChart trends={trends} monthLabels={monthLabels} i18n={i18n} />
         <ExpenseBreakdown expenses={expenses} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
@@ -46,33 +48,64 @@ export function DashboardView({ kpis, trends, expenses, balances, locale, baseCu
   );
 }
 
-function KpiHeroStrip({
+function DashboardQuestions({
   kpis,
   locale,
   baseCurrency,
+  orgSlug,
   i18n,
 }: {
   kpis: DashboardKpis;
   locale: Locale;
   baseCurrency: string;
+  orgSlug: string;
   i18n: Messages;
 }) {
-  const cards: { label: string; value: bigint; className: string }[] = [
-    { label: i18n.overview.monthIncome, value: kpis.monthIncome, className: 'money-in' },
-    { label: i18n.overview.monthExpense, value: kpis.monthExpense, className: 'money-out' },
-    { label: i18n.overview.monthNet, value: kpis.netIncome, className: '' },
-    { label: i18n.overview.accountBalances, value: kpis.totalBankBalance, className: '' },
-    { label: i18n.overview.unpaidInvoices, value: kpis.unpaidInvoices, className: 'money-in' },
-    { label: i18n.overview.unpaidBills, value: kpis.unpaidBills, className: 'money-out' },
+  const isLoss = kpis.netIncome < 0n;
+
+  const questions: { key: string; question: string; hint: string; value: bigint; href: string; className: string }[] = [
+    {
+      key: 'q1',
+      question: i18n.overview.q1,
+      hint: i18n.overview.q1Hint,
+      value: kpis.netIncome,
+      href: `/${orgSlug}/reports`,
+      className: isLoss ? 'money-out' : '',
+    },
+    {
+      key: 'q2',
+      question: i18n.overview.q2,
+      hint: i18n.overview.q2Hint,
+      value: kpis.totalBankBalance,
+      href: `/${orgSlug}/reports`,
+      className: '',
+    },
+    {
+      key: 'q3',
+      question: i18n.overview.q3,
+      hint: i18n.overview.q3Hint,
+      value: kpis.unpaidInvoices,
+      href: `/${orgSlug}/invoices`,
+      className: 'money-in',
+    },
+    {
+      key: 'q4',
+      question: i18n.overview.q4,
+      hint: i18n.overview.q4Hint,
+      value: kpis.unpaidBills,
+      href: `/${orgSlug}/bills`,
+      className: 'money-out',
+    },
   ];
 
   return (
-    <section className="dashboard-kpis">
-      {cards.map((card) => (
-        <article key={card.label} className="kpi-card">
-          <h3>{card.label}</h3>
-          <p className={`kpi-value ${card.className}`}>{formatMoney(card.value, baseCurrency, locale)}</p>
-        </article>
+    <section className="dashboard-questions">
+      {questions.map((q) => (
+        <Link key={q.key} href={q.href} className="question-card">
+          <h3>{q.question}</h3>
+          <p className={`question-value ${q.className}`}>{formatMoney(q.value, baseCurrency, locale)}</p>
+          <p className="question-hint">{q.hint}</p>
+        </Link>
       ))}
     </section>
   );
