@@ -22,7 +22,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { admin, createTestUser, deleteTestUser, deleteTestOrganizations } from '@/tests/helpers/db';
 import { withTransaction } from '@/server/db/transaction';
-import { getTrialBalance } from '@/server/repositories/reports';
+import { getBalanceSheet, getTrialBalance } from '@/server/repositories/reports';
 import { checkTrialBalance } from '@/server/domain/report-invariants';
 
 let userId: string;
@@ -210,5 +210,29 @@ describe('getTrialBalance - I10 archived accounts', () => {
     expect(zero, 'a zero-balance active account must still appear').toBeDefined();
     expect(zero!.debitMinor).toBe(0n);
     expect(zero!.creditMinor).toBe(0n);
+  });
+});
+
+describe('getBalanceSheet - I9 / I10', () => {
+  it('excludes voided transactions and keeps archived accounts with a balance', async () => {
+    const bs = await withTransaction(userId, (tx) =>
+      getBalanceSheet(tx, orgId, '2026-12-31', 0n),
+    );
+
+    const cash = bs.assetRows.find((r) => r.code === 'cash')!;
+    // 100000 (3/1) + 70000 (11/1) = 170000，作废的 55555 不计入
+    expect(cash.totalMinor).toBe(170000n);
+
+    const archived = bs.assetRows.find((r) => r.code === 'old-gear');
+    expect(archived, 'archived account with a balance must still appear').toBeDefined();
+    expect(archived!.isActive).toBe(false);
+  });
+
+  it('respects the as-of cutoff', async () => {
+    const bs = await withTransaction(userId, (tx) =>
+      getBalanceSheet(tx, orgId, '2026-06-30', 0n),
+    );
+    const cash = bs.assetRows.find((r) => r.code === 'cash')!;
+    expect(cash.totalMinor).toBe(100000n);
   });
 });
