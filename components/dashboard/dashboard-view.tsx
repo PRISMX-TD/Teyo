@@ -11,6 +11,7 @@ import type {
   ExpenseByCategory,
   BankBalance,
 } from '@/server/repositories/dashboard';
+import { FirstRunChecklist, type ChecklistState } from '@/components/dashboard/first-run-checklist';
 
 type Props = {
   kpis: DashboardKpis;
@@ -21,6 +22,7 @@ type Props = {
   baseCurrency: string;
   orgSlug: string;
   i18n: Messages;
+  checklist: ChecklistState;
 };
 
 const MONTH_LABELS_EN = [
@@ -32,11 +34,12 @@ const MONTH_LABELS_ZH = [
   '7月', '8月', '9月', '10月', '11月', '12月',
 ];
 
-export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, orgSlug, i18n }: Props) {
+export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, orgSlug, i18n, checklist }: Props) {
   const monthLabels = locale === 'zh' ? MONTH_LABELS_ZH : MONTH_LABELS_EN;
 
   return (
     <div className="dashboard">
+      <FirstRunChecklist orgSlug={orgSlug} state={checklist} locale={locale} t={i18n} />
       <DashboardQuestions kpis={kpis} locale={locale} baseCurrency={baseCurrency} orgSlug={orgSlug} i18n={i18n} />
       <div className="dashboard-grid">
         <MonthlyTrendsChart trends={trends} monthLabels={monthLabels} i18n={i18n} />

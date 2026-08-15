@@ -391,6 +391,14 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 
 .dashboard { display: flex; flex-direction: column; gap: var(--space-5); }
 
+.first-run { margin-bottom: var(--space-6); padding: var(--space-5); background: var(--bg-secondary); border: 1px solid var(--accent-border); border-radius: var(--radius-md); }
+.first-run h2 { font-size: var(--text-base); margin: 0 0 var(--space-4); }
+.first-run ol { list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.first-run li { display: flex; align-items: center; gap: var(--space-3); font-size: var(--text-sm); }
+.first-run .checklist-done { color: var(--text-tertiary); text-decoration: line-through; }
+.first-run .checklist-mark { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--border-secondary); font-size: var(--text-xs); }
+.first-run .checklist-done .checklist-mark { color: var(--green); border-color: var(--green); }
+
 .dashboard-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-4); }
 
 .kpi-card {
@@ -1039,6 +1047,9 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
   .attachment-preview-btn, .attachment-delete-btn, .btn-small { min-height: 44px !important; }
   /* Explicitly preserve .text-button's min-height: auto to protect dense inline controls. */
   .text-button { min-height: auto !important; }
+  /* First-run checklist links are plain text links, not buttons, but they are the
+     only tap target on an incomplete row — give them a real touch target too. */
+  .first-run li a { display: inline-flex; align-items: center; min-height: 44px; }
 }
 
 @media (max-width: 520px) {

@@ -75,6 +75,12 @@ const en = {
     q2Hint: 'Across all your accounts',
     q3Hint: 'Invoices you have sent but not been paid for',
     q4Hint: 'Bills you have received but not paid',
+    checklistTitle: 'Getting started',
+    checklistDone: 'Done',
+    checklistStep1: 'Set up the account your money sits in',
+    checklistStep2: 'Record your first income or expense',
+    checklistStep3: 'Add a customer or supplier',
+    checklistStep4: 'Invite your bookkeeper or accountant',
   },
   transaction: {
     kind: 'Type',

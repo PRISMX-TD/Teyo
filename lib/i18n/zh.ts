@@ -88,6 +88,12 @@ const zh: Translated<typeof en> = {
     q2Hint: '所有账户加起来',
     q3Hint: '已经开出去、还没收到钱的发票',
     q4Hint: '已经收到、还没付的账单',
+    checklistTitle: '开始使用',
+    checklistDone: '已完成',
+    checklistStep1: '设置你放钱的账户',
+    checklistStep2: '记下第一笔收入或支出',
+    checklistStep3: '添加一个客户或供应商',
+    checklistStep4: '邀请你的记账员或会计师',
   },
   transaction: {
     kind: '类型',
