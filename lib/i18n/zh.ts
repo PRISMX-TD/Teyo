@@ -151,6 +151,13 @@ const zh: Translated<typeof en> = {
     directionRequired: '请先选择这笔钱是进来还是出去。',
     useAdvanced: '跳过——我知道该选哪个账户和分类',
   },
+  uncertain: {
+    title: '待确认',
+    empty: '没有待处理的。你记的账都已经分好类了。',
+    badge: '{count} 笔待确认',
+    explain: '这些是你当时不确定的笔。账是平的，只是在交给会计之前需要给它们定个分类。',
+    resolve: '去分类',
+  },
   filters: {
     from: '起始日期',
     to: '结束日期',

@@ -399,6 +399,18 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .first-run .checklist-mark { flex: 0 0 auto; width: 20px; height: 20px; display: inline-flex; align-items: center; justify-content: center; border-radius: 50%; border: 1px solid var(--border-secondary); font-size: var(--text-xs); }
 .first-run .checklist-done .checklist-mark { color: var(--green); border-color: var(--green); }
 
+/* Task 16：待确认角标块。amber 而不是 red——挂起不是错误，只是还没分类，
+   用警示色会暗示账出了问题，与 uncertain.explain 的说明相矛盾。 */
+.uncertain-banner {
+  display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+  min-height: 44px; margin-bottom: var(--space-6); padding: var(--space-4) var(--space-5);
+  background: var(--amber-subtle); border: 1px solid rgba(245,158,11,0.3); border-radius: var(--radius-md);
+  color: var(--text-primary);
+}
+.uncertain-banner:hover { background: var(--amber-subtle); border-color: var(--amber); text-decoration: none; }
+.uncertain-banner-title { font-weight: 600; font-size: var(--text-sm); }
+.uncertain-banner .badge { color: var(--amber); border-color: rgba(245,158,11,0.3); background: transparent; }
+
 .dashboard-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-4); }
 
 .kpi-card {
@@ -460,6 +472,25 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .activity-icon { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
 .invoice-icon { background: var(--amber); }
 .bill-icon { background: var(--red); }
+
+/* ==========================================================================
+   Uncertain queue (Task 16)
+   ========================================================================== */
+
+/* 这句说明是整个机制成立的关键——告诉用户「挂起」不等于「出错」，账依然是平的。
+   给它比正文更明显的底色，保证它不会被当成一句可以跳过的小字。 */
+.uncertain-explain { max-width: 640px; margin-bottom: var(--space-5); padding: var(--space-4); background: var(--bg-secondary); border-radius: var(--radius-md); color: var(--text-secondary); font-size: var(--text-sm); }
+
+.uncertain-list { list-style: none; display: flex; flex-direction: column; gap: var(--space-3); }
+.uncertain-row {
+  display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3);
+  padding: var(--space-4); background: var(--bg-secondary);
+  border: 1px solid var(--border-primary); border-radius: var(--radius-md);
+}
+.uncertain-row-info { display: flex; flex-direction: column; gap: var(--space-1); min-width: 0; flex: 1 1 220px; }
+.uncertain-row-date { font-size: var(--text-xs); color: var(--text-tertiary); }
+.uncertain-row-description { font-size: var(--text-sm); font-weight: 550; color: var(--text-primary); overflow-wrap: anywhere; }
+.uncertain-row-amount { font-size: var(--text-base); font-weight: 600; color: var(--text-primary); margin-left: auto; }
 
 /* ==========================================================================
    Transaction Form

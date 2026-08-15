@@ -25,6 +25,9 @@ export function Sidebar({ orgSlug, i18n }: Props) {
       items: [
         { href: `/${orgSlug}`, label: i18n.nav.overview },
         { href: `/${orgSlug}/transactions`, label: i18n.nav.transactions },
+        // Task 16：待确认队列——「不确定」场景卡片记下的条目最终要有地方去处理，
+        // 挂在「流水」组下而不是单开一个顶级分组，因为它本质上是交易列表的一个过滤视图。
+        { href: `/${orgSlug}/uncertain`, label: i18n.uncertain.title },
       ],
     },
     {

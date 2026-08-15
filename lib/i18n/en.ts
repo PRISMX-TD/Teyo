@@ -138,6 +138,13 @@ const en = {
     directionRequired: 'Choose whether the money came in or went out.',
     useAdvanced: 'Skip this — I know which account and category to use',
   },
+  uncertain: {
+    title: 'Needs a decision',
+    empty: 'Nothing waiting. Everything you have recorded is sorted.',
+    badge: '{count} to sort',
+    explain: 'These are entries you were not sure about. Your books still balance — these just need a category before you hand them to your accountant.',
+    resolve: 'Sort this out',
+  },
   filters: {
     from: 'From',
     to: 'To',

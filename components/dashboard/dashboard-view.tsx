@@ -3,7 +3,7 @@
 import React from 'react';
 import Link from 'next/link';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName } from '@/lib/i18n';
+import { localizedName, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type {
   DashboardKpis,
@@ -25,6 +25,8 @@ type Props = {
   i18n: Messages;
   checklist: ChecklistState;
   role: Role;
+  /** Task 16：待确认队列里未作废、还没分类的条目数。0 时不渲染角标块。 */
+  uncertainCount: number;
 };
 
 const MONTH_LABELS_EN = [
@@ -36,12 +38,13 @@ const MONTH_LABELS_ZH = [
   '7月', '8月', '9月', '10月', '11月', '12月',
 ];
 
-export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, orgSlug, i18n, checklist, role }: Props) {
+export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, orgSlug, i18n, checklist, role, uncertainCount }: Props) {
   const monthLabels = locale === 'zh' ? MONTH_LABELS_ZH : MONTH_LABELS_EN;
 
   return (
     <div className="dashboard">
       <FirstRunChecklist orgSlug={orgSlug} state={checklist} locale={locale} t={i18n} role={role} />
+      <UncertainBanner orgSlug={orgSlug} count={uncertainCount} i18n={i18n} />
       <DashboardQuestions kpis={kpis} locale={locale} baseCurrency={baseCurrency} orgSlug={orgSlug} i18n={i18n} />
       <div className="dashboard-grid">
         <MonthlyTrendsChart trends={trends} monthLabels={monthLabels} i18n={i18n} />
@@ -50,6 +53,30 @@ export function DashboardView({ kpis, trends, expenses, balances, locale, baseCu
       <BankBalancesSection balances={balances} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
       <RecentActivity kpis={kpis} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
     </div>
+  );
+}
+
+/**
+ * Task 16：不是脚手架、不会自动消失——只要队列里还有未分类的条目就一直显示，
+ * 提醒用户「悬置」是可以处理完的，而不是记忆里悄悄积压的东西。
+ * count 为 0 时不渲染：这不是一个常驻入口，只有真的有事要做才出现。
+ */
+function UncertainBanner({
+  orgSlug,
+  count,
+  i18n,
+}: {
+  orgSlug: string;
+  count: number;
+  i18n: Messages;
+}) {
+  if (count <= 0) return null;
+
+  return (
+    <Link href={`/${orgSlug}/uncertain`} className="uncertain-banner">
+      <span className="uncertain-banner-title">{i18n.uncertain.title}</span>
+      <span className="badge">{interpolate(i18n.uncertain.badge, { count })}</span>
+    </Link>
   );
 }
 

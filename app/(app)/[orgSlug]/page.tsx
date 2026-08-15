@@ -10,6 +10,7 @@ import {
   getFirstRunChecklistState,
 } from '@/server/repositories/dashboard';
 import { getUserLocale } from '@/server/repositories/organizations';
+import { countUncertain } from '@/server/repositories/uncertain';
 
 export default async function OverviewPage({
   params,
@@ -28,17 +29,18 @@ export default async function OverviewPage({
   // getFirstRunChecklistState 折进这同一个 Promise.all、同一个事务——它内部
   // 按角色权限决定四项存在性查询各查不查（详见该函数上的注释），不额外开
   // 事务、也不多一次网络往返。
-  const { kpis, trends, expenses, balances, checklist } = await withTransaction(
+  const { kpis, trends, expenses, balances, checklist, uncertainCount } = await withTransaction(
     context.userId,
     async (tx) => {
-      const [kpis, trends, expenses, balances, checklist] = await Promise.all([
+      const [kpis, trends, expenses, balances, checklist, uncertainCount] = await Promise.all([
         getDashboardKpis(tx, context.organizationId),
         getMonthlyTrends(tx, context.organizationId),
         getExpenseByCategory(tx, context.organizationId, year, month),
         getBankBalances(tx, context.organizationId),
         getFirstRunChecklistState(tx, context.organizationId, context.role),
+        countUncertain(tx, context.organizationId),
       ]);
-      return { kpis, trends, expenses, balances, checklist };
+      return { kpis, trends, expenses, balances, checklist, uncertainCount };
     },
   );
 
@@ -56,6 +58,7 @@ export default async function OverviewPage({
         i18n={t}
         checklist={checklist}
         role={context.role}
+        uncertainCount={uncertainCount}
       />
     </>
   );
