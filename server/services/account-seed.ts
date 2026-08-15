@@ -31,17 +31,25 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   // 资产
   { code: 'cash', nameEn: 'Cash', nameZh: '现金', type: 'asset', isMoneyAccount: true, sortOrder: 10 },
   { code: 'bank', nameEn: 'Bank Account', nameZh: '银行账户', type: 'asset', isMoneyAccount: true, sortOrder: 20 },
-  { code: 'accounts-receivable', nameEn: 'Accounts Receivable', nameZh: '应收账款', type: 'asset', isMoneyAccount: false, sortOrder: 30 },
-  { code: 'inventory', nameEn: 'Inventory', nameZh: '库存', type: 'asset', isMoneyAccount: false, sortOrder: 40 },
+  // AR/inventory 是标准间接法下的营运资金调整项——server/repositories/reports.ts
+  // 已经把 -netFlow('accounts-receivable') / -netFlow('inventory') 计入 operatingTotal，
+  // 这里补上分类只是让列与既有代码的处理口径一致，不是新判断。
+  { code: 'accounts-receivable', nameEn: 'Accounts Receivable', nameZh: '应收账款', type: 'asset', isMoneyAccount: false, sortOrder: 30, cashFlowCategory: 'operating' },
+  { code: 'inventory', nameEn: 'Inventory', nameZh: '库存', type: 'asset', isMoneyAccount: false, sortOrder: 40, cashFlowCategory: 'operating' },
   { code: 'equipment', nameEn: 'Equipment', nameZh: '设备', type: 'asset', isMoneyAccount: false, sortOrder: 50, cashFlowCategory: 'investing' },
   { code: 'furniture', nameEn: 'Furniture & Fixtures', nameZh: '家具及装修', type: 'asset', isMoneyAccount: false, sortOrder: 60, cashFlowCategory: 'investing' },
   { code: 'vehicles', nameEn: 'Vehicles', nameZh: '车辆', type: 'asset', isMoneyAccount: false, sortOrder: 70, cashFlowCategory: 'investing' },
   { code: 'software-intangible', nameEn: 'Software (Intangible)', nameZh: '无形资产·软件', type: 'asset', isMoneyAccount: false, sortOrder: 80, cashFlowCategory: 'investing' },
+  // 累计折旧/摊销科目留空（不是 operating）：它们只在非现金的折旧/摊销分录里
+  // 被触碰，而那笔调整已经通过 depreciation / amortization 两个费用科目算过
+  // 一次了。给它们再分类会导致现金流量表把同一笔非现金费用加回两次。
   { code: 'ad-equipment', nameEn: 'Accum. Depr. - Equipment', nameZh: '累计折旧·设备', type: 'asset', isMoneyAccount: false, sortOrder: 85 },
   { code: 'ad-furniture', nameEn: 'Accum. Depr. - Furniture', nameZh: '累计折旧·家具', type: 'asset', isMoneyAccount: false, sortOrder: 86 },
   { code: 'ad-vehicles', nameEn: 'Accum. Depr. - Vehicles', nameZh: '累计折旧·车辆', type: 'asset', isMoneyAccount: false, sortOrder: 87 },
   { code: 'ad-software', nameEn: 'Accum. Amort. - Software', nameZh: '累计摊销·软件', type: 'asset', isMoneyAccount: false, sortOrder: 88 },
-  { code: 'prepaid-expenses', nameEn: 'Prepaid Expenses', nameZh: '预付费用', type: 'asset', isMoneyAccount: false, sortOrder: 90 },
+  // prepaid-expenses 同 AR/inventory：server/repositories/reports.ts 已把
+  // -netFlow('prepaid-expenses') 计入 operatingTotal，是营运资金调整项。
+  { code: 'prepaid-expenses', nameEn: 'Prepaid Expenses', nameZh: '预付费用', type: 'asset', isMoneyAccount: false, sortOrder: 90, cashFlowCategory: 'operating' },
   // 负债
   { code: 'accounts-payable', nameEn: 'Accounts Payable', nameZh: '应付账款', type: 'liability', isMoneyAccount: false, sortOrder: 110, cashFlowCategory: 'operating' },
   { code: 'loans', nameEn: 'Loans', nameZh: '贷款', type: 'liability', isMoneyAccount: false, sortOrder: 120, cashFlowCategory: 'financing' },
@@ -49,6 +57,8 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   { code: 'deferred-revenue', nameEn: 'Deferred Revenue', nameZh: '递延收入', type: 'liability', isMoneyAccount: false, sortOrder: 140, cashFlowCategory: 'operating' },
   // 权益
   { code: 'capital', nameEn: 'Capital', nameZh: '股本', type: 'equity', isMoneyAccount: false, sortOrder: 210, cashFlowCategory: 'financing' },
+  // retained-earnings 留空：server/ 下没有任何地方对它过账（净利润结转不是
+  // 一笔现金分录的对方科目），因此它从不是现金移动的对方科目，没有可分类的行为。
   { code: 'retained-earnings', nameEn: 'Retained Earnings', nameZh: '留存收益', type: 'equity', isMoneyAccount: false, sortOrder: 220 },
   { code: 'owners-draw', nameEn: "Owner's Draw", nameZh: '股东提取', type: 'equity', isMoneyAccount: false, sortOrder: 230, cashFlowCategory: 'financing' },
   // 收入

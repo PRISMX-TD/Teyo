@@ -122,4 +122,20 @@ describe('seeded accounts carry a cash-flow category', () => {
     expect(SEED_ACCOUNTS.find((a) => a.code === 'capital')?.cashFlowCategory).toBe('financing');
     expect(SEED_ACCOUNTS.find((a) => a.code === 'loans')?.cashFlowCategory).toBe('financing');
   });
+
+  it('classifies operating liability accounts as operating', () => {
+    for (const code of ['accounts-payable', 'tax-payable', 'deferred-revenue']) {
+      expect(SEED_ACCOUNTS.find((a) => a.code === code)?.cashFlowCategory, code).toBe('operating');
+    }
+  });
+
+  it('classifies AR, inventory and prepaid expenses as operating working-capital adjustments', () => {
+    // server/repositories/reports.ts already folds -netFlow('accounts-receivable'),
+    // -netFlow('inventory') and -netFlow('prepaid-expenses') into operatingTotal,
+    // the same indirect-method treatment as accounts-payable (sign-flipped
+    // because they're asset-side). This is not a new judgment call.
+    for (const code of ['accounts-receivable', 'inventory', 'prepaid-expenses']) {
+      expect(SEED_ACCOUNTS.find((a) => a.code === code)?.cashFlowCategory, code).toBe('operating');
+    }
+  });
 });

@@ -21,6 +21,16 @@ update accounts set cash_flow_category = 'financing'
   where is_money_account = false
     and code in ('capital', 'loans', 'owners-draw');
 
+-- AR / inventory / prepaid-expenses 是资产类科目，不在下面按 type 回填的
+-- revenue/expense/liability 分支里，但它们是标准间接法下的营运资金调整项——
+-- server/repositories/reports.ts 已经把 -netFlow('accounts-receivable')、
+-- -netFlow('inventory')、-netFlow('prepaid-expenses') 计入 operatingTotal，
+-- 与 accounts-payable 是同一处理口径（资产端符号相反）。这里显式回填，
+-- 不靠 type 判断，避免误伤 equipment 等同为资产类但属于 investing 的科目。
+update accounts set cash_flow_category = 'operating'
+  where is_money_account = false
+    and code in ('accounts-receivable', 'inventory', 'prepaid-expenses');
+
 update accounts set cash_flow_category = 'operating'
   where is_money_account = false
     and cash_flow_category is null
