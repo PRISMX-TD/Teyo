@@ -287,9 +287,15 @@ export type CashFlowResult = {
  * 间接法现金流量表。
  *
  * 从净利润出发，加减非现金项目和营运资金变动，得到经营活动现金流。
- * 投资和融资活动直接从科目变动推算。
+ * 投资活动按科目上的 cash_flow_category 分类聚合（Task 10），不再依赖
+ * 字面量 code 匹配——用户自建的资产科目也能被正确归类。
+ * 融资活动仍是三行显式构造（capital/loans/ownersDraw），因为它们各自
+ * 的符号规则不同，逐条明写比分类聚合更不容易出错。
  *
- * 实现中分类依赖账户的 code 前缀匹配，种子数据 code 设计时已考虑这一点。
+ * 期间口径：与 getProfitLoss（Task 8）一致的闭区间 [from, to]。
+ * 期初现金取严格小于 from 的余额，与期间流量的 >= from 互补，
+ * 避免 from 当天的交易被两边重复计入；期末现金取小于等于 to 的余额，
+ * 与期间流量的 <= to 对齐。
  */
 export async function getCashFlow(
   tx: Tx,
@@ -297,7 +303,9 @@ export async function getCashFlow(
   from: string,
   to: string,
 ): Promise<CashFlowResult> {
-  // --- 辅助：单科目期间发生额（本位币，借正贷负） ---
+  // --- 辅助：单科目期间发生额（本位币，借正贷负）。闭区间 [from, to]，
+  // 与 getProfitLoss 的口径一致——否则同一笔发生在 to 当天、影响净利润的
+  // 分录会在这里被漏掉，导致 operatingTotal 与 netIncome 的口径不一致。 ---
   async function netFlow(code: string): Promise<bigint> {
     const r = await tx`
       select
@@ -310,26 +318,61 @@ export async function getCashFlow(
         and a.code = ${code}
         and t.voided_at is null
         and t.occurred_on >= ${from}::date
-        and t.occurred_on < ${to}::date
+        and t.occurred_on <= ${to}::date
     `;
     return BigInt(r[0].net as string);
   }
 
-  // --- 辅助：期初/期末余额 ---
-  async function balanceAsOf(code: string, asOf: string): Promise<bigint> {
-    const r = await tx`
-      select
+  // --- 辅助：资金账户（is_money_account = true）截至某日的余额之和。
+  // 按标志位聚合而不是按 'cash'/'bank' 字面量编码，用户自建的银行账户
+  // 也会被正确计入期初/期末现金。 ---
+  async function moneyBalanceAsOf(asOf: string, inclusive: boolean): Promise<bigint> {
+    const r = inclusive
+      ? await tx`
+          select coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                                   else -l.base_amount_minor end), 0) as net
+          from journal_lines l
+          join transactions t on t.id = l.transaction_id
+          join accounts a on a.id = l.account_id
+          where l.organization_id = ${organizationId}
+            and a.is_money_account
+            and t.voided_at is null
+            and t.occurred_on <= ${asOf}::date
+        `
+      : await tx`
+          select coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                                   else -l.base_amount_minor end), 0) as net
+          from journal_lines l
+          join transactions t on t.id = l.transaction_id
+          join accounts a on a.id = l.account_id
+          where l.organization_id = ${organizationId}
+            and a.is_money_account
+            and t.voided_at is null
+            and t.occurred_on < ${asOf}::date
+        `;
+    return BigInt(r[0].net as string);
+  }
+
+  // --- 辅助：按 cash_flow_category 聚合的期间发生额，逐科目返回。 ---
+  async function netFlowByCategory(
+    category: 'operating' | 'investing' | 'financing',
+  ): Promise<{ code: string; net: bigint }[]> {
+    const rows = await tx`
+      select a.code,
         coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
                           else -l.base_amount_minor end), 0) as net
       from journal_lines l
       join transactions t on t.id = l.transaction_id
       join accounts a on a.id = l.account_id
       where l.organization_id = ${organizationId}
-        and a.code = ${code}
+        and a.cash_flow_category = ${category}
         and t.voided_at is null
-        and t.occurred_on <= ${asOf}::date
+        and t.occurred_on >= ${from}::date
+        and t.occurred_on <= ${to}::date
+      group by a.code
+      order by a.code
     `;
-    return BigInt(r[0].net as string);
+    return rows.map((r) => ({ code: r.code as string, net: BigInt(r.net as string) }));
   }
 
   // --- 经营活动 ---
@@ -344,13 +387,14 @@ export async function getCashFlow(
   // 营运资金变动
   // AR 增加 = 现金减少（借贷记在资产端，ar 的 net = debit-credit，资产增加意味着 net>0，所以 cash 影响是 -netFlow）
   const arChange = -(await netFlow('accounts-receivable'));
-  // AP 增加 = 现金增加
-  const apChange = await netFlow('accounts-payable');
+  // AP 是贷方余额科目：netFlow 是"借方减贷方"，AP 增加时 netFlow 为负，
+  // 而 AP 增加（欠着还没付）对现金的影响是正——取反。
+  const apChange = -(await netFlow('accounts-payable'));
   // Inventory 增加 = 现金减少（借买存货）
   const invChange = -(await netFlow('inventory'));
 
-  // 递延收入变动
-  const deferredRevChange = await netFlow('deferred-revenue');
+  // 递延收入同为贷方余额科目，符号规则与 AP 相同，取反。
+  const deferredRevChange = -(await netFlow('deferred-revenue'));
   // 预付费用变动
   const prepaidChange = -(await netFlow('prepaid-expenses'));
 
@@ -377,27 +421,23 @@ export async function getCashFlow(
     ],
   };
 
-  // --- 投资活动 ---
-  const equipment = -(await netFlow('equipment'));
-  const furniture = -(await netFlow('furniture'));
-  const vehicles = -(await netFlow('vehicles'));
-  const softwareIntangible = -(await netFlow('software-intangible'));
+  // --- 投资活动：按 cash_flow_category = 'investing' 聚合，不再逐个字面量
+  // code 匹配——用户自建的资产科目（只要打上了该分类）也会出现在这里。
+  // 资产科目增加意味着现金流出，取负。 ---
+  const investingRows = (await netFlowByCategory('investing')).map((r) => ({
+    label: r.code,
+    amountMinor: -r.net,
+  }));
+  const investingTotal = investingRows.reduce((sum, r) => sum + r.amountMinor, 0n);
+  const investing: CashFlowSection = { label: 'Investing', rows: investingRows };
 
-  const investingTotal = equipment + furniture + vehicles + softwareIntangible;
-
-  const investing: CashFlowSection = {
-    label: 'Investing',
-    rows: [
-      { label: 'equipment', amountMinor: equipment },
-      { label: 'furniture', amountMinor: furniture },
-      { label: 'vehicles', amountMinor: vehicles },
-      { label: 'softwareIntangible', amountMinor: softwareIntangible },
-    ],
-  };
-
-  // --- 融资活动 ---
-  const capital = await netFlow('capital');
-  const loans = await netFlow('loans');
+  // --- 融资活动：保留三行显式构造，因为符号规则彼此不同，逐条明写比
+  // 按分类聚合更不容易出错。 ---
+  // capital/loans 都是贷方余额科目，同 AP：netFlow 借正贷负，取反。
+  const capital = -(await netFlow('capital'));
+  const loans = -(await netFlow('loans'));
+  // owners-draw 是借方余额科目（所有者提取）：netFlow 增加时为正，
+  // 而提取会减少现金，取反——与之前一致，未改动。
   const ownersDraw = -(await netFlow('owners-draw'));
 
   const financingTotal = capital + loans + ownersDraw;
@@ -413,11 +453,11 @@ export async function getCashFlow(
 
   const netChange = operatingTotal + investingTotal + financingTotal;
 
-  // 期初/期末现金 = cash + bank 余额
-  const openingCash =
-    (await balanceAsOf('cash', from)) + (await balanceAsOf('bank', from));
-  const closingCash =
-    (await balanceAsOf('cash', to)) + (await balanceAsOf('bank', to));
+  // 期初现金：严格小于 from，与期间流量（>= from）互补，避免边界当天
+  // 被两边重复计入。期末现金：小于等于 to，与期间流量（<= to）对齐。
+  // 按 is_money_account 聚合，不再按 'cash'/'bank' 字面量编码。
+  const openingCash = await moneyBalanceAsOf(from, false);
+  const closingCash = await moneyBalanceAsOf(to, true);
 
   return {
     operating,

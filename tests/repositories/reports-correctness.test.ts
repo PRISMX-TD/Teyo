@@ -25,11 +25,12 @@ import { withTransaction } from '@/server/db/transaction';
 import {
   GENERAL_LEDGER_PAGE_MAX,
   getBalanceSheet,
+  getCashFlow,
   getGeneralLedger,
   getProfitLoss,
   getTrialBalance,
 } from '@/server/repositories/reports';
-import { checkBalanceSheet, checkTrialBalance } from '@/server/domain/report-invariants';
+import { checkBalanceSheet, checkCashFlow, checkTrialBalance } from '@/server/domain/report-invariants';
 
 let userId: string;
 let orgId: string;
@@ -407,5 +408,84 @@ describe('getGeneralLedger - bounded reads', () => {
     expect(defaulted.lines.length).toBe(rowCount);
     expect(defaulted.lines.length).toBe(explicitMax.lines.length);
     expect(defaulted.closingBalance).toBe(explicitMax.closingBalance);
+  });
+});
+
+describe('getCashFlow - signs and tie-out (B4 / I8)', () => {
+  it('shows a loan drawdown as positive financing cash flow', async () => {
+    const [loans] = await admin`
+      insert into accounts (organization_id, code, name_en, type, cash_flow_category)
+      values (${orgId}, 'loans', 'Loans', 'liability', 'financing') returning id
+    `;
+
+    // 借入 200000：借现金、贷借款
+    await insertBalancedTransaction({
+      occurredOn: '2026-04-01',
+      amountMinor: 20000000n,
+      debitAccountId: cashId,
+      creditAccountId: loans.id as string,
+    });
+
+    const cf = await withTransaction(userId, (tx) =>
+      getCashFlow(tx, orgId, '2026-04-01', '2026-04-30'),
+    );
+
+    const loanRow = cf.financing.rows.find((r) => r.label === 'loans')!;
+    expect(loanRow.amountMinor).toBe(20000000n);
+  });
+
+  it('ties: opening + net change = closing', async () => {
+    const cf = await withTransaction(userId, (tx) =>
+      getCashFlow(tx, orgId, '2026-01-01', '2026-12-31'),
+    );
+
+    const result = checkCashFlow({
+      openingCash: cf.openingCash,
+      netChange: cf.netChange,
+      closingCash: cf.closingCash,
+    });
+    expect(result.differenceMinor).toBe(0n);
+  });
+
+  it('does not double-count a transaction dated exactly on the from-date', async () => {
+    // 4/1 的借款既然计入了本期流量，就不能同时计入期初现金。
+    // 只断言 tie-out：具体数值依赖前面用例插入的夹具顺序，硬编码会脆。
+    const cf = await withTransaction(userId, (tx) =>
+      getCashFlow(tx, orgId, '2026-04-01', '2026-04-30'),
+    );
+    expect(checkCashFlow(cf).differenceMinor).toBe(0n);
+  });
+
+  it('includes a to-date transaction in both netIncome and its working-capital offset (B4 boundary)', async () => {
+    // 回归 defect #4：netFlow 曾用 < to（不含边界），而 getProfitLoss 早已是 <= to。
+    // 用一笔恰好落在 to 当天、赊销确认收入的分录验证两者现在同口径：
+    // 借 accounts-receivable、贷收入，都不触碰任何资金账户。
+    // 如果 netFlow 仍是 < to，这笔分录会被 getProfitLoss 计入 netIncome，
+    // 却不会被 netFlow('accounts-receivable') 计入 arChange 抵消，
+    // operatingTotal 就会虚增 5000，导致本应为零的 tie-out 出现非零差额。
+    // 用独立科目 + 单日区间，不依赖文件里其余用例累积的夹具，断言干净。
+    const arId = await createScratchAccount('accounts-receivable', 'asset');
+    const revId = await createScratchAccount('b4-boundary-revenue', 'revenue');
+
+    await insertBalancedTransaction({
+      occurredOn: '2026-08-01',
+      amountMinor: 5000n,
+      debitAccountId: arId,
+      creditAccountId: revId,
+    });
+
+    const cf = await withTransaction(userId, (tx) =>
+      getCashFlow(tx, orgId, '2026-08-01', '2026-08-01'),
+    );
+
+    const netIncomeRow = cf.operating.rows.find((r) => r.label === 'netIncome')!;
+    const arRow = cf.operating.rows.find((r) => r.label === 'arChange')!;
+    expect(netIncomeRow.amountMinor).toBe(5000n);
+    expect(arRow.amountMinor).toBe(-5000n);
+    // 两者抵消：这笔赊销对现金没有实际影响，单日区间内没有任何资金账户被触碰，
+    // 所以期初必须等于期末，净变动必须为零。
+    expect(cf.netChange).toBe(0n);
+    expect(cf.openingCash).toBe(cf.closingCash);
+    expect(checkCashFlow(cf).differenceMinor).toBe(0n);
   });
 });
