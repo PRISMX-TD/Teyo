@@ -26,11 +26,10 @@ import {
   deleteJournalLines,
   findTransactionByClientUuid,
   getTransactionDetail,
-  insertJournalLines,
-  insertTransaction,
   markVoided,
   updateTransactionHead,
 } from '@/server/repositories/transactions';
+import { insertJournalLines, insertTransaction } from '@/server/posting/insert';
 
 export type CreateTransactionInput = {
   kind: TransactionKind;

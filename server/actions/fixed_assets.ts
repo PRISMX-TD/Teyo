@@ -17,7 +17,7 @@ import {
 import {
   insertTransaction as insertTransactionRepo,
   insertJournalLines as insertJournalLinesRepo,
-} from '@/server/repositories/transactions';
+} from '@/server/posting/insert';
 import { parseRateToScaled, convertToBaseMinor } from '@/server/domain/exchange-rate';
 
 const createFixedAssetSchema = z.object({

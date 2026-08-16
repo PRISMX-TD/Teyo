@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { parseDecimalToMinor } from '@/server/domain/money';
-import { insertTransaction, insertJournalLines } from '@/server/repositories/transactions';
+import { insertTransaction, insertJournalLines } from '@/server/posting/insert';
 import {
   getDueRecurring,
   insertRecurring,
