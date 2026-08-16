@@ -323,6 +323,8 @@ export type TransactionDetail = TransactionListRow & {
   lines: {
     accountId: string;
     accountCode: string;
+    accountNameEn: string | null;
+    accountNameZh: string | null;
     direction: 'debit' | 'credit';
     amountMinor: bigint;
   }[];
@@ -379,7 +381,8 @@ export async function getTransactionDetail(
   }
 
   const lines = await tx`
-    select l.account_id, a.code, a.is_money_account, l.direction, l.amount_minor
+    select l.account_id, a.code, a.name_en, a.name_zh, a.is_money_account,
+           l.direction, l.amount_minor
     from journal_lines l
     join accounts a on a.id = l.account_id
     where l.transaction_id = ${id} and l.organization_id = ${organizationId}
@@ -406,6 +409,8 @@ export async function getTransactionDetail(
     lines: lines.map((line) => ({
       accountId: line.account_id as string,
       accountCode: line.code as string,
+      accountNameEn: (line.name_en as string | null) ?? null,
+      accountNameZh: (line.name_zh as string | null) ?? null,
       direction: line.direction as 'debit' | 'credit',
       amountMinor: BigInt(line.amount_minor as string),
     })),

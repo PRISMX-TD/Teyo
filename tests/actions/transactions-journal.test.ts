@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { admin } from '@/tests/helpers/db';
+import { withTransaction } from '@/server/db/transaction';
+import { getTransactionDetail } from '@/server/repositories/transactions';
 import {
   createTestOrgWithSeed,
   createTestUser,
@@ -292,6 +294,31 @@ describe('createJournal - validation', () => {
       where organization_id = ${orgId} and client_uuid = ${input.clientUuid}
     `;
     expect(rows).toHaveLength(0);
+  });
+});
+
+describe('getTransactionDetail - lines carry account names for read-only display', () => {
+  // The uncertain queue's detail page (transactions/[id]/page.tsx) renders a
+  // read-only view of a journal entry instead of the broken editable form
+  // (kind 'journal' can never save through updateTransaction). That view
+  // needs the debit/credit account *names*, not just their codes, so this
+  // pins down that getTransactionDetail's lines actually carry them.
+  it('includes accountNameEn/accountNameZh alongside accountCode on each line', async () => {
+    currentUserId = ownerId;
+    const { id } = await createJournal(
+      orgSlug,
+      journalInput({ debitAccountId: cashAccountId, creditAccountId: suspenseAccountId }),
+    );
+
+    const detail = await withTransaction(ownerId, (tx) => getTransactionDetail(tx, orgId, id));
+
+    const debitLine = detail.lines.find((line) => line.direction === 'debit');
+    const creditLine = detail.lines.find((line) => line.direction === 'credit');
+
+    expect(debitLine?.accountCode).toBe('cash');
+    expect(debitLine?.accountNameEn).toBeTruthy();
+    expect(creditLine?.accountCode).toBe('suspense');
+    expect(creditLine?.accountNameEn).toBeTruthy();
   });
 });
 

@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -10,6 +10,8 @@ import { listSelectableCategories, type CategoryRow } from '@/server/repositorie
 import { listAttachments } from '@/server/repositories/attachments';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 import { TransactionForm } from '@/components/transaction/transaction-form';
+import { VoidButton } from '@/components/transaction/void-button';
+import { AttachmentPanel } from '@/components/transaction/attachment-panel';
 import type { ReactNode } from 'react';
 
 export default async function TransactionDetailPage({
@@ -52,6 +54,12 @@ export default async function TransactionDetailPage({
   }
 
   const isVoided = !!row.voidedAt;
+  const attachmentItems = attachments.map((at) => ({
+    id: at.id,
+    fileName: at.fileName,
+    mimeType: at.mimeType,
+    sizeBytes: at.sizeBytes,
+  }));
 
   if (isVoided) {
     // 已作废的交易：只读展示，不可编辑
@@ -88,7 +96,63 @@ export default async function TransactionDetailPage({
     );
   }
 
-  // 未作废：显示编辑表单
+  if (row.kind === 'journal') {
+    // 挂起分录——"不确定"队列指向的正是这类记录，不可编辑，只能查看与
+    // 作废。updateTransaction 把 kind 钉死在原值上，kind 为 journal 时
+    // resolveCounterAccountId 对任何分类都会抛
+    // 'Journal entries do not use categories.'，Save 必然失败。这里绝不
+    // 渲染那个必败的可编辑表单，只提供确实有效的操作。
+    const debitLine = row.lines.find((line) => line.direction === 'debit');
+    const creditLine = row.lines.find((line) => line.direction === 'credit');
+
+    return (
+      <Layout orgSlug={orgSlug} t={t}>
+        <h1>{t.uncertain.title}</h1>
+        <p className="uncertain-explain">{t.uncertain.explain}</p>
+        <article className="record-detail">
+          <dl>
+            <dt>{t.transaction.kind}</dt>
+            <dd>{t.transaction.journal}</dd>
+            <dt>{t.transaction.date}</dt>
+            <dd className="mono">{row.occurredOn}</dd>
+            <dt>{t.transaction.amount}</dt>
+            <dd className="mono amount">{formatMoney(row.amountMinor, row.currency, locale)}</dd>
+            <dt>{t.journal.debitAccount}</dt>
+            <dd>
+              {debitLine
+                ? localizedName(
+                    { name_en: debitLine.accountNameEn, name_zh: debitLine.accountNameZh },
+                    locale,
+                  )
+                : '—'}
+            </dd>
+            <dt>{t.journal.creditAccount}</dt>
+            <dd>
+              {creditLine
+                ? localizedName(
+                    { name_en: creditLine.accountNameEn, name_zh: creditLine.accountNameZh },
+                    locale,
+                  )
+                : '—'}
+            </dd>
+            <dt>{t.transaction.description}</dt>
+            <dd>{row.description || '—'}</dd>
+            <dt>{t.transaction.createdBy}</dt>
+            <dd>{row.createdByName}</dd>
+          </dl>
+        </article>
+        <VoidButton orgSlug={orgSlug} transactionId={row.id} t={t} />
+        <AttachmentPanel
+          orgSlug={orgSlug}
+          transactionId={row.id}
+          attachments={attachmentItems}
+          t={t}
+        />
+      </Layout>
+    );
+  }
+
+  // 未作废、非挂起分录：显示编辑表单
   const categoryId = row.categoryId;
 
   // 这笔交易可能已经挂在一个只应由系统过账的分类上（比如固定资产模块
@@ -151,14 +215,12 @@ export default async function TransactionDetailPage({
           counterAccountId: row.counterAccountId ?? null,
           description: row.description ?? '',
           exchangeRate: row.exchangeRate ?? '1',
-          kind: row.kind as 'income' | 'expense' | 'transfer',
+          rateSource: row.rateSource,
+          // 安全：journal 已经在上面单独 return，走到这里的 row.kind
+          // 只可能是 income/expense/transfer。
+          kind: row.kind,
         }}
-        attachments={attachments.map((at) => ({
-          id: at.id,
-          fileName: at.fileName,
-          mimeType: at.mimeType,
-          sizeBytes: at.sizeBytes,
-        }))}
+        attachments={attachmentItems}
       />
     </Layout>
   );

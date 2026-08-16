@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useTransition } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { lookupRate } from '@/server/actions/rates';
@@ -12,13 +12,36 @@ type Props = {
   occurredOn: string;
   amount: string;
   locale: Locale;
+  /**
+   * 编辑一笔既有外币交易时传入：当时记的汇率与来源。有值时首次挂载不
+   * 重新查询，直接采用它——不然打开一笔外币交易改个备注就会把汇率悄悄
+   * 换成缓存里现在的值，改变本位币金额，而屏幕上什么都不会提示这一点。
+   */
+  initialRate?: string;
+  initialSource?: 'auto' | 'manual';
 };
 
-export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount, locale }: Props) {
+export function RateField({
+  orgSlug,
+  currency,
+  baseCurrency,
+  occurredOn,
+  amount,
+  locale,
+  initialRate,
+  initialSource,
+}: Props) {
   const t = getMessages(locale);
-  const [rate, setRate] = useState('');
-  const [source, setSource] = useState<'auto' | 'manual' | 'unavailable'>('auto');
+  const [rate, setRate] = useState(initialRate ?? '');
+  const [source, setSource] = useState<'auto' | 'manual' | 'unavailable'>(initialSource ?? 'auto');
   const [, startTransition] = useTransition();
+
+  // 首次挂载若带着已记录的汇率（编辑模式），跳过第一次查询；
+  // 一旦币种或日期真的变了，就消耗掉这个豁免，跟创建时一样重新查询。
+  const skipNextFetch = useRef(
+    initialRate !== undefined && initialRate !== '' && !!currency && !!occurredOn,
+  );
+  const initialPair = useRef({ currency, occurredOn });
 
   // 币种或日期一变就重新拉汇率。这个 effect 只在 currency/occurredOn/orgSlug
   // 变化时触发，所以每次触发都意味着：无论之前是自动填入还是用户手动改过，
@@ -28,6 +51,16 @@ export function RateField({ orgSlug, currency, baseCurrency, occurredOn, amount,
   // 币种」会让旧数值原地变成新币种的手工汇率，静默记错账。
   useEffect(() => {
     if (!currency || !occurredOn) return;
+
+    if (
+      skipNextFetch.current &&
+      currency === initialPair.current.currency &&
+      occurredOn === initialPair.current.occurredOn
+    ) {
+      skipNextFetch.current = false;
+      return;
+    }
+    skipNextFetch.current = false;
 
     setSource('auto');
     setRate('');

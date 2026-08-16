@@ -28,6 +28,7 @@ type EditData = {
   counterAccountId: string | null;
   description: string;
   exchangeRate: string;
+  rateSource: 'auto' | 'manual';
   kind: 'income' | 'expense' | 'transfer';
 };
 
@@ -334,6 +335,8 @@ export function TransactionForm({
             occurredOn={occurredOn}
             amount={amount}
             locale={locale}
+            initialRate={isEdit ? initialData?.exchangeRate : undefined}
+            initialSource={isEdit ? initialData?.rateSource : undefined}
           />
         </>
       ) : null}
