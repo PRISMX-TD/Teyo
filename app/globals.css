@@ -730,10 +730,15 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
    ========================================================================== */
 
 .settings-index { display: flex; flex-direction: column; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: var(--radius-md); overflow: hidden; }
-.settings-index a { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 52px; padding: var(--space-4); font-size: var(--text-base); font-weight: 500; color: var(--text-primary); border-top: 1px solid var(--border-primary); transition: background var(--dur-fast); }
-.settings-index a:first-child { border-top: none; }
+/* `button` rows share the exact row box as `a` rows (e.g. the theme toggle on the
+   /more page, moved off the mobile dock) but reset the global `button` chrome
+   (own background/border/shadow/centering) so it blends in instead of looking
+   like a form control. No trailing "→" on buttons -- that arrow means "go to a
+   page", and a toggle doesn't navigate anywhere. */
+.settings-index a, .settings-index button { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 52px; padding: var(--space-4); font-size: var(--text-base); font-weight: 500; color: var(--text-primary); background: none; border: none; border-top: 1px solid var(--border-primary); border-radius: 0; box-shadow: none; text-align: left; transition: background var(--dur-fast); }
+.settings-index > :first-child { border-top: none; }
 .settings-index a::after { content: '→'; color: var(--text-tertiary); }
-.settings-index a:hover { background: var(--bg-hover); color: var(--accent); text-decoration: none; }
+.settings-index a:hover, .settings-index button:hover:not(:disabled) { background: var(--bg-hover); color: var(--accent); text-decoration: none; border-color: var(--border-primary); }
 
 /* Settings 子页面的 section 和 form */
 .app-main > section {
@@ -1159,10 +1164,16 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
   .floating-dock a, .floating-dock button {
     display: inline-flex; align-items: center; justify-content: center;
     min-height: 44px; min-width: 44px;
-    /* 横向 padding 从 space-2(8px) 收到 space-1(4px)：加了第 5 个导航项（More）
-       之后 375px 上 7→8 个格子分的空间更紧，这 4px/边在 Playwright 量出来的
-       375px 渲染里能让「我的账号」在中文下重新完整显示，英文下也普遍少切几个
-       字符——触摸区仍由 min-height/min-width 保证 ≥44px，不受 padding 影响。 */
+    /* 横向 padding 是 space-1(4px)，不是 space-2(8px)：省下的 4px/边让长一点
+       的标签（Transactions）在框内多露出几个字符。这只影响框内文字，不影响
+       格子本身能占多宽——四项都顶着 min-width:44px 的下限时，padding 再怎么
+       收也不会让一整行变窄。dock 现在只有 5 个格子（Overview/Transactions/
+       Reports/More/+），一行总宽度在 320px 和 375px 都有余量，用 Playwright
+       量 .floating-dock 的 scrollWidth vs clientWidth、以及每个子项的
+       getBoundingClientRect().right 相对视口宽度核实过，不只是量单项内文字
+       有没有被裁。Settings/主题切换/My account 已经移到 More 页面里；
+       当初以为 8 项时收紧 padding 能救回来是错的——那时几乎每一项都已经卡在
+       min-width 的地板上，收紧 padding 挪的是 0px 的整行宽度。 */
     padding: var(--space-1);
     font-size: var(--text-2xs); color: var(--text-secondary);
     background: none; border: none; border-radius: var(--radius-sm);
@@ -1177,8 +1188,6 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
     font-size: var(--text-lg); font-weight: 600;
     min-width: 48px; border-radius: var(--radius-md);
   }
-  .floating-dock-separator { display: none; }
-  .dock-theme-btn { color: var(--text-tertiary); }
   /* dock 会盖住内容，给主区留出高度 */
   .app-main { padding-bottom: calc(64px + env(safe-area-inset-bottom)); }
 }

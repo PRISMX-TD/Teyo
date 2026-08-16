@@ -3,29 +3,32 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { Messages } from '@/lib/i18n';
-import { useTheme } from './use-theme';
 
 type Props = {
   orgSlug: string;
   i18n: Messages;
 };
 
+// 5 个格子，不是 8 个：第一版把 Settings/主题切换/My account 全塞进 dock，
+// 375px 上一行需要约 400px——375-container-fit 复测（container.scrollWidth
+// vs clientWidth + 逐项 getBoundingClientRect().right）证实 320-390px 下
+// My account 整个被推出视口、点不到。Settings、主题切换、My account 现在都
+// 挂在 More 页面里（app/(app)/[orgSlug]/more/page.tsx），第一版复测确认
+// 5 项在 320px 和 375px 都留有余量。
 const NAV_ITEMS: { label: keyof Messages['nav']; href: (slug: string) => string }[] = [
   { label: 'overview', href: (slug) => `/${slug}` },
   { label: 'transactions', href: (slug) => `/${slug}/transactions` },
   { label: 'reports', href: (slug) => `/${slug}/reports` },
-  { label: 'settings', href: (slug) => `/${slug}/settings` },
-  // 侧栏另外 14 个目的地（发票/账单/收付款/对账/预算/项目...）在移动端没有入口——
-  // sidebar 在 767px 以下直接 display:none。这一格不是某个具体页面，是分流页
-  // （见 app/(app)/[orgSlug]/more/page.tsx），按侧栏分组把其余目的地列出来，
-  // 不在其中挑一个顶上去：Invoices/Bills/Payments 三个只挑一个会留下另外两个
-  // 依然进不去，等于把「开发票」和「收发票的钱」拆成两条不对称的路。
+  // 侧栏另外 15 个目的地（Settings、发票/账单/收付款/对账/预算/项目...、
+  // 主题切换、My account）在移动端没有入口——sidebar 在 767px 以下直接
+  // display:none。这一格不是某个具体页面，是分流页，按侧栏分组把其余目的地
+  // 列出来，不在其中挑一个顶上去：Invoices/Bills/Payments 三个只挑一个会留下
+  // 另外两个依然进不去，等于把「开发票」和「收发票的钱」拆成两条不对称的路。
   { label: 'more', href: (slug) => `/${slug}/more` },
 ];
 
 export function FloatingDock({ orgSlug, i18n }: Props) {
   const pathname = usePathname();
-  const { theme, toggle } = useTheme();
 
   return (
     <nav className="floating-dock" aria-label={i18n.nav.primaryNavigation}>
@@ -51,21 +54,6 @@ export function FloatingDock({ orgSlug, i18n }: Props) {
         aria-label={i18n.transaction.newTitle}
       >
         +
-      </Link>
-
-      <span className="floating-dock-separator" />
-
-      <button
-        type="button"
-        className="dock-theme-btn"
-        onClick={toggle}
-        aria-label={i18n.nav.toggleTheme}
-      >
-        {theme === 'dark' ? '☀' : '☾'}
-      </button>
-
-      <Link href="/account">
-        {i18n.nav.account}
       </Link>
     </nav>
   );
