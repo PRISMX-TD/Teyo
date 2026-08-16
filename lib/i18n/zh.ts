@@ -57,6 +57,7 @@ const zh: Translated<typeof en> = {
     budgets: '预算',
     export: '导出',
     settings: '设置',
+    more: '更多',
     switchCompany: '切换公司',
     account: '我的账号',
     inventory: '库存',

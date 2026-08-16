@@ -47,6 +47,7 @@ const en = {
     export: 'Export',
     settings: 'Settings',
     tax: 'Tax',
+    more: 'More',
     switchCompany: 'Switch company',
     account: 'My account',
     toggleTheme: 'Toggle theme',

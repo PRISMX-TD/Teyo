@@ -1158,7 +1158,12 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
   }
   .floating-dock a, .floating-dock button {
     display: inline-flex; align-items: center; justify-content: center;
-    min-height: 44px; min-width: 44px; padding: var(--space-1) var(--space-2);
+    min-height: 44px; min-width: 44px;
+    /* 横向 padding 从 space-2(8px) 收到 space-1(4px)：加了第 5 个导航项（More）
+       之后 375px 上 7→8 个格子分的空间更紧，这 4px/边在 Playwright 量出来的
+       375px 渲染里能让「我的账号」在中文下重新完整显示，英文下也普遍少切几个
+       字符——触摸区仍由 min-height/min-width 保证 ≥44px，不受 padding 影响。 */
+    padding: var(--space-1);
     font-size: var(--text-2xs); color: var(--text-secondary);
     background: none; border: none; border-radius: var(--radius-sm);
     /* 显式 min-width 会顶掉 flex item 默认的 min-content 下限，窄屏下
