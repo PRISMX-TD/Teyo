@@ -378,12 +378,31 @@ export async function updateTransaction(
     });
 
     const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(input.currency));
-    const { scaledRate, source } = await resolveRate(tx, {
-      currency: input.currency,
-      baseCurrency: context.baseCurrency,
-      occurredOn: input.occurredOn,
-      manualRate: input.exchangeRate,
-    });
+
+    // 没提交手工汇率、且币种和日期都没变时，直接沿用这笔交易当初记的汇率与
+    // 来源，不再重新调用 resolveRate。RateField 在这种情况下就是这么显示
+    // 的（见 rate-field.tsx 的 initialRate/initialSource）——如果这里还是
+    // 每次保存都重新解析，两边就会对不上：exchange_rates 只由每天的 cron
+    // upsert「今天」这一格（见 app/api/cron/exchange-rates/route.ts），
+    // 所以早上记一笔外币交易时 findRate 的 7 天回溯会命中前一个营业日的
+    // 汇率并存成 auto；同一天晚些时候 cron 把「今天」这一格填上后，若只是
+    // 改个备注就保存，resolveRate 会重新查到当天的精确汇率，把汇率和本位
+    // 币金额悄悄换成屏幕上从未展示过的另一个值。币种或日期真的变了，
+    // 或者用户主动填了手工汇率，才应该重新解析——那两种情况都会让下面
+    // 这个条件为 false，直接走原来的 resolveRate 分支。
+    const reuseStoredRate =
+      input.exchangeRate === undefined &&
+      input.currency === existing.currency &&
+      input.occurredOn === existing.occurredOn;
+
+    const { scaledRate, source } = reuseStoredRate
+      ? { scaledRate: parseRateToScaled(existing.exchangeRate), source: existing.rateSource }
+      : await resolveRate(tx, {
+          currency: input.currency,
+          baseCurrency: context.baseCurrency,
+          occurredOn: input.occurredOn,
+          manualRate: input.exchangeRate,
+        });
 
     const lines = buildJournalLines({
       kind,

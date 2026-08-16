@@ -6,6 +6,7 @@ import {
   createTestUser,
   joinOrg,
   resetTestData,
+  seedRate,
 } from '@/tests/helpers/test-db';
 
 let currentUserId: string | null = null;
@@ -296,6 +297,137 @@ describe('updateTransaction', () => {
     expect(lines).toHaveLength(2);
     const [tx] = await admin`select amount_minor from transactions where id = ${id}`;
     expect(tx.amount_minor).toBe('30000');
+  });
+});
+
+// USD/MYR，2026-09 下半月：与 transactions-create.test.ts 的 SGD/MYR
+// 2026-09-01、exchange-rate-sync.test.ts 整个 2026-08 月都不重叠，
+// 并行跑的测试文件不会互相污染这张全局共享表。
+const RATE_DAY = '2026-09-20';
+const OTHER_DAY = '2026-09-22';
+
+async function newForeignExpense(scaledRate: bigint, occurredOn = RATE_DAY) {
+  await seedRate('USD', 'MYR', scaledRate, occurredOn);
+  currentUserId = ownerId;
+  const { id } = await createTransaction(orgSlug, {
+    kind: 'expense',
+    occurredOn,
+    amount: '100.00',
+    currency: 'USD',
+    moneyAccountId: cashId,
+    categoryId: rentCategoryId,
+    description: 'Foreign original',
+    clientUuid: randomUUID(),
+  });
+  return id;
+}
+
+describe('updateTransaction - foreign currency rate on save', () => {
+  // Task 3 follow-up: RateField shows the record's stored rate without
+  // refetching, but if the server re-resolved on every save regardless,
+  // the two would still diverge the moment the cache changes underneath --
+  // which happens routinely, not just if someone edits history. The daily
+  // cron only upserts "today"'s row (app/api/cron/exchange-rates/route.ts),
+  // so a transaction recorded before the cron runs gets an auto rate from
+  // findRate's lookback to the prior business day; once the cron fills in
+  // the exact date later that same day, a plain save must not silently
+  // adopt it.
+  it('keeps the originally-resolved rate on a description-only edit, even after the cached rate for that date changes', async () => {
+    const id = await newForeignExpense(4_80000000n); // 4.80
+
+    const [before] = await admin`
+      select exchange_rate, base_amount_minor, rate_source from transactions where id = ${id}
+    `;
+    expect(Number(before.exchange_rate)).toBeCloseTo(4.8, 6);
+    expect(before.base_amount_minor).toBe('48000');
+    expect(before.rate_source).toBe('auto');
+
+    // 模拟 cron 在同一天晚些时候把这一天的精确汇率补上，覆盖掉刚才查到的值。
+    await seedRate('USD', 'MYR', 4_95000000n, RATE_DAY);
+
+    currentUserId = ownerId;
+    await updateTransaction(orgSlug, id, {
+      occurredOn: RATE_DAY,
+      amount: '100.00',
+      currency: 'USD',
+      moneyAccountId: cashId,
+      categoryId: rentCategoryId,
+      description: 'Typo fixed',
+    });
+
+    const [after] = await admin`
+      select exchange_rate, base_amount_minor, rate_source, description
+      from transactions where id = ${id}
+    `;
+    expect(Number(after.exchange_rate)).toBeCloseTo(4.8, 6);
+    expect(after.base_amount_minor).toBe('48000');
+    expect(after.rate_source).toBe('auto');
+    expect(after.description).toBe('Typo fixed');
+  });
+
+  it('still re-resolves the rate when the date actually changes', async () => {
+    const id = await newForeignExpense(4_80000000n);
+    await seedRate('USD', 'MYR', 5_00000000n, OTHER_DAY);
+
+    currentUserId = ownerId;
+    await updateTransaction(orgSlug, id, {
+      occurredOn: OTHER_DAY,
+      amount: '100.00',
+      currency: 'USD',
+      moneyAccountId: cashId,
+      categoryId: rentCategoryId,
+      description: 'Moved to the day the invoice actually cleared',
+    });
+
+    const [after] = await admin`
+      select exchange_rate, base_amount_minor from transactions where id = ${id}
+    `;
+    expect(Number(after.exchange_rate)).toBeCloseTo(5.0, 6);
+    expect(after.base_amount_minor).toBe('50000');
+  });
+
+  it('still re-resolves the rate when the currency actually changes', async () => {
+    const id = await newForeignExpense(4_80000000n);
+    await seedRate('SGD', 'MYR', 3_10000000n, RATE_DAY);
+
+    currentUserId = ownerId;
+    await updateTransaction(orgSlug, id, {
+      occurredOn: RATE_DAY,
+      amount: '100.00',
+      currency: 'SGD',
+      moneyAccountId: cashId,
+      categoryId: rentCategoryId,
+      description: 'Actually paid in SGD',
+    });
+
+    const [after] = await admin`
+      select currency, exchange_rate, base_amount_minor from transactions where id = ${id}
+    `;
+    expect(after.currency).toBe('SGD');
+    expect(Number(after.exchange_rate)).toBeCloseTo(3.1, 6);
+    expect(after.base_amount_minor).toBe('31000');
+  });
+
+  it('still honours an explicit manual rate override on an otherwise-unchanged edit', async () => {
+    const id = await newForeignExpense(4_80000000n);
+
+    currentUserId = ownerId;
+    await updateTransaction(orgSlug, id, {
+      occurredOn: RATE_DAY,
+      amount: '100.00',
+      currency: 'USD',
+      moneyAccountId: cashId,
+      categoryId: rentCategoryId,
+      description: 'Bank slip actually says 4.90',
+      exchangeRate: '4.90',
+    });
+
+    const [after] = await admin`
+      select exchange_rate, base_amount_minor, rate_source from transactions where id = ${id}
+    `;
+    expect(Number(after.exchange_rate)).toBeCloseTo(4.9, 6);
+    expect(after.base_amount_minor).toBe('49000');
+    expect(after.rate_source).toBe('manual');
   });
 });
 
