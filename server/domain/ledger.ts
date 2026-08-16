@@ -75,6 +75,97 @@ export function buildJournalLines(input: BuildLinesInput): DraftJournalLine[] {
   return lines;
 }
 
+export type DraftLineSpec = {
+  accountId: string;
+  direction: Direction;
+  /** This line's amount in the original transaction currency. All lines must sum to a debit/credit balance. */
+  amountMinor: bigint;
+};
+
+export type BuildLinesContext = {
+  currency: string;
+  baseCurrency: string;
+  scaledRate: bigint;
+};
+
+/**
+ * Builds a balanced journal from an arbitrary number of lines (n >= 2).
+ *
+ * `buildJournalLines` above is a fixed two-line special case for the three
+ * user-facing operations (income/expense/transfer/journal). This is the
+ * general builder: phase 4 posts invoices (debit receivable / credit revenue
+ * / credit output tax -- three lines) and asset disposals (four lines).
+ *
+ * Each line is converted to base currency independently via
+ * `convertToBaseMinor`, which rounds half up per line. Rounding each line
+ * on its own can leave the two base-currency sides a cent apart even though
+ * the original-currency sides balance exactly -- see the comment below on
+ * how that residual is absorbed.
+ */
+export function buildLines(specs: DraftLineSpec[], ctx: BuildLinesContext): DraftJournalLine[] {
+  const { currency, baseCurrency, scaledRate } = ctx;
+
+  if (specs.length < 2) {
+    throw new LedgerError('A transaction needs at least two journal lines.');
+  }
+  if (scaledRate <= 0n) {
+    throw new LedgerError('Exchange rate must be greater than zero.');
+  }
+  for (const spec of specs) {
+    if (spec.amountMinor <= 0n) {
+      throw new LedgerError('Each journal line amount must be greater than zero.');
+    }
+  }
+
+  const sumSpecsByDirection = (direction: Direction) =>
+    sumMinor(specs.filter((spec) => spec.direction === direction).map((spec) => spec.amountMinor));
+
+  // The specs must already balance in the original currency. If they don't,
+  // that's bad input from the caller -- throw rather than silently plugging
+  // the gap, which would mask a bug upstream.
+  if (sumSpecsByDirection('debit') !== sumSpecsByDirection('credit')) {
+    throw new LedgerError('Journal lines are not balanced in transaction currency.');
+  }
+
+  const lines: DraftJournalLine[] = specs.map((spec) => ({
+    accountId: spec.accountId,
+    direction: spec.direction,
+    amountMinor: spec.amountMinor,
+    baseAmountMinor: convertToBaseMinor({
+      amountMinor: spec.amountMinor,
+      currency,
+      baseCurrency,
+      scaledRate,
+    }),
+  }));
+
+  const sumLinesBaseByDirection = (direction: Direction) =>
+    sumMinor(lines.filter((line) => line.direction === direction).map((line) => line.baseAmountMinor));
+
+  const debitBase = sumLinesBaseByDirection('debit');
+  const creditBase = sumLinesBaseByDirection('credit');
+  const baseDiff = debitBase - creditBase;
+
+  if (baseDiff !== 0n) {
+    // Per-line rounding left the base-currency sides a hair apart. Absorb
+    // the difference into the largest line on the short side (by original
+    // amountMinor, among lines sharing that side's direction) rather than
+    // the last line: the largest line minimises the relative size of the
+    // correction, and plugging the largest line is the conventional
+    // accounting treatment -- landing on the last line would just be an
+    // accident of iteration order.
+    const shortDirection: Direction = baseDiff > 0n ? 'credit' : 'debit';
+    const candidates = lines.filter((line) => line.direction === shortDirection);
+    const target = candidates.reduce((largest, line) =>
+      line.amountMinor > largest.amountMinor ? line : largest,
+    );
+    target.baseAmountMinor += baseDiff > 0n ? baseDiff : -baseDiff;
+  }
+
+  assertBalanced(lines);
+  return lines;
+}
+
 /** The ledger's iron rule: debits must equal credits, in both original and base currency. */
 export function assertBalanced(lines: DraftJournalLine[]): void {
   if (lines.length < 2) {
