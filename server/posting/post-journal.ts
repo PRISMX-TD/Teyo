@@ -3,7 +3,7 @@ import type { OrgContext } from '@/server/auth/guard';
 import { assertPeriodOpen } from '@/server/domain/period-lock';
 import { assertLineInvariants, buildLines } from '@/server/domain/ledger';
 import { templateFor, type PostingEvent } from '@/server/domain/posting-templates';
-import { resolveRate } from '@/server/actions/transactions';
+import { resolveRate } from '@/server/posting/rate';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import { findTransactionByClientUuid } from '@/server/repositories/transactions';
 import { insertJournalLines, insertTransaction } from '@/server/posting/insert';
