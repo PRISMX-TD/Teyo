@@ -5,12 +5,12 @@ import { formatScaledRate, type RateSource } from '@/server/domain/exchange-rate
 /**
  * 记账凭证的底层写入函数。
  *
- * 只对 server/posting/ 内部导出——postJournal（见 ./post-journal.ts）是
- * 唯一应该调用它们的地方。三个尚未迁移的旧写入点
- * （server/actions/transactions.ts、server/actions/recurring.ts、
- * server/actions/fixed_assets.ts 经由 server/repositories/fixed_assets.ts）
- * 暂时仍从这里直接导入，那是阶段 2 任务 4-6 要收编的对象，任务 7 会
- * 用 lint 规则彻底堵死除 server/posting/ 外的导入路径。
+ * 只对 server/posting/ 内部导出——postJournal 与 repostJournal
+ * （见 ./post-journal.ts）是唯一应该调用它们的地方。
+ * server/actions/transactions.ts 已在任务 4 收编；仍直接导入的还剩
+ * server/actions/recurring.ts 与 server/actions/fixed_assets.ts
+ * （经由 server/repositories/fixed_assets.ts），那是阶段 2 任务 5-6 的
+ * 对象，任务 7 会用 lint 规则彻底堵死除 server/posting/ 外的导入路径。
  */
 
 export type NewTransactionRow = {

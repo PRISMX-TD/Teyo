@@ -3,14 +3,9 @@
 import { revalidatePath } from 'next/cache';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission } from '@/server/auth/guard';
-import {
-  assertLineInvariants,
-  buildJournalLines,
-  LedgerError,
-  type TransactionKind,
-} from '@/server/domain/ledger';
+import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
-import { parseRateToScaled, RATE_SCALE } from '@/server/domain/exchange-rate';
+import type { PostingEvent } from '@/server/domain/posting-templates';
 import { assertPeriodOpen } from '@/server/domain/period-lock';
 import { canEditTransaction } from '@/server/domain/permissions';
 import { findAccount, getMoneyAccount } from '@/server/repositories/accounts';
@@ -18,14 +13,11 @@ import { getCategoryWithAccount } from '@/server/repositories/categories';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import { AuthError } from '@/server/auth/guard';
 import {
-  deleteJournalLines,
   findTransactionByClientUuid,
   getTransactionDetail,
   markVoided,
-  updateTransactionHead,
 } from '@/server/repositories/transactions';
-import { insertJournalLines, insertTransaction } from '@/server/posting/insert';
-import { resolveRate } from '@/server/posting/rate';
+import { postJournal, repostJournal } from '@/server/posting/post-journal';
 
 export type CreateTransactionInput = {
   kind: TransactionKind;
@@ -49,7 +41,12 @@ export type CreateTransactionInput = {
 async function resolveCounterAccountId(
   tx: Tx,
   organizationId: string,
-  input: { kind: TransactionKind; counterAccountId?: string; categoryId?: string },
+  input: {
+    kind: TransactionKind;
+    moneyAccountId: string;
+    counterAccountId?: string;
+    categoryId?: string;
+  },
 ): Promise<string> {
   if (input.kind === 'journal') {
     // Journal entries use two arbitrary accounts, no category needed.
@@ -62,6 +59,12 @@ async function resolveCounterAccountId(
       throw new LedgerError('A transfer needs a destination account.');
     }
     const counter = await getMoneyAccount(tx, organizationId, input.counterAccountId);
+    // 转账两端必须是不同账户。这条以前是 buildJournalLines 顺手拦下的；
+    // 改走 templateFor + buildLines 之后，同一账户上的一借一贷照样配平、
+    // 落库也不报错，于是必须在解析入参这一层显式挡住。
+    if (counter.id === input.moneyAccountId) {
+      throw new LedgerError('This operation requires two different accounts.');
+    }
     return counter.id;
   }
 
@@ -71,6 +74,42 @@ async function resolveCounterAccountId(
 
   const category = await getCategoryWithAccount(tx, organizationId, input.categoryId, input.kind);
   return category.accountId;
+}
+
+/**
+ * 把「资金账户 + 对方科目」这套用户视角的说法翻译成 PostingEvent。
+ *
+ * 收入的对方是收入科目，支出的对方是费用科目。
+ *
+ * 转账这一对是反的，务必看清：表单里 moneyAccountId 那个选择器的标签是
+ * transaction.destinationAccount，counterAccountId 的标签是
+ * sourceAccount（见 transaction-form.tsx 的 transfer 分支）——资金账户是
+ * 转入方，对方科目才是转出方。buildJournalLines 一直就是这么记的
+ * （借 moneyAccountId / 贷 counterAccountId），迁移不能把它掉个个儿。
+ */
+function toPostingEvent(
+  kind: TransactionKind,
+  moneyAccountId: string,
+  counterAccountId: string,
+  amountMinor: bigint,
+): PostingEvent {
+  switch (kind) {
+    case 'income':
+      return { type: 'income', moneyAccountId, revenueAccountId: counterAccountId, amountMinor };
+    case 'expense':
+      return { type: 'expense', moneyAccountId, expenseAccountId: counterAccountId, amountMinor };
+    case 'transfer':
+      return {
+        type: 'transfer',
+        fromAccountId: counterAccountId, // 转出方
+        toAccountId: moneyAccountId, // 转入方
+        amountMinor,
+      };
+    case 'journal':
+      // 到不了：resolveCounterAccountId 对 journal 先抛错。createJournal 自己
+      // 组装 journal 事件，不经过这里。
+      throw new LedgerError('Journal entries do not use categories.');
+  }
 }
 
 /**
@@ -89,79 +128,36 @@ export async function createTransaction(
   assertPeriodOpen(input.occurredOn, context.lockedUntil);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 幂等短路留在解析入参之前，而不是全部交给 postJournal 的第 2 步：
+    // 离线队列重放的是几分钟前就已入账成功的那一笔，若期间分类被停用或
+    // 删除，先解析入参会让这次重放报错——用户看到的是一条明明成功过的
+    // 记录突然失败。postJournal 里的那次查询仍在，是结构性兜底。
     const existing = await findTransactionByClientUuid(tx, context.organizationId, input.clientUuid);
     if (existing) {
       return { id: existing.id, deduplicated: true };
     }
 
     const moneyAccount = await getMoneyAccount(tx, context.organizationId, input.moneyAccountId);
-    const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, input);
+    const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, {
+      kind: input.kind,
+      moneyAccountId: moneyAccount.id,
+      counterAccountId: input.counterAccountId,
+      categoryId: input.categoryId,
+    });
 
     const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(input.currency));
-    const { scaledRate, source } = await resolveRate(tx, {
-      currency: input.currency,
-      baseCurrency: context.baseCurrency,
-      occurredOn: input.occurredOn,
-      manualRate: input.exchangeRate,
-    });
 
-    const lines = buildJournalLines({
-      kind: input.kind,
-      amountMinor,
-      currency: input.currency,
-      baseCurrency: context.baseCurrency,
-      scaledRate,
-      moneyAccountId: moneyAccount.id,
-      counterAccountId,
-    });
-
-    // 取自分录行而非另算一遍：表头金额与分录必须同源，
-    // 否则两者可能不一致，而数据库的平衡触发器只看分录、看不到表头。
-    const baseAmountMinor = lines[0].baseAmountMinor;
-
-    const { id } = await insertTransaction(tx, {
-      organizationId: context.organizationId,
-      kind: input.kind,
+    const posted = await postJournal(tx, context, {
+      event: toPostingEvent(input.kind, moneyAccount.id, counterAccountId, amountMinor),
       occurredOn: input.occurredOn,
       description: input.description ?? '',
       currency: input.currency,
-      amountMinor,
-      baseAmountMinor,
-      scaledRate,
-      rateSource: source,
-      categoryId: input.kind === 'transfer' ? null : (input.categoryId as string),
-      createdBy: context.userId,
+      manualRate: input.exchangeRate,
+      categoryId: input.categoryId ?? null,
       clientUuid: input.clientUuid,
     });
 
-    assertLineInvariants(lines, {
-      currency: input.currency,
-      baseCurrency: context.baseCurrency,
-      scaledRate,
-      rateSource: source,
-    });
-
-    await insertJournalLines(tx, context.organizationId, id, lines);
-
-    await recordAudit(tx, {
-      organizationId: context.organizationId,
-      actorUserId: context.userId,
-      action: 'transaction.created',
-      entityType: 'transaction',
-      entityId: id,
-      after: {
-        kind: input.kind,
-        occurredOn: input.occurredOn,
-        currency: input.currency,
-        // bigint 不能直接进 JSON，统一转字符串，保持 jsonb 可查询。
-        amountMinor: amountMinor.toString(),
-        baseAmountMinor: baseAmountMinor.toString(),
-        rateSource: source,
-        categoryId: input.categoryId ?? null,
-      },
-    });
-
-    return { id, deduplicated: false };
+    return { id: posted.transactionId, deduplicated: posted.deduplicated };
   });
 
   revalidatePath(`/${orgSlug}/transactions`);
@@ -186,7 +182,12 @@ export type CreateJournalInput = {
  *   预付费用 → 现金（预付一年租金）
  *   折旧 → 累计折旧（非现金的折旧分录）
  *
- * 金额用本位币，不需要汇率查表。与 createTransaction 一样享有幂等保护。
+ * 与 createTransaction 一样享有幂等保护。
+ *
+ * currency 可省，省略即本位币，此时 resolveRate 不查表直接返回 1。真的传了
+ * 外币，就跟别的写入点走同一条路：查缓存汇率，查不到即报错。以前这里是
+ * 硬写 scaledRate = RATE_SCALE、rateSource = 'auto'，等于把一笔外币凭证按
+ * 编造出来的 1:1 记进账，事后从数据里也看不出来。
  */
 export async function createJournal(
   orgSlug: string,
@@ -199,6 +200,8 @@ export async function createJournal(
   const baseCurrency = context.baseCurrency;
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 与 createTransaction 同理：幂等短路排在解析科目之前，重放不该因为
+    // 某个科目事后被停用而报错。postJournal 里的那次查询是结构性兜底。
     const existing = await findTransactionByClientUuid(tx, context.organizationId, clientUuid);
     if (existing) {
       return { id: existing.id, deduplicated: true };
@@ -219,61 +222,24 @@ export async function createJournal(
     const currency = input.currency ?? baseCurrency;
     const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(currency));
 
-    const lines = buildJournalLines({
-      kind: 'journal',
-      amountMinor,
-      currency,
-      baseCurrency,
-      scaledRate: RATE_SCALE,
-      moneyAccountId: debitAccount.id,    // journal: debit
-      counterAccountId: creditAccount.id,  // journal: credit
-    });
-
-    const baseAmountMinor = lines[0].baseAmountMinor;
-
-    const { id } = await insertTransaction(tx, {
-      organizationId: context.organizationId,
-      kind: 'journal',
+    const posted = await postJournal(tx, context, {
+      event: {
+        type: 'journal',
+        debitAccountId: debitAccount.id,
+        creditAccountId: creditAccount.id,
+        amountMinor,
+      },
       occurredOn: input.occurredOn,
       description: input.description ?? '',
       currency,
-      amountMinor,
-      baseAmountMinor,
-      scaledRate: RATE_SCALE,
-      rateSource: 'auto',
       categoryId: null,
-      createdBy: context.userId,
       clientUuid,
+      // 分录行里只有科目 uuid；凭证的审计快照一直记的是两端的科目代码，
+      // 那是人翻审计日志时唯一读得懂的东西，迁移不能把它丢掉。
+      auditExtra: { debitAccount: debitAccount.code, creditAccount: creditAccount.code },
     });
 
-    assertLineInvariants(lines, {
-      currency,
-      baseCurrency,
-      scaledRate: RATE_SCALE,
-      rateSource: 'auto',
-    });
-
-    await insertJournalLines(tx, context.organizationId, id, lines);
-
-    await recordAudit(tx, {
-      organizationId: context.organizationId,
-      actorUserId: context.userId,
-      action: 'transaction.created',
-      entityType: 'transaction',
-      entityId: id,
-      after: {
-        kind: 'journal',
-        occurredOn: input.occurredOn,
-        currency,
-        amountMinor: amountMinor.toString(),
-        baseAmountMinor: baseAmountMinor.toString(),
-        debitAccount: debitAccount.code,
-        creditAccount: creditAccount.code,
-        description: input.description ?? '',
-      },
-    });
-
-    return { id, deduplicated: false };
+    return { id: posted.transactionId, deduplicated: posted.deduplicated };
   });
 
   revalidatePath(`/${orgSlug}/transactions`);
@@ -300,8 +266,10 @@ export type UpdateTransactionInput = {
  * transaction:create 做门槛是不对的——viewer 与 bookkeeper 的区别不在能否
  * 创建，而在能否改哪些记录。
  *
- * 分录不原地改而是整体重建。journal_lines 的平衡触发器是延迟约束，
- * 同一事务内先删后插不会中途报错，提交时才校验最终状态。
+ * 这里只做入参解析与授权：作废判定、canEditTransaction、kind 不可改、
+ * 资金账户与对方科目的公司维度校验。期间检查、汇率决策、分录重建与审计
+ * 全在 repostJournal 里——包括「未改币种与日期时复用既有汇率」那条规则，
+ * 它必须由边界依据 existing 行自己判断，而不是由调用方算好汇率传进去。
  */
 export async function updateTransaction(
   orgSlug: string,
@@ -321,10 +289,6 @@ export async function updateTransaction(
       throw new AuthError('forbidden', 'Your role cannot edit this record.');
     }
 
-    // 原日期与新日期都要在开放期间内：只查其一，就能把记录搬进或搬出锁定区间。
-    assertPeriodOpen(existing.occurredOn, context.lockedUntil);
-    assertPeriodOpen(input.occurredOn, context.lockedUntil);
-
     // kind 不可改：改了就等于换一笔账，分录方向、分类与对方账户全都得重来，
     // 让用户作废重录更清晰，也让审计留下两条独立记录。
     const kind = existing.kind;
@@ -332,90 +296,30 @@ export async function updateTransaction(
     const moneyAccount = await getMoneyAccount(tx, context.organizationId, input.moneyAccountId);
     const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, {
       kind,
+      moneyAccountId: moneyAccount.id,
       counterAccountId: input.counterAccountId,
       categoryId: input.categoryId,
     });
 
     const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(input.currency));
 
-    // 没提交手工汇率、且币种和日期都没变时，直接沿用这笔交易当初记的汇率与
-    // 来源，不再重新调用 resolveRate。RateField 在这种情况下就是这么显示
-    // 的（见 rate-field.tsx 的 initialRate/initialSource）——如果这里还是
-    // 每次保存都重新解析，两边就会对不上：exchange_rates 只由每天的 cron
-    // upsert「今天」这一格（见 app/api/cron/exchange-rates/route.ts），
-    // 所以早上记一笔外币交易时 findRate 的 7 天回溯会命中前一个营业日的
-    // 汇率并存成 auto；同一天晚些时候 cron 把「今天」这一格填上后，若只是
-    // 改个备注就保存，resolveRate 会重新查到当天的精确汇率，把汇率和本位
-    // 币金额悄悄换成屏幕上从未展示过的另一个值。币种或日期真的变了，
-    // 或者用户主动填了手工汇率，才应该重新解析——那两种情况都会让下面
-    // 这个条件为 false，直接走原来的 resolveRate 分支。
-    const reuseStoredRate =
-      input.exchangeRate === undefined &&
-      input.currency === existing.currency &&
-      input.occurredOn === existing.occurredOn;
-
-    const { scaledRate, source } = reuseStoredRate
-      ? { scaledRate: parseRateToScaled(existing.exchangeRate), source: existing.rateSource }
-      : await resolveRate(tx, {
-          currency: input.currency,
-          baseCurrency: context.baseCurrency,
-          occurredOn: input.occurredOn,
-          manualRate: input.exchangeRate,
-        });
-
-    const lines = buildJournalLines({
-      kind,
-      amountMinor,
-      currency: input.currency,
-      baseCurrency: context.baseCurrency,
-      scaledRate,
-      moneyAccountId: moneyAccount.id,
-      counterAccountId,
-    });
-
-    const description = input.description ?? '';
-
-    await updateTransactionHead(tx, context.organizationId, id, {
+    await repostJournal(tx, context, {
+      transactionId: id,
+      event: toPostingEvent(kind, moneyAccount.id, counterAccountId, amountMinor),
       occurredOn: input.occurredOn,
-      description,
+      description: input.description ?? '',
       currency: input.currency,
-      amountMinor,
-      // 与创建路径同理：表头金额取自分录，数据库的平衡触发器看不到表头。
-      baseAmountMinor: lines[0].baseAmountMinor,
-      scaledRate,
-      rateSource: source,
-      categoryId: kind === 'transfer' ? null : (input.categoryId as string),
-    });
-
-    assertLineInvariants(lines, {
-      currency: input.currency,
-      baseCurrency: context.baseCurrency,
-      scaledRate,
-      rateSource: source,
-    });
-
-    await deleteJournalLines(tx, context.organizationId, id);
-    await insertJournalLines(tx, context.organizationId, id, lines);
-
-    await recordAudit(tx, {
-      organizationId: context.organizationId,
-      actorUserId: context.userId,
-      action: 'transaction.updated',
-      entityType: 'transaction',
-      entityId: id,
-      before: {
+      manualRate: input.exchangeRate,
+      categoryId: input.categoryId ?? null,
+      existing: {
         occurredOn: existing.occurredOn,
-        amountMinor: existing.amountMinor.toString(),
-        currency: existing.currency,
-        categoryId: existing.categoryId,
         description: existing.description,
-      },
-      after: {
-        occurredOn: input.occurredOn,
-        amountMinor: amountMinor.toString(),
-        currency: input.currency,
-        categoryId: kind === 'transfer' ? null : (input.categoryId ?? null),
-        description,
+        currency: existing.currency,
+        amountMinor: existing.amountMinor,
+        baseAmountMinor: existing.baseAmountMinor,
+        categoryId: existing.categoryId,
+        exchangeRate: existing.exchangeRate,
+        rateSource: existing.rateSource,
       },
     });
   });
