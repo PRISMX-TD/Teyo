@@ -6,7 +6,7 @@ import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listRecurring } from '@/server/repositories/recurring';
 import { listMoneyAccounts, listAllAccounts } from '@/server/repositories/accounts';
-import { listCategories } from '@/server/repositories/categories';
+import { listSelectableCategories } from '@/server/repositories/categories';
 import {
   createRecurring,
   editRecurring,
@@ -24,18 +24,27 @@ export default async function RecurringSettingsPage({
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const [entries, moneyAccounts, allAccounts, categories] = await withTransaction(
-    context.userId,
-    async (tx) => {
-      const [entries, moneyAccounts, allAccounts, categories] = await Promise.all([
-        listRecurring(tx, context.organizationId),
-        listMoneyAccounts(tx, context.organizationId),
-        listAllAccounts(tx, context.organizationId),
-        listCategories(tx, context.organizationId),
-      ]);
-      return [entries, moneyAccounts, allAccounts, categories] as const;
-    },
-  );
+  const [entries, moneyAccounts, allAccounts, incomeCategories, expenseCategories] =
+    await withTransaction(context.userId, async (tx) => {
+      const [entries, moneyAccounts, allAccounts, incomeCategories, expenseCategories] =
+        await Promise.all([
+          listRecurring(tx, context.organizationId),
+          listMoneyAccounts(tx, context.organizationId),
+          listAllAccounts(tx, context.organizationId),
+          // 只取可由用户选的分类（排除折旧/摊销这类只应由系统过账的），
+          // 理由同 transactions/[id]/page.tsx：定期规则每月自动生成交易，
+          // 挂错在这类分类上会一直贷记资金账户，而这笔现金流出从未发生过。
+          listSelectableCategories(tx, context.organizationId, 'income'),
+          listSelectableCategories(tx, context.organizationId, 'expense'),
+        ]);
+      return [entries, moneyAccounts, allAccounts, incomeCategories, expenseCategories] as const;
+    });
+  const categories = [...incomeCategories, ...expenseCategories].map((c) => ({
+    id: c.id,
+    nameEn: c.nameEn,
+    nameZh: c.nameZh,
+    kind: c.kind,
+  }));
 
   return (
     <>
