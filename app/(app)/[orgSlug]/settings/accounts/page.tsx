@@ -41,9 +41,9 @@ export default async function AccountsSettingsPage({
         orgSlug={orgSlug}
         items={items}
         locale={locale}
-        createAction={createAccount as unknown as (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>}
-        renameAction={renameAccount as unknown as (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>}
-        toggleAction={setAccountActive as unknown as (orgSlug: string, id: string, active: boolean) => Promise<unknown>}
+        createAction={createAccount}
+        renameAction={renameAccount}
+        toggleAction={setAccountActive}
       />
     </>
   );

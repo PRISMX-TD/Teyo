@@ -14,17 +14,20 @@ type AccountItem = {
   isActive: boolean;
 };
 
+const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'] as const;
+type AccountType = (typeof ACCOUNT_TYPES)[number];
+
 type Props = {
   orgSlug: string;
   items: AccountItem[];
   locale: Locale;
-  createAction: (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>;
-  renameAction: (orgSlug: string, id: string, names: Record<string, string>) => Promise<unknown>;
-  toggleAction: (orgSlug: string, id: string, active: boolean) => Promise<unknown>;
+  createAction: (
+    orgSlug: string,
+    payload: { nameEn?: string; nameZh?: string; type: AccountType; isMoneyAccount: boolean },
+  ) => Promise<{ id: string }>;
+  renameAction: (orgSlug: string, id: string, names: { nameEn?: string; nameZh?: string }) => Promise<void>;
+  toggleAction: (orgSlug: string, id: string, active: boolean) => Promise<void>;
 };
-
-const ACCOUNT_TYPES = ['asset', 'liability', 'equity', 'revenue', 'expense'] as const;
-type AccountType = (typeof ACCOUNT_TYPES)[number];
 
 const TYPE_LABEL_KEYS: Record<AccountType, keyof ReturnType<typeof getMessages>['settings']> = {
   asset: 'typeAsset',
@@ -38,7 +41,7 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
   const t = getMessages(locale);
   const [nameEn, setNameEn] = useState('');
   const [nameZh, setNameZh] = useState('');
-  const [newType, setNewType] = useState<string>('asset');
+  const [newType, setNewType] = useState<AccountType>('asset');
   const [newIsMoney, setNewIsMoney] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
   const [editEn, setEditEn] = useState('');
@@ -156,7 +159,7 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
 
       <div className="add-form">
         <h3>{t.settings.addAccount}</h3>
-        <select value={newType} onChange={(e) => setNewType(e.target.value)}>
+        <select value={newType} onChange={(e) => setNewType(e.target.value as AccountType)}>
           {ACCOUNT_TYPES.map((type) => (
             <option key={type} value={type}>
               {t.settings[TYPE_LABEL_KEYS[type]]}

@@ -26,7 +26,11 @@ export async function createRecurring(
     currency: string;
     debitAccountId: string;
     creditAccountId: string;
-    categoryId: string;
+    // categories.category_id 在 recurring_transactions 上没有 not null 约束
+    // （见 0008 迁移），insertRecurring 的形参类型也是 `string | null`——
+    // 定期规则本就允许不挂分类。这里之前错标成必填，被 settings/recurring/page.tsx
+    // 那个 `as unknown as` 挡住没被 tsc 发现；组件从来就只在选了值时才传。
+    categoryId?: string;
     frequency: RecurringTransactionRow['frequency'];
     interval: number;
     startDate: string;

@@ -44,9 +44,9 @@ export default async function ContactsSettingsPage({
         orgSlug={orgSlug}
         items={items}
         locale={locale}
-        onCreate={createContact as unknown as (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>}
-        onUpdate={updateContactAction as unknown as (orgSlug: string, id: string, fields: Record<string, string>) => Promise<unknown>}
-        onToggle={toggleContactActive as unknown as (orgSlug: string, id: string, active: boolean) => Promise<unknown>}
+        onCreate={createContact}
+        onUpdate={updateContactAction}
+        onToggle={toggleContactActive}
       />
     </>
   );

@@ -85,7 +85,7 @@ export default async function TransactionsListPage({
       <TransactionFilters
         orgSlug={orgSlug}
         locale={locale}
-        categories={data.categories.map((c) => toOption(c as unknown as { id: string; nameEn: string | null; nameZh: string | null }))}
+        categories={data.categories.map(toOption)}
         moneyAccounts={data.accounts.map(toOption)}
         members={data.members.map((m) => ({ userId: m.userId, displayName: m.displayName }))}
       />

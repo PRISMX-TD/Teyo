@@ -17,17 +17,39 @@ type ContactItem = {
   isActive: boolean;
 };
 
+const CONTACT_TYPES = ['customer', 'vendor', 'both'] as const;
+type ContactType = (typeof CONTACT_TYPES)[number];
+
+type CreatePayload = {
+  type: ContactType;
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  taxId?: string;
+  paymentTerms?: string;
+  notes?: string;
+};
+
+type UpdatePayload = Partial<{
+  type: string;
+  name: string;
+  email: string;
+  phone: string;
+  address: string;
+  taxId: string;
+  paymentTerms: string;
+  notes: string;
+}>;
+
 type Props = {
   orgSlug: string;
   items: ContactItem[];
   locale: Locale;
-  onCreate: (orgSlug: string, payload: Record<string, unknown>) => Promise<unknown>;
-  onUpdate: (orgSlug: string, id: string, fields: Record<string, string>) => Promise<unknown>;
-  onToggle: (orgSlug: string, id: string, active: boolean) => Promise<unknown>;
+  onCreate: (orgSlug: string, payload: CreatePayload) => Promise<{ id: string }>;
+  onUpdate: (orgSlug: string, id: string, fields: UpdatePayload) => Promise<void>;
+  onToggle: (orgSlug: string, id: string, active: boolean) => Promise<void>;
 };
-
-const CONTACT_TYPES = ['customer', 'vendor', 'both'] as const;
-type ContactType = (typeof CONTACT_TYPES)[number];
 
 const TYPE_LABEL_KEYS: Record<ContactType, keyof ReturnType<typeof getMessages>['settings']> = {
   customer: 'typeCustomer',
@@ -37,7 +59,7 @@ const TYPE_LABEL_KEYS: Record<ContactType, keyof ReturnType<typeof getMessages>[
 
 export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onToggle }: Props) {
   const t = getMessages(locale);
-  const [type, setType] = useState<string>('customer');
+  const [type, setType] = useState<ContactType>('customer');
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [phone, setPhone] = useState('');
@@ -247,7 +269,7 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
 
       <div className="add-form">
         <h3>{t.settings.addContact}</h3>
-        <select value={type} onChange={(e) => setType(e.target.value)}>
+        <select value={type} onChange={(e) => setType(e.target.value as ContactType)}>
           {CONTACT_TYPES.map((ct) => (
             <option key={ct} value={ct}>
               {t.settings[TYPE_LABEL_KEYS[ct]]}

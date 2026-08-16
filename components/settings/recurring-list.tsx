@@ -4,6 +4,8 @@ import { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
+import type { TransactionKind } from '@/server/domain/ledger';
+import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 
 type MoneyAccountOption = {
   id: string;
@@ -44,6 +46,35 @@ type RecurringEntry = {
   isActive: boolean;
 };
 
+type RecurringFrequency = RecurringTransactionRow['frequency'];
+
+type CreatePayload = {
+  kind: TransactionKind;
+  description: string;
+  amount: string;
+  currency: string;
+  debitAccountId: string;
+  creditAccountId: string;
+  categoryId?: string;
+  frequency: RecurringFrequency;
+  interval: number;
+  startDate: string;
+  endDate?: string;
+};
+
+type EditPayload = {
+  description?: string;
+  amount?: string;
+  currency?: string;
+  debitAccountId?: string;
+  creditAccountId?: string;
+  categoryId?: string;
+  frequency?: RecurringFrequency;
+  interval?: number;
+  startDate?: string;
+  endDate?: string | null;
+};
+
 type Props = {
   orgSlug: string;
   locale: Locale;
@@ -52,8 +83,8 @@ type Props = {
   moneyAccounts: MoneyAccountOption[];
   allAccounts: AccountOption[];
   categories: CategoryOption[];
-  createAction: (orgSlug: string, input: Record<string, unknown>) => Promise<{ id: string }>;
-  editAction: (orgSlug: string, id: string, fields: Record<string, unknown>) => Promise<void>;
+  createAction: (orgSlug: string, input: CreatePayload) => Promise<{ id: string }>;
+  editAction: (orgSlug: string, id: string, fields: EditPayload) => Promise<void>;
   toggleAction: (orgSlug: string, id: string, active: boolean) => Promise<void>;
   generateAction: (orgSlug: string) => Promise<{ generated: number }>;
 };
@@ -85,14 +116,14 @@ export function RecurringList({
 }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
-    kind: 'expense' as string,
+    kind: 'expense' as TransactionKind,
     description: '',
     amount: '',
     currency: moneyAccounts[0]?.id ? '' : 'USD',
     debitAccountId: '',
     creditAccountId: '',
     categoryId: '',
-    frequency: 'monthly' as string,
+    frequency: 'monthly' as RecurringFrequency,
     interval: 1,
     startDate: new Date().toISOString().slice(0, 10),
     endDate: '',
@@ -185,7 +216,7 @@ export function RecurringList({
             {t.transaction.kind}
             <select
               value={form.kind}
-              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as TransactionKind }))}
             >
               <option value="income">{t.transaction.income}</option>
               <option value="expense">{t.transaction.expense}</option>
@@ -284,7 +315,7 @@ export function RecurringList({
             {t.recurring.frequency}
             <select
               value={form.frequency}
-              onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value }))}
+              onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value as RecurringFrequency }))}
             >
               {FREQUENCIES.map((freq) => (
                 <option key={freq.key} value={freq.key}>

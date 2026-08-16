@@ -82,10 +82,10 @@ export default async function RecurringSettingsPage({
           isMoneyAccount: a.isMoneyAccount,
         }))}
         categories={categories}
-        createAction={createRecurring as unknown as (orgSlug: string, input: Record<string, unknown>) => Promise<{ id: string }>}
-        editAction={editRecurring as unknown as (orgSlug: string, id: string, fields: Record<string, unknown>) => Promise<void>}
-        toggleAction={toggleRecurring as unknown as (orgSlug: string, id: string, active: boolean) => Promise<void>}
-        generateAction={generateDueRecurring as unknown as (orgSlug: string) => Promise<{ generated: number }>}
+        createAction={createRecurring}
+        editAction={editRecurring}
+        toggleAction={toggleRecurring}
+        generateAction={generateDueRecurring}
       />
     </>
   );
