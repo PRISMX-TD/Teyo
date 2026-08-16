@@ -44,28 +44,37 @@ describe('buildLines - n lines', () => {
   });
 
   it('absorbs a rounding difference into the largest line, keeping base amounts balanced', () => {
-    // 三行外币，逐行换算会产生一分的取整差。
+    // Debit 5, credits 3 (largest, listed FIRST) and 2 (smaller, listed LAST).
+    // Independent per-line conversion at this rate gives debit -> 24,
+    // credit B(3) -> 14, credit C(2) -> 9. Credits sum to 23 against a debit
+    // of 24: a genuine one-cent gap on the credit side. B is both the
+    // largest credit line and NOT the last line in the specs array, so this
+    // input can distinguish "adjust the largest line" from "adjust the last
+    // line" -- an input where the largest line happens to also be last
+    // cannot tell the two apart.
     const lines = buildLines(
       [
-        { accountId: A, direction: 'debit', amountMinor: 10000n },
-        { accountId: B, direction: 'credit', amountMinor: 3333n },
-        { accountId: C, direction: 'credit', amountMinor: 6667n },
+        { accountId: A, direction: 'debit', amountMinor: 5n },
+        { accountId: B, direction: 'credit', amountMinor: 3n },
+        { accountId: C, direction: 'credit', amountMinor: 2n },
       ],
       { currency: 'USD', baseCurrency: 'MYR', scaledRate: 4_71834900n },
     );
 
     expect(() => assertBalanced(lines)).not.toThrow();
 
-    // 差额必须落在金额最大的那一行，不是最后一行
-    const debit = lines.find((l) => l.direction === 'debit')!;
-    const credits = lines.filter((l) => l.direction === 'credit');
-    const largestCredit = credits.reduce((a, b) => (b.amountMinor > a.amountMinor ? b : a));
-    const otherCredit = credits.find((l) => l !== largestCredit)!;
+    const debit = lines.find((l) => l.accountId === A)!;
+    const largestCredit = lines.find((l) => l.accountId === B)!;
+    const otherCredit = lines.find((l) => l.accountId === C)!;
 
-    // 未被调整的那一行必须等于它自己的独立换算值
     const exact = (amount: bigint) => (amount * 4_71834900n * 2n + RATE_SCALE) / (RATE_SCALE * 2n);
-    expect(otherCredit.baseAmountMinor).toBe(exact(otherCredit.amountMinor));
-    expect(debit.baseAmountMinor).toBe(exact(debit.amountMinor));
+
+    // The debit side was already balanced on its own; its single line is untouched.
+    expect(debit.baseAmountMinor).toBe(exact(5n));
+    // The smaller, last-listed credit line equals its own independent conversion.
+    expect(otherCredit.baseAmountMinor).toBe(exact(2n));
+    // The larger, first-listed credit line absorbs the one-cent gap.
+    expect(largestCredit.baseAmountMinor).toBe(exact(3n) + 1n);
   });
 
   it('preserves every line-level invariant that assertLineInvariants would check, except on the adjusted line', () => {
