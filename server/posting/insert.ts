@@ -7,10 +7,9 @@ import { formatScaledRate, type RateSource } from '@/server/domain/exchange-rate
  *
  * 只对 server/posting/ 内部导出——postJournal 与 repostJournal
  * （见 ./post-journal.ts）是唯一应该调用它们的地方。
- * server/actions/transactions.ts 已在任务 4 收编；仍直接导入的还剩
- * server/actions/recurring.ts 与 server/actions/fixed_assets.ts
- * （经由 server/repositories/fixed_assets.ts），那是阶段 2 任务 5-6 的
- * 对象，任务 7 会用 lint 规则彻底堵死除 server/posting/ 外的导入路径。
+ * 任务 4-6 依次收编了 transactions.ts、recurring.ts、fixed_assets.ts，
+ * 至此 server/posting/ 之外已无任何直接导入；任务 7 会用 lint 规则把这条
+ * 路径彻底堵死，让新的直接导入连编译都过不去。
  */
 
 export type NewTransactionRow = {

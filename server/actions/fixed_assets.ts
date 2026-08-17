@@ -11,13 +11,11 @@ import {
   disposeFixedAsset,
   generateDepreciationSchedule,
   getFixedAsset,
-  postDepreciation,
+  loadDepreciationPosting,
+  markDepreciationPosted,
   type DepreciationMethod,
 } from '@/server/repositories/fixed_assets';
-import {
-  insertTransaction as insertTransactionRepo,
-  insertJournalLines as insertJournalLinesRepo,
-} from '@/server/posting/insert';
+import { postJournal } from '@/server/posting/post-journal';
 import { parseRateToScaled, convertToBaseMinor } from '@/server/domain/exchange-rate';
 
 const createFixedAssetSchema = z.object({
@@ -205,6 +203,22 @@ export async function disposeFixedAssetAction(
   revalidatePath(`/${orgSlug}/fixed-assets/${id}`);
 }
 
+/**
+ * 过一期折旧：读 -> 记账 -> 标记，三步都在同一个事务里。
+ *
+ * 记账那一步以前在仓储层，靠注入两个写入函数完成（见 fixed_assets 仓储里
+ * loadDepreciationPosting 的注释）。改走 postJournal 之后这条路径顺带拿到
+ * 两样它一直缺的东西：期间锁检查，以及一条带科目代码的审计快照——两样都
+ * 不是这里写的代码，而是边界本身就会做的事。
+ *
+ * 折旧的方向：借折旧费用、贷累计折旧。累计折旧是资产的备抵科目，贷方增加，
+ * 与资产科目本身的方向相反——写反不会有任何报错（一借一贷照样配平），只会
+ * 让资产负债表两头同时错。
+ *
+ * 币种恒为本位币：排程表里的金额本来就是按 cost_minor 算的，而 cost_minor
+ * 是本位币（原币三个字段只作购入留痕，见 0011 迁移）。所以 resolveRate 会
+ * 走同币种那一支直接返回 RATE_SCALE，不查缓存，也就不需要在这里绕开它。
+ */
 export async function postDepreciationAction(
   orgSlug: string,
   assetId: string,
@@ -213,12 +227,29 @@ export async function postDepreciationAction(
   const context = await requirePermission(orgSlug, 'account:manage');
 
   const result = await withTransaction(context.userId, async (tx) => {
-    return postDepreciation(tx, context.organizationId, assetId, period, {
-      userId: context.userId,
-      baseCurrency: context.baseCurrency,
-      insertTransaction: insertTransactionRepo,
-      insertJournalLines: insertJournalLinesRepo,
+    const pending = await loadDepreciationPosting(tx, context.organizationId, assetId, period);
+
+    const { transactionId } = await postJournal(tx, context, {
+      event: {
+        type: 'journal',
+        debitAccountId: pending.depnExpenseAccountId,
+        creditAccountId: pending.depnAccumAccountId,
+        amountMinor: pending.depreciationMinor,
+      },
+      occurredOn: period,
+      description: `Depreciation: ${pending.assetName} (${period})`,
+      currency: context.baseCurrency,
+      categoryId: null,
+      // 每次点击都是一个新的 clientUuid，所以幂等靠的不是它，而是排程行上的
+      // is_posted 加那把行锁（见 loadDepreciationPosting）。
+      clientUuid: crypto.randomUUID(),
+      sourceType: 'fixed_asset',
+      sourceId: assetId,
     });
+
+    await markDepreciationPosted(tx, context.organizationId, pending.scheduleId, transactionId);
+
+    return { transactionId };
   });
 
   revalidatePath(`/${orgSlug}/fixed-assets/${assetId}`);
