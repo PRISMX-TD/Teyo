@@ -8,8 +8,10 @@ import { formatScaledRate, type RateSource } from '@/server/domain/exchange-rate
  * 只对 server/posting/ 内部导出——postJournal 与 repostJournal
  * （见 ./post-journal.ts）是唯一应该调用它们的地方。
  * 任务 4-6 依次收编了 transactions.ts、recurring.ts、fixed_assets.ts，
- * 至此 server/posting/ 之外已无任何直接导入；任务 7 会用 lint 规则把这条
- * 路径彻底堵死，让新的直接导入连编译都过不去。
+ * 至此 server/posting/ 之外已无任何直接导入；任务 7 用 lint 规则把这条
+ * 路径堵死。deleteJournalLines 原来留在 server/repositories/transactions.ts，
+ * 后来搬进这个文件——三个底层写入函数现在同属一个模块，按模块整体禁止导入，
+ * 不用再对某一个名字单独开 importNames 白名单／黑名单。
  */
 
 export type NewTransactionRow = {
@@ -146,4 +148,20 @@ export async function insertJournalLines(
   `;
 
   return codesById;
+}
+
+/**
+ * 删掉一笔交易名下的全部分录行，供编辑路径重建分录用（先删后插，见
+ * repostJournal 的注释）。原先落在 server/repositories/transactions.ts，
+ * 纯粹搬家：行为、签名、SQL 都未改动。
+ */
+export async function deleteJournalLines(
+  tx: Tx,
+  organizationId: string,
+  transactionId: string,
+): Promise<void> {
+  await tx`
+    delete from journal_lines
+    where transaction_id = ${transactionId} and organization_id = ${organizationId}
+  `;
 }

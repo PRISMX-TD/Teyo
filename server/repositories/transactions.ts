@@ -4,9 +4,10 @@ import { formatScaledRate } from '@/server/domain/exchange-rate';
 import type { RateSource } from '@/server/domain/exchange-rate';
 import { parseDecimalToMinor } from '@/server/domain/money';
 
-// insertTransaction / insertJournalLines 已搬到 server/posting/insert.ts，
-// 只对 server/posting/ 内部导出——postJournal 是记账凭证的唯一写入出口。
-// 见该文件顶部注释。
+// insertTransaction / insertJournalLines / deleteJournalLines 都已搬到
+// server/posting/insert.ts，只对 server/posting/ 内部导出——postJournal /
+// repostJournal 是记账凭证的唯一写入出口。见该文件顶部注释。这个仓储文件
+// 之后只留读取。
 
 /** client_uuid 是离线幂等键，唯一约束是 (organization_id, client_uuid)。 */
 export async function findTransactionByClientUuid(
@@ -346,17 +347,6 @@ export async function getTransactionDetail(
       sizeBytes: Number(row.size_bytes),
     })),
   };
-}
-
-export async function deleteJournalLines(
-  tx: Tx,
-  organizationId: string,
-  transactionId: string,
-): Promise<void> {
-  await tx`
-    delete from journal_lines
-    where transaction_id = ${transactionId} and organization_id = ${organizationId}
-  `;
 }
 
 export type TransactionHeadUpdate = {
