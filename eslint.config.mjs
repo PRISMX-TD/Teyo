@@ -22,6 +22,31 @@ const compat = new FlatCompat({
 // 一处写入 bug 如果两条腿（原分录与冲销/重建的分录）算错了同一个数，
 // 借贷合计照样相等，触发器完全看不出来——这正是唯一入口存在的意义：
 // 把不变量校验钉死在写入之前，而不是指望写完之后触发器替你把关。
+//
+// ============================================================
+// 下面这两条规则由什么来跑——**不是** next lint
+// ============================================================
+// `next lint`（以及 `next build` 内置的那次 lint）只扫 next.config 里
+// eslint.dirs 指定的目录，默认是 app / pages / components / lib / src
+// （见 next/dist/lib/constants.js 的 ESLINT_DEFAULT_DIRS）。server/ 与
+// tests/ 一个文件都不在里面。实测：在 server/actions/transactions.ts 顶上
+// 加一行 `import { insertJournalLines } from '../posting/insert'`，
+// `npx next lint` 照样 exit 0、0 errors——它测量的范围恰好把这两条规则
+// 保护的每个文件都排除了。所以 next lint 的绿色对这条边界毫无信息量。
+//
+// 也没有把 server/ 加进 eslint.dirs：那会让 `next build` 一并去 lint
+// server/，而仓库里现有 3 个与记账边界无关的既有错误就在那儿
+// （server/repositories/bank_import.ts、server/services/bank_import_parser.ts），
+// 构建会因此永久变红——用一个永远红的门禁换一个永远绿的门禁，还是没人看。
+//
+// 真正跑这两条规则的是两处：
+//   1. `npm run lint` —— 已显式列出 server 与 tests。它今天是红的：上面那
+//      3 个既有错误不属于本分支，没有一并修，也没有用 disable 注释盖掉。
+//   2. tests/posting/boundary-lint.test.ts —— 在 `npx vitest run`（这个项目
+//      里唯一每次都会跑的门禁）里用 ESLint 的 Node API 加载**本文件**，
+//      既证明规则本身有效，也扫一遍全仓。它只按 ruleId 过滤边界规则，
+//      因此不会被那 3 个既有错误染红，也不替它们遮掩。
+//      改动本文件时那个测试会跟着红——那是它该有的样子。
 const boundaryMessage =
   "记账写入必须经过 server/posting/post-journal.ts 里的 postJournal / repostJournal，" +
   "不能直接调用底层写入函数。原因见本文件顶部注释：数据库的配平触发器只核对" +
