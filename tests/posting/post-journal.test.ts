@@ -268,6 +268,44 @@ describe('postJournal - rate resolution', () => {
     expect(result.deduplicated).toBe(false);
     expect(await transactionCount(clientUuid)).toBe(1);
   });
+
+  /**
+   * assertLineInvariants 的 I4，从真实数据这一头量。
+   *
+   * 删掉边界上那一句 assertLineInvariants，整个测试套件仍然全绿——因为 I3
+   * 在当前这条路径上恒成立（所有模板都出两行同额分录），而 I4 原先只有
+   * 手搓 DraftJournalLine[] 的单元测试，没有任何一条走过数据库。于是那一句
+   * 看起来像是可以删的。它不是：I4 是这条路径上唯一真正拦得住东西的一条。
+   *
+   * 缓存里出现一个恰好 1.00000000 的外币汇率，不需要任何人犯错：
+   * 0001_core_schema.sql 的约束只写了 rate > 0，upsertRates 不另加检查，
+   * 汇率源写错一格、返回默认值、或某天真的报了 1，都会原样落进表里。
+   * resolveRate 会把它当成一个正常的 auto 汇率返回（rate.ts），
+   * 于是一笔 EUR 交易按 1:1 记成 MYR——两条腿都错同一个倍数，
+   * journal_lines 那个只比合计的延迟触发器完全看不见。
+   */
+  it('rejects a cached foreign rate of exactly 1 and writes nothing', async () => {
+    await seedRate('EUR', 'MYR', 100000000n, '2031-03-10');
+
+    const clientUuid = randomUUID();
+    const input = baseInput({ currency: 'EUR', occurredOn: '2031-03-10', clientUuid });
+
+    await expect(
+      withTransaction(ownerId, (tx) => postJournal(tx, ctx, input)),
+    ).rejects.toThrow(/automatic rate of exactly 1/i);
+
+    // 表头和分录都必须一行都没有：I4 在第 7 步 insertTransaction 之前跑，
+    // 靠的不是事务回滚事后擦干净。
+    expect(await transactionCount(clientUuid)).toBe(0);
+
+    const lineRows = await admin`
+      select l.id
+      from journal_lines l
+      join transactions t on t.id = l.transaction_id
+      where t.organization_id = ${org.id} and t.client_uuid = ${clientUuid}
+    `;
+    expect(lineRows).toHaveLength(0);
+  });
 });
 
 describe('postJournal - account ownership', () => {
