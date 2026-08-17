@@ -274,6 +274,9 @@ export async function postDepreciationAction(
       occurredOn: period,
       description: `Depreciation: ${pending.assetName} (${period})`,
       currency: context.baseCurrency,
+      // 折旧恒为本位币，resolveRate 走同币种那一支，够不到这句报错；
+      // 即便够到，这个按钮旁边也没有任何填汇率的地方。
+      manualRateEntry: 'unavailable',
       categoryId: null,
       // 每次点击都是一个新的 clientUuid，所以幂等靠的不是它，而是排程行上的
       // is_posted 加那把行锁（见 loadDepreciationPosting）。

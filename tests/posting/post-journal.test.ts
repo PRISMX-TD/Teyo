@@ -45,6 +45,7 @@ function baseInput(overrides: Partial<PostJournalInput> = {}): PostJournalInput 
     occurredOn: DAY,
     description: 'test posting',
     currency: 'MYR',
+    manualRateEntry: 'available',
     categoryId: null,
     clientUuid: randomUUID(),
     ...overrides,
@@ -256,6 +257,47 @@ describe('postJournal - rate resolution', () => {
     ).rejects.toThrow(LedgerError);
 
     expect(await transactionCount(clientUuid)).toBe(0);
+  });
+
+  /**
+   * 这两条量的是那句报错让用户去做的事，在这个入口做不做得到。
+   *
+   * 原来它一律以「Enter one manually.」结尾。交易表单上确实有 RateField，
+   * 这句话是对的；定期规则的补记没有汇率字段——recurring_transactions 里
+   * 没有这一列，界面上也没有这一栏——手工凭证同样没有。而缺汇率恰恰是定期
+   * 补记最常见的失败：findRate 只回溯 7 天，cron 只同步「今天」，补记历史
+   * 月份的外币规则必然查不到。于是撞得最多的那个入口，读到的是一句指向
+   * 不存在的输入框的话。
+   */
+  const NO_RATE_DAY = '2031-01-16'; // 同样没有、也不会有汇率
+
+  it('tells a caller with a rate field to enter one manually', async () => {
+    const input = baseInput({
+      currency: 'EUR',
+      occurredOn: NO_RATE_DAY,
+      manualRateEntry: 'available',
+      clientUuid: randomUUID(),
+    });
+
+    await expect(
+      withTransaction(ownerId, (tx) => postJournal(tx, ctx, input)),
+    ).rejects.toThrow(/Enter one manually\./);
+  });
+
+  it('does not tell a caller without a rate field to enter one manually', async () => {
+    const input = baseInput({
+      currency: 'EUR',
+      occurredOn: NO_RATE_DAY,
+      manualRateEntry: 'unavailable',
+      clientUuid: randomUUID(),
+    });
+
+    const run = () => withTransaction(ownerId, (tx) => postJournal(tx, ctx, input));
+
+    await expect(run()).rejects.toThrow(/Record this entry yourself under Transactions/);
+    await expect(run()).rejects.not.toThrow(/Enter one manually/);
+    // 两句都必须先说清楚缺的是哪一对货币、哪一天。
+    await expect(run()).rejects.toThrow(/No exchange rate available for EUR to MYR on 2031-01-16/);
   });
 
   it('succeeds once a cached rate is available', async () => {

@@ -324,6 +324,11 @@ async function catchUpRule(
           occurredOn,
           description: rule.description ?? '',
           currency: rule.currency,
+          // 定期规则没有汇率：recurring_transactions 里没有这一列，界面上
+          // 也没有这一栏。补记历史月份的外币规则最常撞上「查不到汇率」
+          // （findRate 只回溯 7 天，cron 只同步今天），而这个入口给不了
+          // 用户任何可以填汇率的地方。
+          manualRateEntry: 'unavailable',
           categoryId: rule.categoryId,
           // 每一期各自一个 clientUuid。共用一个的话，postJournal 的幂等查询会
           // 把第二期起全部短路掉，一条逾期三期的规则最后只入账一笔。

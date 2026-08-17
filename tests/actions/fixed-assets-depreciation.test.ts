@@ -317,6 +317,7 @@ describe('postDepreciationAction - is_posted is the real idempotency guard', () 
         occurredOn: period,
         description: `Depreciation: ${pending.assetName} (${period})`,
         currency: 'MYR',
+        manualRateEntry: 'unavailable',
         categoryId: null,
         clientUuid: randomUUID(),
         sourceType: 'fixed_asset',

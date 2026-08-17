@@ -9,7 +9,7 @@ import {
 } from '@/server/domain/ledger';
 import { templateFor, type PostingEvent } from '@/server/domain/posting-templates';
 import { parseRateToScaled, type RateSource } from '@/server/domain/exchange-rate';
-import { resolveRate } from '@/server/posting/rate';
+import { resolveRate, type ManualRateEntry } from '@/server/posting/rate';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
   findTransactionByClientUuid,
@@ -30,6 +30,12 @@ type PostingCore = {
   currency: string;
   /** 用户手工输入的汇率；未提供时由 resolveRate 查缓存。 */
   manualRate?: string;
+  /**
+   * 这个入口的界面上有没有能填汇率的地方。查不到缓存汇率时，那句报错要
+   * 据此告诉用户接下来做什么——见 server/posting/rate.ts 上的 ManualRateEntry。
+   * 必填：只有调用方知道自己的表单长什么样。
+   */
+  manualRateEntry: ManualRateEntry;
   categoryId: string | null;
 };
 
@@ -83,7 +89,7 @@ export async function postJournal(
   input: PostJournalInput,
 ): Promise<{ transactionId: string; deduplicated: boolean }> {
   // 1. 期间检查——省掉一次注定要回滚的写入。
-  assertPeriodOpen(input.occurredOn, ctx.lockedUntil);
+  assertPeriodOpen(input.occurredOn, ctx.lockedUntil, ctx.role);
 
   // 2. 幂等查询。命中直接返回，不碰 resolveRate，也不写任何行。
   const existing = await findTransactionByClientUuid(tx, ctx.organizationId, input.clientUuid);
@@ -97,6 +103,7 @@ export async function postJournal(
     occurredOn: input.occurredOn,
     currency: input.currency,
     manualRate: input.manualRate,
+    manualRateEntry: input.manualRateEntry,
   });
 
   const kind = input.event.type;
@@ -202,8 +209,8 @@ export async function repostJournal(
   const { existing } = input;
 
   // 1. 期间检查——原日期与新日期都必须落在开放区间内。
-  assertPeriodOpen(existing.occurredOn, ctx.lockedUntil);
-  assertPeriodOpen(input.occurredOn, ctx.lockedUntil);
+  assertPeriodOpen(existing.occurredOn, ctx.lockedUntil, ctx.role);
+  assertPeriodOpen(input.occurredOn, ctx.lockedUntil, ctx.role);
 
   // 2. 汇率：没提交手工汇率、且币种和日期都没变时，直接沿用这笔交易当初记的
   // 汇率与来源，不再重新解析。RateField 在这种情况下就是这么显示的（见
@@ -229,6 +236,7 @@ export async function repostJournal(
     occurredOn: input.occurredOn,
     currency: input.currency,
     manualRate: input.manualRate,
+    manualRateEntry: input.manualRateEntry,
     storedRate: reuseStoredRate
       ? { scaledRate: parseRateToScaled(existing.exchangeRate), source: existing.rateSource }
       : undefined,
@@ -309,6 +317,7 @@ async function buildValidatedLines(
     occurredOn: string;
     currency: string;
     manualRate?: string;
+    manualRateEntry: ManualRateEntry;
     storedRate?: { scaledRate: bigint; source: RateSource };
   },
 ): Promise<{ lines: DraftJournalLine[]; scaledRate: bigint; rateSource: RateSource }> {
@@ -319,6 +328,7 @@ async function buildValidatedLines(
       baseCurrency: ctx.baseCurrency,
       occurredOn: args.occurredOn,
       manualRate: args.manualRate,
+      manualRateEntry: args.manualRateEntry,
     }));
 
   // 换算 + 行级不变量。这两步在 buildCheckedLines 里，不在这里各写一句：

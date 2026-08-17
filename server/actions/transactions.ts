@@ -129,7 +129,7 @@ export async function createTransaction(
   const context = await requirePermission(orgSlug, 'transaction:create');
 
   // 期间锁定在进事务前先判，省掉一次注定要回滚的写入。
-  assertPeriodOpen(input.occurredOn, context.lockedUntil);
+  assertPeriodOpen(input.occurredOn, context.lockedUntil, context.role);
 
   const result = await withTransaction(context.userId, async (tx) => {
     // 幂等短路留在解析入参之前，而不是全部交给 postJournal 的第 2 步：
@@ -157,6 +157,8 @@ export async function createTransaction(
       description: input.description ?? '',
       currency: input.currency,
       manualRate: input.exchangeRate,
+      // 交易表单上就有 RateField，查不到缓存汇率时让用户当场填一个。
+      manualRateEntry: 'available',
       categoryId: input.categoryId ?? null,
       clientUuid: input.clientUuid,
     });
@@ -198,7 +200,7 @@ export async function createJournal(
   input: CreateJournalInput,
 ): Promise<{ id: string; deduplicated: boolean }> {
   const context = await requirePermission(orgSlug, 'transaction:create');
-  assertPeriodOpen(input.occurredOn, context.lockedUntil);
+  assertPeriodOpen(input.occurredOn, context.lockedUntil, context.role);
 
   const clientUuid = input.clientUuid;
   const baseCurrency = context.baseCurrency;
@@ -236,6 +238,9 @@ export async function createJournal(
       occurredOn: input.occurredOn,
       description: input.description ?? '',
       currency,
+      // 手工凭证没有汇率输入框：CreateJournalInput 里根本没有 exchangeRate，
+      // journal-form.tsx 与 transaction-form.tsx 的 not-sure 分支都硬传本位币。
+      manualRateEntry: 'unavailable',
       categoryId: null,
       clientUuid,
     });
@@ -311,6 +316,8 @@ export async function updateTransaction(
       description: input.description ?? '',
       currency: input.currency,
       manualRate: input.exchangeRate,
+      // 编辑走的是同一张表单，RateField 同样在。
+      manualRateEntry: 'available',
       categoryId: input.categoryId ?? null,
       existing: {
         occurredOn: existing.occurredOn,
@@ -357,7 +364,7 @@ export async function voidTransaction(
       throw new AuthError('forbidden', 'Your role cannot void this record.');
     }
 
-    assertPeriodOpen(existing.occurredOn, context.lockedUntil);
+    assertPeriodOpen(existing.occurredOn, context.lockedUntil, context.role);
 
     await markVoided(tx, context.organizationId, id, context.userId, cleanReason);
 
