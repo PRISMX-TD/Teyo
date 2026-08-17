@@ -11,6 +11,8 @@ import {
   updateRecurring,
   setRecurringActive,
   computeNextDueDate,
+  plannedDueDates,
+  MAX_CATCH_UP_PER_RULE,
 } from '@/server/repositories/recurring';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
@@ -100,37 +102,52 @@ export async function createRecurring(
   return result;
 }
 
+/**
+ * editRecurring 能改的字段。
+ *
+ * amount 与 currency 是一对，类型上就绑死：要么两个都给，要么一个都不给。
+ *
+ * 分开可选会漏掉两种写法，而且两种的终局是一样的——规则永远生成不出来。
+ * 金额该有几位小数只由币种决定：
+ *   只给 amount —— 拿不到库里的币种，就只能按 2 位「大概验一下」，于是
+ *     合法的「JPY 500」被拒，非法的「JPY 500.50」被放行。
+ *   只给 currency —— 校验根本不会触发，可 updateRecurring 照样把币种写进去，
+ *     一条存着 '500.00' 的规则就此变成 JPY 规则。catchUpRule 之后按
+ *     exponent 0 解析这个金额，每次运行都失败，而用户能编辑的任何单个字段
+ *     都救不回来。
+ *
+ * 类型挡的是「这种调用写不出来」，函数里那道运行时检查挡的是「Server Action
+ * 的入参来自网络，类型在运行时已经不存在了」。两道都要。
+ */
+export type RecurringEditFields = {
+  description?: string;
+  debitAccountId?: string;
+  creditAccountId?: string;
+  categoryId?: string;
+  frequency?: RecurringTransactionRow['frequency'];
+  interval?: number;
+  startDate?: string;
+  endDate?: string | null;
+} & (
+  | { amount: string; currency: string }
+  | { amount?: undefined; currency?: undefined }
+);
+
 export async function editRecurring(
   orgSlug: string,
   id: string,
-  fields: {
-    description?: string;
-    amount?: string;
-    currency?: string;
-    debitAccountId?: string;
-    creditAccountId?: string;
-    categoryId?: string;
-    frequency?: RecurringTransactionRow['frequency'];
-    interval?: number;
-    startDate?: string;
-    endDate?: string | null;
-  },
+  fields: RecurringEditFields,
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'transaction:edit:any');
 
-  // 小数位数由币种决定，硬写 2 会拒掉合法的「JPY 500」，又放行非法的
-  // 「JPY 500.50」——后者落库之后，catchUpRule 按 exponent 0 解析必然失败，
-  // 这条规则从此永远生成不出来。
-  //
-  // 改金额必须同时带上币种：这里只拿得到正在写入的字段，拿不到库里存的
-  // 币种，没有币种就无法判断该有几位小数。与其按 2 位「大概验一下」，
-  // 不如明说缺了什么——这个动作目前没有任何调用方（recurring-list 从不调
-  // editAction），改契约不会打断谁。
-  if (fields.amount !== undefined) {
-    if (fields.currency === undefined) {
-      throw new LedgerError('Changing the amount also needs the currency, so the decimals can be checked.');
-    }
+  if (fields.amount !== undefined && fields.currency !== undefined) {
     parseDecimalToMinor(fields.amount, currencyExponent(fields.currency));
+  } else if (fields.amount !== undefined || fields.currency !== undefined) {
+    // 类型已经排除了这种调用，能走到这里说明入参不是 TypeScript 写出来的
+    // ——Server Action 收的是网络上的任意 payload。
+    throw new LedgerError(
+      'Change the amount and the currency together, so the number of decimals can be checked.',
+    );
   }
 
   if (fields.interval !== undefined) {
@@ -186,20 +203,6 @@ export type RecurringRunReport = {
   /** 撞到单次补记上限、这次没补完的规则。resumeFrom 是下次从哪一期接着补。 */
   deferred: { id: string; description: string; resumeFrom: string }[];
 };
-
-/**
- * 单次运行里，单条规则最多补记多少期。
- *
- * 必须有上限：一条每日规则三年没跑过，一次就是一千多笔交易、两千多行分录
- * 挤进同一个事务，锁与内存都不好看。
- *
- * 取 60，因为它覆盖了除「每日」外每种频率的任何现实积压——60 期是 5 年的
- * 每月、超过 1 年的每周、15 年的每季、60 年的每年。只有每日规则可能撞到它，
- * 而一条每日规则积压满 60 天，本身就是该让用户看见的状态，所以撞上限的规则
- * 会进 deferred 而不是被静默截断。next_due_date 每次都推进到已入账的下一期，
- * 下一次运行接着补，一笔都不会丢。
- */
-const MAX_CATCH_UP_PER_RULE = 60;
 
 /**
  * 把一条定期规则翻译成 PostingEvent。
@@ -277,41 +280,6 @@ type RuleOutcome = {
   resumeFrom: string | null;
   failure: { occurredOn: string; reason: string } | null;
 };
-
-/**
- * 列出这条规则本次该补的到期日。
- *
- * 每走一步都要求日期严格前进。interval = 0 时 computeNextDueDate 是恒等函数
- * （五个分支都是），没有这条断言的话循环会把同一天塞满 MAX_CATCH_UP_PER_RULE
- * 次，每笔一个新的 clientUuid，幂等拦不住，一笔月租直接乘以 60，而且因为
- * cursor 没变，之后每次点击都再来 60 笔——账面还完全配平。
- *
- * 这里抛错而不是 break：break 会把一条坏掉的规则悄悄变成「没什么可做的规则」，
- * 用户永远不知道自己的重复间隔填坏了。抛出去会让它出现在 blocked 里。
- */
-function plannedDueDates(rule: RecurringTransactionRow, today: string): string[] {
-  const dates: string[] = [];
-  let cursor = rule.nextDueDate;
-
-  while (
-    cursor <= today &&
-    (rule.endDate === null || cursor <= rule.endDate) &&
-    dates.length < MAX_CATCH_UP_PER_RULE
-  ) {
-    dates.push(cursor);
-
-    const next = computeNextDueDate(rule.frequency, rule.interval, cursor);
-    if (next <= cursor) {
-      throw new LedgerError(
-        'This rule repeats every 0 periods, so its next date never moves forward. ' +
-          'Set how often it repeats to at least 1.',
-      );
-    }
-    cursor = next;
-  }
-
-  return dates;
-}
 
 /**
  * 补记一条规则欠下的全部分录。

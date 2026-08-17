@@ -5,7 +5,7 @@ import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { TransactionKind } from '@/server/domain/ledger';
-import type { RecurringRunReport } from '@/server/actions/recurring';
+import type { RecurringEditFields, RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 
 type MoneyAccountOption = {
@@ -63,18 +63,9 @@ type CreatePayload = {
   endDate?: string;
 };
 
-type EditPayload = {
-  description?: string;
-  amount?: string;
-  currency?: string;
-  debitAccountId?: string;
-  creditAccountId?: string;
-  categoryId?: string;
-  frequency?: RecurringFrequency;
-  interval?: number;
-  startDate?: string;
-  endDate?: string | null;
-};
+// 直接用 action 导出的类型，而不是在这里再抄一份：amount 与 currency 必须
+// 成对出现这条规则一旦两边各写各的就会漂移，而漂移的那一侧编译不报错。
+type EditPayload = RecurringEditFields;
 
 type Props = {
   orgSlug: string;

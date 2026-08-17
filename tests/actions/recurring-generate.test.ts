@@ -337,6 +337,10 @@ describe('createRecurring', () => {
   });
 
   it('拒绝 interval 为 0 的规则', async () => {
+    // 这个 interval: 0 是安全的：assertValidInterval 在任何 SQL 之前就抛错，
+    // 一行都不会写进库，所以 0019 的 CHECK 约束永远碰不到它。会被约束炸掉的
+    // 是「先把违规行插进去再断言」那种写法，那条已经搬去
+    // tests/repositories/recurring-dates.test.ts 直接单测 plannedDueDates。
     const org = await freshOrg('BadInterval');
     await expect(
       createRecurring(org.slug, {
@@ -514,30 +518,39 @@ describe('generateDueRecurring - 一条规则内部也不是全有全无', () =>
     expect(await nextDueOf(ruleId)).toBe('2026-05-12');
   });
 
-  it('interval 为 0 的存量规则被挡下，而不是把同一天记满 60 笔', async () => {
-    const org = await freshOrg('ZeroInterval');
-    // 直接写库，绕过 createRecurring 的校验：0019 迁移落地前，库里可能已经
-    // 存在这样的行。
+  it('整条规则在任何一期之前就失败时，blocked 里没有可指的日期', async () => {
+    // 这里用「零小数位币种存了两位小数的金额」，而不是 interval = 0，来覆盖
+    // 规则级失败这条路径。
+    //
+    // interval = 0 的用例原本在这里，但它必须先把一条违规的行插进库里，而
+    // CHECK 约束对包括超级用户在内的所有角色都生效——0019 迁移一落地，这个
+    // fixture 会在任何断言之前撞上约束，看起来像是用例写坏了，而不是策略变了。
+    // 一个在计划要求人工执行的步骤之后必然变红的用例不是文档，是陷阱。那条
+    // 断言搬去 tests/repositories/recurring-dates.test.ts 直接单测
+    // plannedDueDates，不需要数据库行，也就永远不会被约束碰到。
+    //
+    // amount 是 text 列，没有、也不会有约束，所以这个形状是稳的。它同时也是
+    // 真实存在的状态：这条规则是在 createRecurring 还硬写两位小数的年代建的。
+    const org = await freshOrg('BadAmount');
     const ruleId = await insertRule({
       orgId: org.id,
-      description: 'Zero interval rent',
-      amount: '1200.00',
-      debitAccountId: org.accountsByCode.rent,
+      description: 'Legacy JPY rule',
+      amount: '500.50',
+      currency: 'JPY',
+      debitAccountId: org.accountsByCode['professional-fees'],
       creditAccountId: org.accountsByCode.bank,
-      categoryId: org.categoriesByAccountCode.rent,
-      frequency: 'monthly',
-      interval: 0,
+      categoryId: org.categoriesByAccountCode['professional-fees'],
       nextDueDate: '2026-03-01',
+      endDate: '2026-03-01',
     });
 
     const report = await generateDueRecurring(org.slug);
 
     expect(report.generated).toBe(0);
     expect(report.blocked).toHaveLength(1);
+    // 失败发生在任何一期开始之前，没有哪一天可以指给用户。
     expect(report.blocked[0].occurredOn).toBeNull();
-    expect(report.blocked[0].reason).toMatch(/at least 1/i);
-    // 断言的重点不是「没记」，而是「没记 60 遍」：RM1,200 的房租
-    // 会变成 RM72,000，而且借贷完全配平，触发器一点都看不出来。
+    expect(report.blocked[0].reason).toMatch(/decimal place/i);
     expect(await transactionsOf(org.id)).toHaveLength(0);
     expect(await nextDueOf(ruleId)).toBe('2026-03-01');
   });

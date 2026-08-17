@@ -1,5 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
-import type { TransactionKind } from '@/server/domain/ledger';
+import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
 
 export type RecurringTransactionRow = {
   id: string;
@@ -250,4 +250,61 @@ export function computeNextDueDate(
   const clampedDay = Math.min(day, lastDayOfMonth(targetYear, targetMonthIndex));
 
   return isoFromUtc(new Date(Date.UTC(targetYear, targetMonthIndex, clampedDay)));
+}
+
+/**
+ * 单次运行里，单条规则最多补记多少期。
+ *
+ * 必须有上限：一条每日规则三年没跑过，一次就是一千多笔交易、两千多行分录
+ * 挤进同一个事务，锁与内存都不好看。
+ *
+ * 取 60，因为它覆盖了除「每日」外每种频率的任何现实积压——60 期是 5 年的
+ * 每月、超过 1 年的每周、15 年的每季、60 年的每年。只有每日规则可能撞到它，
+ * 而一条每日规则积压满 60 天，本身就是该让用户看见的状态，所以撞上限的规则
+ * 会被报告成 deferred 而不是被静默截断。next_due_date 每次都推进到已入账的
+ * 下一期，下一次运行接着补，一笔都不会丢。
+ */
+export const MAX_CATCH_UP_PER_RULE = 60;
+
+/**
+ * 列出这条规则本次该补的到期日。
+ *
+ * 与 computeNextDueDate 一样是纯函数、不碰数据库，放在这里是因为两者是同一
+ * 套排期算术：一个算「下一期是哪天」，一个算「到今天为止还欠哪几期」，分开
+ * 放会让读者以为上限和 end_date 的判断在别处还有第二份。
+ *
+ * 每走一步都要求日期严格前进。interval = 0 时 computeNextDueDate 是恒等函数
+ * （五个分支都是），没有这条断言的话循环会把同一天塞满 MAX_CATCH_UP_PER_RULE
+ * 次，每笔一个新的 clientUuid，幂等拦不住，一笔月租直接乘以 60；而且因为游标
+ * 没变，之后每次点击都再来 60 笔——账面还完全配平，数据库的配平触发器一点都
+ * 看不出来。
+ *
+ * 这里抛错而不是 break：break 会把一条坏掉的规则悄悄变成「没什么可做的规则」，
+ * 用户永远不知道自己的重复间隔填坏了。抛出去会让它出现在 blocked 里。
+ */
+export function plannedDueDates(
+  rule: Pick<RecurringTransactionRow, 'frequency' | 'interval' | 'nextDueDate' | 'endDate'>,
+  today: string,
+): string[] {
+  const dates: string[] = [];
+  let cursor = rule.nextDueDate;
+
+  while (
+    cursor <= today &&
+    (rule.endDate === null || cursor <= rule.endDate) &&
+    dates.length < MAX_CATCH_UP_PER_RULE
+  ) {
+    dates.push(cursor);
+
+    const next = computeNextDueDate(rule.frequency, rule.interval, cursor);
+    if (next <= cursor) {
+      throw new LedgerError(
+        'This rule repeats every 0 periods, so its next date never moves forward. ' +
+          'Set how often it repeats to at least 1.',
+      );
+    }
+    cursor = next;
+  }
+
+  return dates;
 }

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { computeNextDueDate } from '@/server/repositories/recurring';
+import { LedgerError } from '@/server/domain/ledger';
+import {
+  computeNextDueDate,
+  plannedDueDates,
+  MAX_CATCH_UP_PER_RULE,
+} from '@/server/repositories/recurring';
 
 // 纯函数，不碰数据库。
 //
@@ -125,5 +130,83 @@ describe('computeNextDueDate - 连续推进', () => {
     }
     // 2027-12-20 起 400 天，跨过 2028 这个闰年。
     expect(cursor).toBe('2029-01-23');
+  });
+});
+
+// plannedDueDates 同样是纯函数。这些用例刻意不碰数据库：interval = 0 这条
+// 断言原本活在一个集成用例里，那个用例必须先把 "interval" = 0 的行插进库，
+// 而 0019 迁移加上 check ("interval" >= 1) 之后，CHECK 约束对所有角色生效
+// （RLS 可以用超级用户绕过，CHECK 不能），fixture 会在断言之前就炸。搬到
+// 这里之后，这道防线的覆盖在迁移落地后依然成立。
+describe('plannedDueDates', () => {
+  function rule(fields: {
+    frequency?: 'daily' | 'weekly' | 'monthly' | 'quarterly' | 'yearly';
+    interval?: number;
+    nextDueDate: string;
+    endDate?: string | null;
+  }) {
+    return {
+      frequency: fields.frequency ?? 'monthly',
+      interval: fields.interval ?? 1,
+      nextDueDate: fields.nextDueDate,
+      endDate: fields.endDate ?? null,
+    } as const;
+  }
+
+  it('列出从 next_due_date 到今天为止的每一期', () => {
+    expect(plannedDueDates(rule({ nextDueDate: '2026-03-15' }), '2026-06-01')).toEqual([
+      '2026-03-15',
+      '2026-04-15',
+      '2026-05-15',
+    ]);
+  });
+
+  it('今天刚好到期时只列这一期', () => {
+    expect(plannedDueDates(rule({ nextDueDate: '2026-06-01' }), '2026-06-01')).toEqual([
+      '2026-06-01',
+    ]);
+  });
+
+  it('不越过 end_date，即使 end_date 早已过去', () => {
+    expect(
+      plannedDueDates(rule({ nextDueDate: '2026-03-15', endDate: '2026-05-15' }), '2026-12-31'),
+    ).toEqual(['2026-03-15', '2026-04-15', '2026-05-15']);
+  });
+
+  it('单次最多补 MAX_CATCH_UP_PER_RULE 期', () => {
+    const dates = plannedDueDates(
+      rule({ frequency: 'daily', nextDueDate: '2026-01-01' }),
+      '2026-12-31',
+    );
+    expect(dates).toHaveLength(MAX_CATCH_UP_PER_RULE);
+    expect(dates[0]).toBe('2026-01-01');
+    expect(dates[MAX_CATCH_UP_PER_RULE - 1]).toBe('2026-03-01');
+  });
+
+  it('间隔为 0 时抛错，而不是把同一天列 60 遍', () => {
+    // 这是把 RM1,200 的房租变成 RM72,000 的那条路径：computeNextDueDate 在
+    // interval = 0 时五个分支全是恒等函数，游标不动，循环把同一天填满上限，
+    // 每笔一个新的 clientUuid 所以幂等拦不住，写回的 next_due_date 又没变，
+    // 于是再点一次再来一批——而借贷完全配平，配平触发器什么也看不见。
+    for (const frequency of ['daily', 'weekly', 'monthly', 'quarterly', 'yearly'] as const) {
+      expect(() =>
+        plannedDueDates(rule({ frequency, interval: 0, nextDueDate: '2026-03-01' }), '2026-06-01'),
+      ).toThrow(/at least 1/i);
+    }
+  });
+
+  it('间隔为负数时同样抛错', () => {
+    expect(() =>
+      plannedDueDates(rule({ interval: -1, nextDueDate: '2026-03-01' }), '2026-06-01'),
+    ).toThrow(LedgerError);
+  });
+
+  it('还没到期的规则一期都不列', () => {
+    expect(plannedDueDates(rule({ nextDueDate: '2027-01-01' }), '2026-06-01')).toEqual([]);
+    // 游标已经越过 end_date 的规则同理——getDueRecurring 的 where 子句本来就
+    // 会把它挡在外面，这里是同一条判断的第二道。
+    expect(
+      plannedDueDates(rule({ nextDueDate: '2026-06-15', endDate: '2026-05-15' }), '2026-12-31'),
+    ).toEqual([]);
   });
 });
