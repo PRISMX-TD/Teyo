@@ -47,6 +47,83 @@ describe('assertLineInvariants - I3 base amount consistency', () => {
       }),
     ).toThrow(LedgerError);
   });
+
+  // I3 现在允许一行偏离自己的换算结果（buildLines 吸收舍入残差的那一行）。
+  // 下面三条钉住这个口子有多大：它不是一个「差不多就行」的容差。
+  //
+  // 这一条正是产品声明的失败模式：两条腿错得一模一样，借贷合计照样相等，
+  // 数据库那个延迟触发器完全看不出来。放宽 I3 时最容易顺手放过的就是它。
+  it('rejects an error applied equally to both legs, which the database cannot see', () => {
+    const lines: DraftJournalLine[] = [
+      { accountId: BANK, direction: 'debit', amountMinor: 10000n, baseAmountMinor: 35001n },
+      { accountId: SALES, direction: 'credit', amountMinor: 10000n, baseAmountMinor: 35001n },
+    ];
+
+    // 两边合计相等（35001 = 35001），原币也配平，只有逐行核对能发现。
+    expect(() =>
+      assertLineInvariants(lines, {
+        currency: 'SGD',
+        baseCurrency: 'MYR',
+        scaledRate: 3_50000000n,
+        rateSource: 'auto',
+      }),
+    ).toThrow(/at most one/i);
+  });
+
+  it('rejects a single line off by more than rounding could account for', () => {
+    // 原币两边就不配平（10000 借 / 9000 贷），却在本位币这边用一行把差额
+    // 补平了。少了幅度上界，这组行就只是「一行偏离」，会被当成舍入残差放过。
+    const lines: DraftJournalLine[] = [
+      { accountId: BANK, direction: 'debit', amountMinor: 10000n, baseAmountMinor: 35000n },
+      { accountId: SALES, direction: 'credit', amountMinor: 9000n, baseAmountMinor: 35000n },
+    ];
+
+    expect(() =>
+      assertLineInvariants(lines, {
+        currency: 'SGD',
+        baseCurrency: 'MYR',
+        scaledRate: 3_50000000n,
+        rateSource: 'auto',
+      }),
+    ).toThrow(/at most/i);
+  });
+
+  it('rejects a one-unit deviation that leaves the base sides apart', () => {
+    const lines: DraftJournalLine[] = [
+      { accountId: BANK, direction: 'debit', amountMinor: 10000n, baseAmountMinor: 35001n },
+      { accountId: SALES, direction: 'credit', amountMinor: 10000n, baseAmountMinor: 35000n },
+    ];
+
+    expect(() =>
+      assertLineInvariants(lines, {
+        currency: 'SGD',
+        baseCurrency: 'MYR',
+        scaledRate: 3_50000000n,
+        rateSource: 'auto',
+      }),
+    ).toThrow(/balanced in base currency/i);
+  });
+
+  // 允许的那一种：三行，逐行换算后两边差 1，那 1 落在其中一行上。
+  // 这就是 buildLines 对一笔三行外币事件会产出的形状——原来的 I3 会拒绝它，
+  // 也就是说边界上的下一句会把一笔正确的分录判错。
+  it('accepts the one line that absorbed a genuine rounding residual', () => {
+    const RATE = 4_71834900n;
+    const lines: DraftJournalLine[] = [
+      { accountId: BANK, direction: 'debit', amountMinor: 5n, baseAmountMinor: 24n },
+      { accountId: SALES, direction: 'credit', amountMinor: 3n, baseAmountMinor: 15n }, // 自身换算是 14
+      { accountId: 'account-tax', direction: 'credit', amountMinor: 2n, baseAmountMinor: 9n },
+    ];
+
+    expect(() =>
+      assertLineInvariants(lines, {
+        currency: 'USD',
+        baseCurrency: 'MYR',
+        scaledRate: RATE,
+        rateSource: 'auto',
+      }),
+    ).not.toThrow();
+  });
 });
 
 describe('assertLineInvariants - I4 fabricated 1:1 rate', () => {
