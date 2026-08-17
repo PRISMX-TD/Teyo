@@ -2,8 +2,7 @@ import type { Tx } from '@/server/db/transaction';
 import type { OrgContext } from '@/server/auth/guard';
 import { assertPeriodOpen } from '@/server/domain/period-lock';
 import {
-  assertLineInvariants,
-  buildLines,
+  buildCheckedLines,
   LedgerError,
   type DraftJournalLine,
   type TransactionKind,
@@ -54,8 +53,8 @@ export type PostJournalInput = PostingCore & {
  *   2. clientUuid 幂等查询 —— 命中则直接返回，不做任何写入。
  *   3. resolveRate —— 查不到即抛错，绝不回退 1。
  *   4. templateFor(event) —— 映射成一对草稿分录。
- *   5. buildLines —— 换算本位币金额，内部已做 assertBalanced。
- *   6. assertLineInvariants —— 行级不变量，必须在任何 insert 之前。
+ *   5-6. buildCheckedLines —— 换算本位币金额（内部已做 assertBalanced），
+ *      再核对行级不变量。两步绑成一个函数，且必须在任何 insert 之前。
  *   7. insertTransaction —— 写交易表头。
  *   8. insertJournalLines —— 写分录行；写入前会核实每个 accountId 属于本公司
  *      （PostgreSQL 的外键校验不受 RLS 约束，这一步不能省，见 insert.ts）。
@@ -322,14 +321,11 @@ async function buildValidatedLines(
       manualRate: args.manualRate,
     }));
 
-  const specs = templateFor(args.event);
-  const lines = buildLines(specs, {
-    currency: args.currency,
-    baseCurrency: ctx.baseCurrency,
-    scaledRate,
-  });
-
-  assertLineInvariants(lines, {
+  // 换算 + 行级不变量。这两步在 buildCheckedLines 里，不在这里各写一句：
+  // 它们互相配套（前者故意让一行偏离自己的换算结果，后者按吸收之后的样子
+  // 核对），拆成相邻两句写过一次，结果是两句互斥、且只有三行以上的外币
+  // 分录才撞得到。见 server/domain/ledger.ts 上那个函数的注释。
+  const lines = buildCheckedLines(templateFor(args.event), {
     currency: args.currency,
     baseCurrency: ctx.baseCurrency,
     scaledRate,

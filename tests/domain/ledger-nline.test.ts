@@ -4,6 +4,7 @@ import {
   LedgerError,
   assertBalanced,
   assertLineInvariants,
+  buildCheckedLines,
   buildLines,
 } from '@/server/domain/ledger';
 
@@ -119,5 +120,78 @@ describe('buildLines - n lines', () => {
 
     // 而这正是边界下一句要做的事：吸收之后的这组行必须通过行级不变量。
     expect(() => assertLineInvariants(lines, { ...ctx, rateSource: 'auto' })).not.toThrow();
+  });
+});
+
+/**
+ * 上面那些用例喂的是 buildLines，然后各自再调一次 assertLineInvariants。
+ * 这一组喂的是 buildCheckedLines —— post-journal.ts 的 buildValidatedLines
+ * 逐字调用的那一个函数，也就是每一笔记账真正走的那两步。区别不在断言，
+ * 在于测的是不是同一段代码：手抄一遍「先 build 再 assert」的顺序，量到的
+ * 只是这份手抄，边界那边改成别的顺序也照样全绿。
+ *
+ * 三行外币分录是阶段 4 要记的第一种形状（发票：借应收 / 贷收入 / 贷销项税），
+ * 也正是原来 I3 会误判的那一种。
+ */
+describe('buildCheckedLines - the pair the posting boundary calls', () => {
+  const RATE = 4_71834900n; // USD -> MYR
+  const ctx = {
+    currency: 'USD',
+    baseCurrency: 'MYR',
+    scaledRate: RATE,
+    rateSource: 'auto' as const,
+  };
+  const exact = (amount: bigint) => (amount * RATE * 2n + RATE_SCALE) / (RATE_SCALE * 2n);
+
+  // USD 106.11 = 100.10 净额 + 6.01 销项税。逐行换算：
+  //   借 10611 -> 50066；贷 10010 -> 47231、601 -> 2836，合计 50067。
+  // 借方短 1，短边只有一行，那 1 落在借方——与上面几条落在贷方的用例互补。
+  const INVOICE = [
+    { accountId: A, direction: 'debit' as const, amountMinor: 10611n },
+    { accountId: B, direction: 'credit' as const, amountMinor: 10010n },
+    { accountId: C, direction: 'credit' as const, amountMinor: 601n },
+  ];
+
+  it('accepts a three-line foreign-currency invoice whose per-line rounding leaves a residual', () => {
+    // 先确认这组输入真的有残差。没有残差的话，下面那句 not.toThrow 通不过
+    // 也证明不了什么——这正是本文件里已经修过一次的那种空用例。
+    expect(exact(10611n)).not.toBe(exact(10010n) + exact(601n));
+
+    const lines = buildCheckedLines(INVOICE, ctx);
+
+    expect(lines).toHaveLength(3);
+    // 借方那一行吸收了残差，于是它不等于自己的换算结果。postJournal 拿
+    // lines[0].baseAmountMinor 当交易表头的本位币金额，所以表头记的是吸收
+    // 之后的 50067，与分录借方合计一致——而不是 50066。
+    expect(lines[0].baseAmountMinor).toBe(exact(10611n) + 1n);
+    expect(lines[1].baseAmountMinor).toBe(exact(10010n));
+    expect(lines[2].baseAmountMinor).toBe(exact(601n));
+    expect(() => assertBalanced(lines)).not.toThrow();
+  });
+
+  it('still refuses a foreign posting at an automatic rate of exactly 1', () => {
+    // I4 没有因为这次合并而丢掉：它在同一个函数里，与 I3 一起跑。
+    expect(() =>
+      buildCheckedLines(
+        [
+          { accountId: A, direction: 'debit', amountMinor: 10611n },
+          { accountId: B, direction: 'credit', amountMinor: 10611n },
+        ],
+        { ...ctx, scaledRate: RATE_SCALE },
+      ),
+    ).toThrow(LedgerError);
+  });
+
+  it('still refuses specs that do not balance in the original currency', () => {
+    expect(() =>
+      buildCheckedLines(
+        [
+          { accountId: A, direction: 'debit', amountMinor: 10611n },
+          { accountId: B, direction: 'credit', amountMinor: 10010n },
+          { accountId: C, direction: 'credit', amountMinor: 600n },
+        ],
+        ctx,
+      ),
+    ).toThrow(LedgerError);
   });
 });

@@ -245,3 +245,27 @@ export function assertLineInvariants(
     throw new LedgerError('Journal lines are not balanced in base currency.');
   }
 }
+
+/**
+ * 构造一组可以落库的分录行：换算本位币金额，再核对行级不变量。
+ *
+ * 这两步必须成对出现，且顺序不能反——buildLines 会故意让一行偏离自己的
+ * 换算结果去吸收舍入残差，assertLineInvariants 正是照着「吸收之后」的样子
+ * 写的（见它自己的注释）。把这对绑成一个函数，是因为它们曾经在
+ * post-journal.ts 的 buildValidatedLines 里以两条相邻语句的形式共存，而这
+ * 两条语句互斥：上一句制造出的偏离，下一句会当成错误抛掉。所有模板都出
+ * 两行同额分录、残差恒为 0，这才一直没被撞上；第一笔三行外币事件——阶段 4
+ * 的发票与资产处置——会在自己的边界上收到一条假的 I3 错误而不是记账成功。
+ *
+ * 现在它们只在这里出现一次。测试可以拿任意 n 行喂进来，量到的就是记账边界
+ * 真正跑的那两步，而不是一份手抄的顺序；边界那边也不会再各写一遍、然后
+ * 其中一处漏掉后半句。
+ */
+export function buildCheckedLines(
+  specs: DraftLineSpec[],
+  ctx: LineInvariantContext,
+): DraftJournalLine[] {
+  const lines = buildLines(specs, ctx);
+  assertLineInvariants(lines, ctx);
+  return lines;
+}
