@@ -5,6 +5,7 @@ import { toIsoDate } from '@/lib/format';
 import {
   createTestOrgWithSeed,
   createTestUser,
+  joinOrg,
   resetTestData,
   seedRate,
   type SeededOrg,
@@ -18,7 +19,7 @@ vi.mock('@/server/auth/session', () => ({
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const { generateDueRecurring } = await import('@/server/actions/recurring');
+const { createRecurring, generateDueRecurring } = await import('@/server/actions/recurring');
 
 const suffix = randomUUID().slice(0, 8);
 
@@ -115,6 +116,26 @@ async function nextDueOf(ruleId: string): Promise<string> {
   return toIsoDate(row.next_due_date as Date);
 }
 
+/**
+ * 每一行分录落在哪个科目的哪一边，按交易日期排序。
+ *
+ * 只断言金额是不够的：把 toAccountId / fromAccountId 写反，一借一贷照样配平，
+ * templateFor 只拦借贷同科目，insertJournalLines 只查科目归属，数据库的配平
+ * 触发器只比合计——每一笔转账都反了，金额却一分不差。要拦住这种改动，断言
+ * 必须说出「哪个科目在借方」。
+ */
+async function linesByAccount(orgId: string) {
+  const rows = await admin`
+    select t.kind, t.occurred_on, l.direction, a.code
+    from journal_lines l
+    join transactions t on t.id = l.transaction_id
+    join accounts a on a.id = l.account_id
+    where l.organization_id = ${orgId}
+    order by t.occurred_on asc, l.direction asc
+  `;
+  return rows.map((r) => [r.kind, r.direction, r.code]);
+}
+
 describe('generateDueRecurring - 外币规则', () => {
   it('有缓存汇率时按真实汇率入账（这条路径此前从未跑通过）', async () => {
     const org = await freshOrg('FX');
@@ -149,15 +170,17 @@ describe('generateDueRecurring - 外币规则', () => {
     expect(toIsoDate(txn.occurred_on as Date)).toBe('2026-03-10');
 
     const lines = await admin`
-      select direction, amount_minor, base_amount_minor
-      from journal_lines
-      where organization_id = ${org.id}
-      order by direction
+      select l.direction, l.amount_minor, l.base_amount_minor, a.code
+      from journal_lines l
+      join accounts a on a.id = l.account_id
+      where l.organization_id = ${org.id}
+      order by l.direction
     `;
     // direction 是枚举列，order by 走的是声明顺序（debit 在前），不是字典序。
+    // 费用规则：借费用科目、贷资金账户——科目也要断言，光断言金额挡不住方向写反。
     expect(lines).toEqual([
-      { direction: 'debit', amount_minor: '10000', base_amount_minor: '47000' },
-      { direction: 'credit', amount_minor: '10000', base_amount_minor: '47000' },
+      { direction: 'debit', code: 'ai-llm-costs', amount_minor: '10000', base_amount_minor: '47000' },
+      { direction: 'credit', code: 'bank', amount_minor: '10000', base_amount_minor: '47000' },
     ]);
 
     // 单期规则跑完后就不该再到期。
@@ -185,6 +208,7 @@ describe('generateDueRecurring - 外币规则', () => {
     expect(report.deferred).toEqual([]);
     expect(report.blocked).toHaveLength(1);
     expect(report.blocked[0].description).toBe('CHF retainer');
+    expect(report.blocked[0].occurredOn).toBe('2026-04-10');
     expect(report.blocked[0].reason).toMatch(/exchange rate/i);
     // 「LedgerError」这类内部名字不该出现在用户看到的句子里。
     expect(report.blocked[0].reason).not.toMatch(/Error/);
@@ -192,6 +216,147 @@ describe('generateDueRecurring - 外币规则', () => {
     expect(await transactionsOf(org.id)).toHaveLength(0);
     // 整条规则连同它的 next_due_date 推进一起回滚了。
     expect(await nextDueOf(ruleId)).toBe('2026-04-10');
+  });
+});
+
+describe('generateDueRecurring - 四种 kind 各自的借贷方向', () => {
+  it('每种 kind 的借方科目与贷方科目都落在规则指定的那一侧', async () => {
+    const org = await freshOrg('Mapping');
+
+    // 规则表存的是字面的借方/贷方，PostingEvent 的四个变体各用不同的字段名
+    // 表达同一对方向。写反不会报任何错，只会让每一笔都记反，所以这里逐个钉住。
+    await insertRule({
+      orgId: org.id,
+      kind: 'expense',
+      description: 'Rent',
+      debitAccountId: org.accountsByCode.rent,
+      creditAccountId: org.accountsByCode.bank,
+      categoryId: org.categoriesByAccountCode.rent,
+      nextDueDate: '2026-02-01',
+      endDate: '2026-02-01',
+    });
+    await insertRule({
+      orgId: org.id,
+      kind: 'income',
+      description: 'Retainer',
+      debitAccountId: org.accountsByCode.bank,
+      creditAccountId: org.accountsByCode.sales,
+      categoryId: org.categoriesByAccountCode.sales,
+      nextDueDate: '2026-02-02',
+      endDate: '2026-02-02',
+    });
+    await insertRule({
+      orgId: org.id,
+      kind: 'transfer',
+      description: 'Cash to bank sweep',
+      debitAccountId: org.accountsByCode.bank, // 转入方 = 借方
+      creditAccountId: org.accountsByCode.cash, // 转出方 = 贷方
+      nextDueDate: '2026-02-03',
+      endDate: '2026-02-03',
+    });
+    await insertRule({
+      orgId: org.id,
+      kind: 'journal',
+      description: 'Equipment accrual',
+      debitAccountId: org.accountsByCode.equipment,
+      creditAccountId: org.accountsByCode['accounts-payable'],
+      nextDueDate: '2026-02-04',
+      endDate: '2026-02-04',
+    });
+
+    const report = await generateDueRecurring(org.slug);
+    expect(report.blocked).toEqual([]);
+    expect(report.generated).toBe(4);
+
+    expect(await linesByAccount(org.id)).toEqual([
+      ['expense', 'debit', 'rent'],
+      ['expense', 'credit', 'bank'],
+      ['income', 'debit', 'bank'],
+      ['income', 'credit', 'sales'],
+      // 最容易写反的一条：to 是借方。整个计划里已经有一次把它写反的记录。
+      ['transfer', 'debit', 'bank'],
+      ['transfer', 'credit', 'cash'],
+      ['journal', 'debit', 'equipment'],
+      ['journal', 'credit', 'accounts-payable'],
+    ]);
+
+    // 转账与手工凭证不挂分类，收支必须挂。
+    const kinds = await admin`
+      select kind, category_id from transactions
+      where organization_id = ${org.id} order by occurred_on asc
+    `;
+    expect(kinds.map((r) => [r.kind, r.category_id === null])).toEqual([
+      ['expense', false],
+      ['income', false],
+      ['transfer', true],
+      ['journal', true],
+    ]);
+  });
+});
+
+describe('createRecurring', () => {
+  it('带结束日期的规则建得出来，并且只生成到结束日期为止', async () => {
+    // insertRecurring 原先把 ::date 拼在插值里面，绑定参数的值成了字符串
+    // '2026-04-20::date'，postgres.js 按 date 序列化时直接抛 Invalid time value。
+    // 于是带结束日期的规则在生产里根本建不出来——而本任务的补记逻辑一半都
+    // 建立在结束日期上。
+    expect(TODAY > '2026-04-20').toBe(true);
+
+    const org = await freshOrg('CreateEnd');
+    const { id } = await createRecurring(org.slug, {
+      kind: 'expense',
+      description: 'Bounded rent',
+      amount: '750.00',
+      currency: 'MYR',
+      debitAccountId: org.accountsByCode.rent,
+      creditAccountId: org.accountsByCode.bank,
+      categoryId: org.categoriesByAccountCode.rent,
+      frequency: 'monthly',
+      interval: 1,
+      startDate: '2026-03-20',
+      endDate: '2026-04-20',
+    });
+
+    const [row] = await admin`
+      select start_date, end_date, next_due_date
+      from recurring_transactions where id = ${id}
+    `;
+    expect(toIsoDate(row.start_date as Date)).toBe('2026-03-20');
+    expect(toIsoDate(row.end_date as Date)).toBe('2026-04-20');
+    expect(toIsoDate(row.next_due_date as Date)).toBe('2026-03-20');
+
+    const report = await generateDueRecurring(org.slug);
+    expect(report.generated).toBe(2);
+    expect(report.blocked).toEqual([]);
+
+    const rows = await transactionsOf(org.id);
+    expect(rows.map((r) => toIsoDate(r.occurred_on as Date))).toEqual([
+      '2026-03-20',
+      '2026-04-20',
+    ]);
+  });
+
+  it('拒绝 interval 为 0 的规则', async () => {
+    const org = await freshOrg('BadInterval');
+    await expect(
+      createRecurring(org.slug, {
+        kind: 'expense',
+        description: 'Zero interval',
+        amount: '10.00',
+        currency: 'MYR',
+        debitAccountId: org.accountsByCode.rent,
+        creditAccountId: org.accountsByCode.bank,
+        categoryId: org.categoriesByAccountCode.rent,
+        frequency: 'monthly',
+        interval: 0,
+        startDate: '2026-03-01',
+      }),
+    ).rejects.toThrow(/at least 1/i);
+
+    const rules = await admin`
+      select id from recurring_transactions where organization_id = ${org.id}
+    `;
+    expect(rules).toHaveLength(0);
   });
 });
 
@@ -302,6 +467,131 @@ describe('generateDueRecurring - 补记积压', () => {
   }, 180_000);
 });
 
+describe('generateDueRecurring - 一条规则内部也不是全有全无', () => {
+  it('中间某一期缺汇率时，之前几期留在账上，游标停在卡住的那一天', async () => {
+    expect(TODAY > '2026-05-12').toBe(true);
+
+    const org = await freshOrg('PartialFX');
+    // 前两期有汇率，第三期没有。findRate 只回溯 7 天，所以 04-12 那条不会被
+    // 05-12 借用。这正是现实里最常见的形状：Cron 只同步「今天」，任何在规则
+    // 起始日之后才开始用这个应用的公司，历史汇率天然是断的。
+    await seedRate('NZD', 'MYR', 2_60000000n, '2026-03-12');
+    await seedRate('NZD', 'MYR', 2_65000000n, '2026-04-12');
+
+    const ruleId = await insertRule({
+      orgId: org.id,
+      description: 'NZD subscription',
+      amount: '80.00',
+      currency: 'NZD',
+      debitAccountId: org.accountsByCode['ai-llm-costs'],
+      creditAccountId: org.accountsByCode.bank,
+      categoryId: org.categoriesByAccountCode['ai-llm-costs'],
+      frequency: 'monthly',
+      startDate: '2026-03-12',
+      nextDueDate: '2026-03-12',
+      endDate: '2026-05-12',
+    });
+
+    const report = await generateDueRecurring(org.slug);
+
+    // 逐期保存点之前：第三期一失败，前两期连同游标推进一起回滚，这条规则
+    // 每次运行都从 03-12 重来、每次都在 05-12 倒下，永远一笔都记不进去。
+    expect(report.generated).toBe(2);
+    expect(report.deferred).toEqual([]);
+    expect(report.blocked).toHaveLength(1);
+    expect(report.blocked[0].occurredOn).toBe('2026-05-12');
+    expect(report.blocked[0].reason).toMatch(/exchange rate/i);
+
+    const rows = await transactionsOf(org.id);
+    expect(rows.map((r) => toIsoDate(r.occurred_on as Date))).toEqual([
+      '2026-03-12',
+      '2026-04-12',
+    ]);
+    // 80.00 NZD x 2.60 / x 2.65
+    expect(rows.map((r) => r.base_amount_minor)).toEqual(['20800', '21200']);
+
+    // 游标停在卡住的那一期，不多不少：补上那天的汇率就能接着往下走。
+    expect(await nextDueOf(ruleId)).toBe('2026-05-12');
+  });
+
+  it('interval 为 0 的存量规则被挡下，而不是把同一天记满 60 笔', async () => {
+    const org = await freshOrg('ZeroInterval');
+    // 直接写库，绕过 createRecurring 的校验：0019 迁移落地前，库里可能已经
+    // 存在这样的行。
+    const ruleId = await insertRule({
+      orgId: org.id,
+      description: 'Zero interval rent',
+      amount: '1200.00',
+      debitAccountId: org.accountsByCode.rent,
+      creditAccountId: org.accountsByCode.bank,
+      categoryId: org.categoriesByAccountCode.rent,
+      frequency: 'monthly',
+      interval: 0,
+      nextDueDate: '2026-03-01',
+    });
+
+    const report = await generateDueRecurring(org.slug);
+
+    expect(report.generated).toBe(0);
+    expect(report.blocked).toHaveLength(1);
+    expect(report.blocked[0].occurredOn).toBeNull();
+    expect(report.blocked[0].reason).toMatch(/at least 1/i);
+    // 断言的重点不是「没记」，而是「没记 60 遍」：RM1,200 的房租
+    // 会变成 RM72,000，而且借贷完全配平，触发器一点都看不出来。
+    expect(await transactionsOf(org.id)).toHaveLength(0);
+    expect(await nextDueOf(ruleId)).toBe('2026-03-01');
+  });
+});
+
+describe('generateDueRecurring - 角色', () => {
+  it('bookkeeper 得到一句说明该找谁的话，而不是每条规则一句「出了点问题」', async () => {
+    const org = await freshOrg('Bookkeeper');
+    await insertRule({
+      orgId: org.id,
+      description: 'Rule one',
+      debitAccountId: org.accountsByCode.rent,
+      creditAccountId: org.accountsByCode.bank,
+      categoryId: org.categoriesByAccountCode.rent,
+      nextDueDate: '2026-03-01',
+      endDate: '2026-03-01',
+    });
+    await insertRule({
+      orgId: org.id,
+      description: 'Rule two',
+      debitAccountId: org.accountsByCode.utilities,
+      creditAccountId: org.accountsByCode.bank,
+      categoryId: org.categoriesByAccountCode.utilities,
+      nextDueDate: '2026-03-02',
+      endDate: '2026-03-02',
+    });
+
+    const bookkeeperId = await createTestUser(
+      `test-bk-recurgen-${suffix}@example.com`,
+      'Bookkeeper',
+    );
+    await joinOrg(bookkeeperId, org.id, 'bookkeeper');
+
+    currentUserId = bookkeeperId;
+    try {
+      // bookkeeper 有 transaction:create，所以过得了 requirePermission；但
+      // recurring_transactions 的 RLS 写入策略只认 owner/admin，推进
+      // next_due_date 那句 UPDATE 一定会被拒。不先判角色的话，每条规则都会
+      // 在保存点里撞上同一个原始 Postgres 错误，用户连着看到两句
+      // 「Something went wrong with this rule」，一句都没说到底为什么。
+      await expect(generateDueRecurring(org.slug)).rejects.toThrow(/owner or an admin/i);
+    } finally {
+      currentUserId = ownerId;
+    }
+
+    expect(await transactionsOf(org.id)).toHaveLength(0);
+
+    // owner 跑同一批就正常。
+    const report = await generateDueRecurring(org.slug);
+    expect(report.generated).toBe(2);
+    expect(report.blocked).toEqual([]);
+  });
+});
+
 describe('generateDueRecurring - 一条坏规则不拖垮整批', () => {
   it('借贷同一个科目的规则被挡下，同一批里健康的规则照常入账', async () => {
     const org = await freshOrg('Savepoint');
@@ -331,6 +621,7 @@ describe('generateDueRecurring - 一条坏规则不拖垮整批', () => {
     expect(report.generated).toBe(1);
     expect(report.blocked).toHaveLength(1);
     expect(report.blocked[0].description).toBe('Broken wash entry');
+    expect(report.blocked[0].occurredOn).toBe('2026-03-01');
     expect(report.blocked[0].reason).toMatch(/different accounts/i);
 
     const rows = await transactionsOf(org.id);
@@ -373,6 +664,7 @@ describe('generateDueRecurring - 一条坏规则不拖垮整批', () => {
     expect(report.generated).toBe(1);
     expect(report.blocked).toHaveLength(1);
     expect(report.blocked[0].description).toBe('Uncategorised income');
+    expect(report.blocked[0].occurredOn).toBe('2026-03-03');
     expect(report.blocked[0].reason).toBe('Income and expense records need a category.');
     // 数据库那条 CHECK 约束的原文长这样，不该漏到界面上。
     expect(report.blocked[0].reason).not.toMatch(/constraint|violates/i);

@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requirePermission, type OrgContext } from '@/server/auth/guard';
+import { AuthError, requirePermission, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { currencyExponent, MoneyError, parseDecimalToMinor } from '@/server/domain/money';
 import { postJournal } from '@/server/posting/post-journal';
@@ -17,6 +17,22 @@ import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
 import { PeriodLockedError } from '@/server/domain/period-lock';
 import type { PostingEvent } from '@/server/domain/posting-templates';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
+
+/**
+ * 「每几期一次」必须是至少 1 的整数。
+ *
+ * 数据库层至今没有这条约束（interval integer not null default 1，见 0008），
+ * 客户端那个 Math.max(1, ...) 只是表单上的夹取，直接调用 Server Action 就绕过去了。
+ * interval = 0 时 computeNextDueDate 五个分支全是恒等函数，到期日永远不推进——
+ * 补记循环会把同一天记满上限那么多笔，每笔一个新的 clientUuid，幂等也拦不住：
+ * 一笔 1200 的月租会变成 72000，账面完全配平，再点一次再来 60 笔。
+ * 0019 迁移会把这条约束补进库里，在那之前这里是唯一的闸门。
+ */
+function assertValidInterval(interval: number): void {
+  if (!Number.isInteger(interval) || interval < 1) {
+    throw new LedgerError('How often this repeats must be a whole number, at least 1.');
+  }
+}
 
 export async function createRecurring(
   orgSlug: string,
@@ -44,6 +60,7 @@ export async function createRecurring(
   // 硬写 2 会让「JPY 1200」这种零小数位币种的合法金额被判成非法，
   // 也会放行一个 JPY 永远不该有的小数部分。
   parseDecimalToMinor(input.amount, currencyExponent(input.currency));
+  assertValidInterval(input.interval);
 
   const result = await withTransaction(context.userId, async (tx) => {
     const { id } = await insertRecurring(tx, {
@@ -101,8 +118,23 @@ export async function editRecurring(
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'transaction:edit:any');
 
-  if (fields.amount) {
-    parseDecimalToMinor(fields.amount, 2);
+  // 小数位数由币种决定，硬写 2 会拒掉合法的「JPY 500」，又放行非法的
+  // 「JPY 500.50」——后者落库之后，catchUpRule 按 exponent 0 解析必然失败，
+  // 这条规则从此永远生成不出来。
+  //
+  // 改金额必须同时带上币种：这里只拿得到正在写入的字段，拿不到库里存的
+  // 币种，没有币种就无法判断该有几位小数。与其按 2 位「大概验一下」，
+  // 不如明说缺了什么——这个动作目前没有任何调用方（recurring-list 从不调
+  // editAction），改契约不会打断谁。
+  if (fields.amount !== undefined) {
+    if (fields.currency === undefined) {
+      throw new LedgerError('Changing the amount also needs the currency, so the decimals can be checked.');
+    }
+    parseDecimalToMinor(fields.amount, currencyExponent(fields.currency));
+  }
+
+  if (fields.interval !== undefined) {
+    assertValidInterval(fields.interval);
   }
 
   await withTransaction(context.userId, async (tx) => {
@@ -142,8 +174,15 @@ export async function toggleRecurring(
 export type RecurringRunReport = {
   /** 实际入账的交易笔数——是笔数不是规则条数，一条逾期三期的规则算三笔。 */
   generated: number;
-  /** 一笔都没能生成的规则，附一句用户读得懂的原因。 */
-  blocked: { id: string; description: string; reason: string }[];
+  /**
+   * 卡住的规则，附一句用户读得懂的原因。
+   *
+   * occurredOn 是卡在哪一期。补记会逐期入账，所以一条规则可能已经记好了前
+   * 几期、停在第四期——那一期的日期就是用户要去处理的地方（比如补一条那天
+   * 的汇率）。整条规则在开始之前就失败时（金额解析不了、重复间隔是 0），
+   * 没有哪一期可指，为 null。
+   */
+  blocked: { id: string; description: string; occurredOn: string | null; reason: string }[];
   /** 撞到单次补记上限、这次没补完的规则。resumeFrom 是下次从哪一期接着补。 */
   deferred: { id: string; description: string; resumeFrom: string }[];
 };
@@ -233,13 +272,63 @@ function describeFailure(error: unknown): string {
   return 'Something went wrong with this rule. Nothing was recorded for it.';
 }
 
-type RuleOutcome = { posted: number; resumeFrom: string | null };
+type RuleOutcome = {
+  posted: number;
+  resumeFrom: string | null;
+  failure: { occurredOn: string; reason: string } | null;
+};
+
+/**
+ * 列出这条规则本次该补的到期日。
+ *
+ * 每走一步都要求日期严格前进。interval = 0 时 computeNextDueDate 是恒等函数
+ * （五个分支都是），没有这条断言的话循环会把同一天塞满 MAX_CATCH_UP_PER_RULE
+ * 次，每笔一个新的 clientUuid，幂等拦不住，一笔月租直接乘以 60，而且因为
+ * cursor 没变，之后每次点击都再来 60 笔——账面还完全配平。
+ *
+ * 这里抛错而不是 break：break 会把一条坏掉的规则悄悄变成「没什么可做的规则」，
+ * 用户永远不知道自己的重复间隔填坏了。抛出去会让它出现在 blocked 里。
+ */
+function plannedDueDates(rule: RecurringTransactionRow, today: string): string[] {
+  const dates: string[] = [];
+  let cursor = rule.nextDueDate;
+
+  while (
+    cursor <= today &&
+    (rule.endDate === null || cursor <= rule.endDate) &&
+    dates.length < MAX_CATCH_UP_PER_RULE
+  ) {
+    dates.push(cursor);
+
+    const next = computeNextDueDate(rule.frequency, rule.interval, cursor);
+    if (next <= cursor) {
+      throw new LedgerError(
+        'This rule repeats every 0 periods, so its next date never moves forward. ' +
+          'Set how often it repeats to at least 1.',
+      );
+    }
+    cursor = next;
+  }
+
+  return dates;
+}
 
 /**
  * 补记一条规则欠下的全部分录。
  *
  * 每一期都记在它自己的到期日上，而不是今天——七月的房租必须落在七月，
  * 记成今天就进了八月的损益表，而这正是用户第二天要拿去看的那张表。
+ *
+ * 每一期各自再套一层保存点，这一层不能省。整条规则共用一个保存点时，中间
+ * 任何一期失败都会把已经记好的前几期一起回滚，next_due_date 也退回原处，
+ * 于是下一次运行从同一期重来、同样失败——那条规则从此再也生成不出任何东西。
+ * 而「某一期缺汇率」恰恰是最常见的情况：findRate 只回溯 7 天，Cron 又只同步
+ * 「今天」，任何在规则起始日之后才开始用这个应用的公司，历史汇率本来就是空的。
+ * 结果就是几个月的外币支出从损益表上整片消失——正是这个任务要根除的失败模式。
+ *
+ * 改成逐期保存点后：失败之前记好的都留下，cursor 停在失败的那一期，规则被
+ * 报告成 blocked 并带上那个日期。用户看到的是「2026-03-01 这天没有汇率」，
+ * 而不是一条什么都不生成、也什么都不说的规则。
  */
 async function catchUpRule(
   sp: Tx,
@@ -248,64 +337,94 @@ async function catchUpRule(
   today: string,
 ): Promise<RuleOutcome> {
   const amountMinor = parseDecimalToMinor(rule.amount, currencyExponent(rule.currency));
+  const dueDates = plannedDueDates(rule, today);
 
-  // 先把要补的到期日一次列出来，再逐笔入账：循环结束后 cursor 正好停在
-  // 下一个尚未入账的到期日，无论这次是补完了还是撞了上限，它都是要写回
-  // next_due_date 的那个值。
-  const dueDates: string[] = [];
-  let cursor = rule.nextDueDate;
+  // 补完全部时，cursor 落在最后一期之后的下一期；中途失败时，落在失败的那一期。
+  let cursor =
+    dueDates.length === 0
+      ? rule.nextDueDate
+      : computeNextDueDate(rule.frequency, rule.interval, dueDates[dueDates.length - 1]);
 
-  while (
-    cursor <= today &&
-    (rule.endDate === null || cursor <= rule.endDate) &&
-    dueDates.length < MAX_CATCH_UP_PER_RULE
-  ) {
-    dueDates.push(cursor);
-    cursor = computeNextDueDate(rule.frequency, rule.interval, cursor);
-  }
+  let posted = 0;
+  let failure: { occurredOn: string; reason: string } | null = null;
 
   for (const occurredOn of dueDates) {
-    await postJournal(sp, context, {
-      event: toPostingEvent(rule, amountMinor),
-      occurredOn,
-      description: rule.description ?? '',
-      currency: rule.currency,
-      categoryId: rule.categoryId,
-      // 每一期各自一个 clientUuid。共用一个的话，postJournal 的幂等查询会
-      // 把第二期起全部短路掉，一条逾期三期的规则最后只入账一笔。
-      clientUuid: crypto.randomUUID(),
-      sourceType: 'recurring_transaction',
-      sourceId: rule.id,
-    });
+    try {
+      await sp.savepoint((occurrence) =>
+        postJournal(occurrence, context, {
+          event: toPostingEvent(rule, amountMinor),
+          occurredOn,
+          description: rule.description ?? '',
+          currency: rule.currency,
+          categoryId: rule.categoryId,
+          // 每一期各自一个 clientUuid。共用一个的话，postJournal 的幂等查询会
+          // 把第二期起全部短路掉，一条逾期三期的规则最后只入账一笔。
+          clientUuid: crypto.randomUUID(),
+          sourceType: 'recurring_transaction',
+          sourceId: rule.id,
+        }),
+      );
+      posted += 1;
+    } catch (error) {
+      // 停在这一期。后面的期数不试了——它们多半会因为同样的原因失败，而且
+      // 跳过这一期继续往后记会让账目出现一个无声的窟窿。
+      failure = { occurredOn, reason: describeFailure(error) };
+      cursor = occurredOn;
+      break;
+    }
   }
 
   await updateRecurring(sp, context.organizationId, rule.id, { nextDueDate: cursor });
 
-  // 只有「撞了上限而且后面确实还欠着」才算延后。刚好补满 60 期就结束的规则
-  // 是补完了，不该报告成还有积压。
+  // 只有「补满了上限、没出错、而且后面确实还欠着」才算延后。刚好补满 60 期
+  // 就结束的规则是补完了，不该报告成还有积压。
   const stoppedAtCap =
+    failure === null &&
     dueDates.length === MAX_CATCH_UP_PER_RULE &&
     cursor <= today &&
     (rule.endDate === null || cursor <= rule.endDate);
 
-  return { posted: dueDates.length, resumeFrom: stoppedAtCap ? cursor : null };
+  return { posted, resumeFrom: stoppedAtCap ? cursor : null, failure };
 }
 
 /**
  * 生成所有到期的定期分录。
  *
- * 每条规则各自一个保存点。整批规则跑在同一个 withTransaction 里，没有保存点
- * 时任何一条抛错都会连坐整批——Task 4 给 templateFor 加了借贷不同科目的断言
- * 之后这一点变得更尖锐：一条历史遗留的、借贷填成同一个科目的规则，以前会
- * 记一笔毫无意义的对冲分录，现在会抛错，并把当天所有其它规则一起拖下水。
+ * 保存点分两层，各挡一种连坐：
  *
- * 这里不能用裸 try/catch 代替保存点。一条 SQL 语句在 Postgres 里失败之后，
- * 整个事务就进入 aborted 状态，后续任何语句都只会回
- * 「current transaction is aborted」——JS 把异常接住了也没用，回滚边界必须
- * 是数据库认得的那一个，也就是 savepoint / rollback to savepoint。
+ *   规则一层（这里）——整批规则跑在同一个 withTransaction 里，没有保存点时
+ *   任何一条抛错都会连坐整批。Task 4 给 templateFor 加了借贷不同科目的断言
+ *   之后这一点变得更尖锐：一条历史遗留的、借贷填成同一个科目的规则，以前会
+ *   记一笔毫无意义的对冲分录，现在会抛错，并把当天所有其它规则一起拖下水。
+ *
+ *   期数一层（catchUpRule 里）——一条规则内部某一期失败，不该把这条规则已经
+ *   补好的前几期一起回滚。理由见那个函数的注释。
+ *
+ * 两层都不能用裸 try/catch 代替。一条 SQL 语句在 Postgres 里失败之后，整个
+ * 事务就进入 aborted 状态，后续任何语句都只会回「current transaction is
+ * aborted」——JS 把异常接住了也没用，回滚边界必须是数据库认得的那一个，
+ * 也就是 savepoint / rollback to savepoint。
  */
 export async function generateDueRecurring(orgSlug: string): Promise<RecurringRunReport> {
   const context = await requirePermission(orgSlug, 'transaction:create');
+
+  // 先判角色，再开事务。
+  //
+  // 这个动作的门槛是 transaction:create，bookkeeper 有；但 recurring_transactions
+  // 的 RLS 写入策略要求 owner 或 admin（0010_fix_rls_pattern.sql 的 with check）。
+  // for update 只需要 using 子句，所以 bookkeeper 读得到也锁得住规则，偏偏在每条
+  // 规则末尾那句推进 next_due_date 的 UPDATE 上被 RLS 拒绝——那是个原始的
+  // Postgres 错误，不是 LedgerError，于是每条规则都换回一句「出了点问题」，
+  // 用户连着看到 N 句一模一样、什么也没说的话。
+  //
+  // 权限矩阵与 RLS 对不上本身是既有问题（后续阶段会把两者统一到一处定义），
+  // 这里不修它，只保证它说人话：一次说清，并指明该找谁。
+  if (context.role !== 'owner' && context.role !== 'admin') {
+    throw new AuthError(
+      'forbidden',
+      'Only an owner or an admin can run recurring entries. Ask one of them to run this for you.',
+    );
+  }
 
   const result = await withTransaction(context.userId, async (tx) => {
     const today = new Date().toISOString().slice(0, 10);
@@ -321,13 +440,28 @@ export async function generateDueRecurring(orgSlug: string): Promise<RecurringRu
         const outcome = await tx.savepoint((sp) => catchUpRule(sp, context, rule, today));
 
         report.generated += outcome.posted;
-        if (outcome.resumeFrom !== null) {
+
+        if (outcome.failure !== null) {
+          // 中途卡住：卡住之前记好的那几期留在账上，cursor 停在失败的那一期。
+          report.blocked.push({
+            id: rule.id,
+            description: label,
+            occurredOn: outcome.failure.occurredOn,
+            reason: outcome.failure.reason,
+          });
+        } else if (outcome.resumeFrom !== null) {
           report.deferred.push({ id: rule.id, description: label, resumeFrom: outcome.resumeFrom });
         }
       } catch (error) {
-        // 这条规则的分录连同它的 next_due_date 推进一起回滚了，下次运行会
-        // 从原来那一期重来。其余规则不受影响。
-        report.blocked.push({ id: rule.id, description: label, reason: describeFailure(error) });
+        // 整条规则在开始之前就失败了（金额解析不了、重复间隔是 0、或者最后
+        // 那句推进 next_due_date 被拒），保存点把这条规则做过的一切都回滚了，
+        // 下次运行从原来那一期重来。其余规则不受影响。
+        report.blocked.push({
+          id: rule.id,
+          description: label,
+          occurredOn: null,
+          reason: describeFailure(error),
+        });
       }
     }
 

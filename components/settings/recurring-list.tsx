@@ -102,6 +102,21 @@ const FREQUENCIES: { key: string; label: string }[] = [
   { key: 'yearly', label: 'yearly' },
 ];
 
+/**
+ * 与 getDueRecurring 的 where 子句同一套判断，三个条件缺一不可。
+ *
+ * 少了 endDate 那一条时，一条已经跑完的规则（游标停在结束日期之后，而且
+ * 没有任何东西会去翻 is_active）会永远算作到期：按钮一直亮着，确认框说
+ * 「1 条到期的规则」，点下去服务端一条都不选，结果又报「没有到期的分录」。
+ */
+function isDue(entry: RecurringEntry, today: string): boolean {
+  return (
+    entry.isActive &&
+    entry.nextDueDate <= today &&
+    (entry.endDate === null || entry.nextDueDate <= entry.endDate)
+  );
+}
+
 export function RecurringList({
   orgSlug,
   locale,
@@ -175,9 +190,8 @@ export function RecurringList({
   const handleGenerate = useCallback(async () => {
     // 数的是到期的规则条数，不是将要生成的分录笔数——补记会让后者更大。
     // 文案已经改成明说自己数的是规则，并提醒逾期规则会一期一笔。
-    const dueRules = entries.filter(
-      (e) => e.isActive && e.nextDueDate <= new Date().toISOString().slice(0, 10),
-    ).length;
+    const today = new Date().toISOString().slice(0, 10);
+    const dueRules = entries.filter((e) => isDue(e, today)).length;
     if (dueRules === 0) return;
     if (!window.confirm(interpolate(t.recurring.generateConfirm, { n: dueRules }))) return;
 
@@ -206,9 +220,7 @@ export function RecurringList({
           onClick={handleGenerate}
           disabled={
             generating ||
-            entries.filter(
-              (e) => e.isActive && e.nextDueDate <= new Date().toISOString().slice(0, 10),
-            ).length === 0
+            !entries.some((e) => isDue(e, new Date().toISOString().slice(0, 10)))
           }
         >
           {generating ? t.common.loading : 'Run due now'}
@@ -227,9 +239,16 @@ export function RecurringList({
           className={runReport.blocked.length > 0 ? 'form-error' : 'form-success'}
         >
           <p>
-            {runReport.generated > 0
-              ? interpolate(t.recurring.generatedCount, { n: runReport.generated })
-              : t.recurring.generateNone}
+            {/*
+              「没有到期的分录」和「没记上任何东西」是两回事。全部规则都被挡下时
+              前者是假话——下面的 generateBlocked 才是真正的原因，标题不该跟它打架。
+              只有真正无事可做时才说无事可做。
+            */}
+            {runReport.generated === 0 &&
+            runReport.blocked.length === 0 &&
+            runReport.deferred.length === 0
+              ? t.recurring.generateNone
+              : interpolate(t.recurring.generatedCount, { n: runReport.generated })}
           </p>
 
           {runReport.deferred.length > 0 ? (
@@ -252,7 +271,13 @@ export function RecurringList({
               <ul>
                 {runReport.blocked.map((rule) => (
                   <li key={rule.id}>
-                    {rule.description} &mdash; {rule.reason}
+                    {/*
+                      卡在哪一期要说出来：补记可能已经记好了前几期，停在第四期。
+                      用户要去处理的是那一天（补一条那天的汇率之类），不是整条规则。
+                      ISO 日期不需要翻译，所以这里不必再加一个文案键。
+                    */}
+                    {rule.description}
+                    {rule.occurredOn ? ` (${rule.occurredOn})` : ''} &mdash; {rule.reason}
                   </li>
                 ))}
               </ul>

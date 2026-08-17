@@ -83,6 +83,11 @@ export async function insertRecurring(
     nextDueDate: string;
   },
 ): Promise<{ id: string }> {
+  // 三个日期列的 ::date 都必须写在插值外面。end_date 这一处原先是把类型转换
+  // 拼进了插值内部（endDate + '::date'），于是绑定参数的值是字符串
+  // '2026-05-15::date' 而不是日期：postgres.js 先 describe 得知该列是 date，
+  // 随后按 date 序列化这个字符串，直接抛 Invalid time value。结果是任何带
+  // 结束日期的定期规则根本建不出来——而结束日期正是补记逻辑最需要的那一列。
   const [inserted] = await tx`
     insert into recurring_transactions (
       organization_id, kind, description, amount, currency,
@@ -93,7 +98,7 @@ export async function insertRecurring(
       ${row.amount}, ${row.currency},
       ${row.debitAccountId}, ${row.creditAccountId}, ${row.categoryId},
       ${row.frequency}, ${row.interval},
-      ${row.startDate}::date, ${row.endDate ? row.endDate + '::date' : null},
+      ${row.startDate}::date, ${row.endDate}::date,
       ${row.nextDueDate}::date
     )
     returning id
