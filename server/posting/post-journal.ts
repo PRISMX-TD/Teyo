@@ -4,6 +4,7 @@ import { assertPeriodOpen } from '@/server/domain/period-lock';
 import {
   assertLineInvariants,
   buildLines,
+  LedgerError,
   type DraftJournalLine,
   type TransactionKind,
 } from '@/server/domain/ledger';
@@ -340,10 +341,29 @@ async function buildValidatedLines(
 
 /**
  * 转账与手工凭证不挂分类，与 transactions_category_matches_kind 约束一致
- * （见 0014 迁移）；收支两种事件必须带分类，否则由该约束在库层拒绝。
+ * （见 0014 迁移）；收支两种事件必须带分类。
+ *
+ * 缺分类这一条以前只由数据库那个 CHECK 约束兜着。任务 3 把这条断言判为
+ * 够不着而搁置：当时唯一走到这里的 server/actions/transactions.ts 会先抛
+ * 「Income and expense records need a category.」，postJournal 拿到的
+ * categoryId 不可能为 null。
+ *
+ * 任务 5 把定期规则接进这个边界之后它就够得着了：
+ * recurring_transactions.category_id 上没有 not null 约束（见 0008 迁移），
+ * 一条不挂分类的收入规则会带着 categoryId: null 一路走到这里。少了这一句，
+ * 用户看到的是 Postgres 那条 CHECK 约束的原始报错，而不是一句能读懂的
+ * LedgerError——而定期生成还会把它当成「意料之外的错误」，说不出到底哪里
+ * 不对。文案与 transactions.ts 里那句逐字相同：同一件事无论从哪个入口发生，
+ * 用户都该读到同一句话。
  */
 function categoryForKind(kind: TransactionKind, categoryId: string | null): string | null {
-  return kind === 'transfer' || kind === 'journal' ? null : categoryId;
+  if (kind === 'transfer' || kind === 'journal') return null;
+
+  if (categoryId === null) {
+    throw new LedgerError('Income and expense records need a category.');
+  }
+
+  return categoryId;
 }
 
 /**

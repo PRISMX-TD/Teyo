@@ -2,9 +2,10 @@
 
 import { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName } from '@/lib/i18n';
+import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { TransactionKind } from '@/server/domain/ledger';
+import type { RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 
 type MoneyAccountOption = {
@@ -86,7 +87,7 @@ type Props = {
   createAction: (orgSlug: string, input: CreatePayload) => Promise<{ id: string }>;
   editAction: (orgSlug: string, id: string, fields: EditPayload) => Promise<void>;
   toggleAction: (orgSlug: string, id: string, active: boolean) => Promise<void>;
-  generateAction: (orgSlug: string) => Promise<{ generated: number }>;
+  generateAction: (orgSlug: string) => Promise<RecurringRunReport>;
 };
 
 function toOption(row: { nameEn: string | null; nameZh: string | null }) {
@@ -130,6 +131,10 @@ export function RecurringList({
   });
   const [submitting, setSubmitting] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // 生成结果必须显示出来。生成可以部分成功之后，「什么都不说」就有歧义了：
+  // 规则全被挡下的用户和规则全部入账的用户看到的是同一个空界面。
+  const [runReport, setRunReport] = useState<RecurringRunReport | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const handleCreate = useCallback(async () => {
     if (!form.amount || !form.debitAccountId || !form.creditAccountId) return;
@@ -168,15 +173,21 @@ export function RecurringList({
   }, [form, orgSlug, createAction]);
 
   const handleGenerate = useCallback(async () => {
-    const dueCount = entries.filter(
+    // 数的是到期的规则条数，不是将要生成的分录笔数——补记会让后者更大。
+    // 文案已经改成明说自己数的是规则，并提醒逾期规则会一期一笔。
+    const dueRules = entries.filter(
       (e) => e.isActive && e.nextDueDate <= new Date().toISOString().slice(0, 10),
     ).length;
-    if (dueCount === 0) return;
-    if (!window.confirm(t.recurring.generateConfirm.replace('{n}', String(dueCount)))) return;
+    if (dueRules === 0) return;
+    if (!window.confirm(interpolate(t.recurring.generateConfirm, { n: dueRules }))) return;
 
     setGenerating(true);
+    setRunReport(null);
+    setRunError(null);
     try {
-      await generateAction(orgSlug);
+      setRunReport(await generateAction(orgSlug));
+    } catch (e) {
+      setRunError((e as Error).message);
     } finally {
       setGenerating(false);
     }
@@ -203,6 +214,52 @@ export function RecurringList({
           {generating ? t.common.loading : 'Run due now'}
         </button>
       </div>
+
+      {runError ? (
+        <p role="alert" className="form-error">
+          {runError}
+        </p>
+      ) : null}
+
+      {runReport ? (
+        <div
+          role="status"
+          className={runReport.blocked.length > 0 ? 'form-error' : 'form-success'}
+        >
+          <p>
+            {runReport.generated > 0
+              ? interpolate(t.recurring.generatedCount, { n: runReport.generated })
+              : t.recurring.generateNone}
+          </p>
+
+          {runReport.deferred.length > 0 ? (
+            <>
+              <p>{interpolate(t.recurring.generateDeferred, { n: runReport.deferred.length })}</p>
+              <ul>
+                {runReport.deferred.map((rule) => (
+                  <li key={rule.id}>
+                    {rule.description} &mdash;{' '}
+                    {interpolate(t.recurring.generateResumeFrom, { date: rule.resumeFrom })}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {runReport.blocked.length > 0 ? (
+            <>
+              <p>{interpolate(t.recurring.generateBlocked, { n: runReport.blocked.length })}</p>
+              <ul>
+                {runReport.blocked.map((rule) => (
+                  <li key={rule.id}>
+                    {rule.description} &mdash; {rule.reason}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {showForm && (
         <form

@@ -455,7 +455,15 @@ const en = {
     endDate: 'End date (optional)',
     interval: 'Every',
     save: 'Save',
-    generateConfirm: 'Generate {n} due transaction(s)?',
+    // {n} 数的是到期的规则条数，不是将要生成的分录笔数。有了补记之后
+    // 三条规则可能生成十笔，原来那句「生成 {n} 笔到期交易」会直接骗人。
+    generateConfirm:
+      'Generate entries for {n} due recurring rule(s)? A rule that is overdue creates one entry for every period it missed.',
+    generatedCount: 'Recorded {n} new transaction(s).',
+    generateNone: 'Nothing was due, so nothing was recorded.',
+    generateDeferred: '{n} rule(s) still have earlier periods left. Run this again to continue.',
+    generateResumeFrom: 'next period: {date}',
+    generateBlocked: 'Nothing was recorded for {n} rule(s):',
   },
   budgets: {
     title: 'Budgets',
