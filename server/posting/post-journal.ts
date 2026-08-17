@@ -19,6 +19,7 @@ import {
   deleteJournalLines,
   insertJournalLines,
   insertTransaction,
+  loadJournalLines,
   type AccountCodesById,
 } from '@/server/posting/insert';
 
@@ -191,8 +192,16 @@ export type RepostJournalInput = PostingCore & {
  *
  * 1. 没有 clientUuid 幂等查询。被编辑的这一行本来就带着那个 clientUuid，
  *    照 postJournal 的顺序走一遍必然命中，返回 deduplicated 然后一个字节
- *    都不写——用户的修改看起来保存成功，实际什么也没发生。编辑的幂等语义
- *    在别处（乐观并发 / 表单一次提交），不在 clientUuid 上。
+ *    都不写——用户的修改看起来保存成功，实际什么也没发生。
+ *
+ *    重复提交靠的是别的东西。这里原来写的是「乐观并发」——代码里没有这个
+ *    东西：transactions 上没有版本列，updateTransactionHead 的 where 只有
+ *    id 与 organization_id，没有任何「你读到的还是不是这一版」的条件。
+ *    真正起作用的是第 7 步排在第 8 步之前：那条 update 会在这一行上取到
+ *    行级排他锁，于是同一笔交易的两次并发保存被串起来，后一次要等前一次
+ *    提交才动得了分录。反过来先删后插再改表头的话，两个事务可以在谁都还
+ *    没拿到表头锁之前各自重建一遍分录行。而每次保存都是整体替换（表头覆盖
+ *    + 分录全删全插），串起来之后跑两遍与跑一遍的结果相同。
  * 2. 期间检查查两个日期。只查其一就能把一条记录搬进或搬出锁定区间：
  *    只查新日期，锁定期内的记录可以被改到开放日期；只查原日期，开放期的
  *    记录可以被塞进锁定期。
@@ -260,6 +269,10 @@ export async function repostJournal(
   });
 
   // 8. 分录整体重建，而不是原地改。
+  //
+  // 先把旧分录读出来给审计的 before 用——删掉之后就读不到了。放在 delete
+  // 前一行而不是函数开头，是为了让这个先后关系在读代码时是看得见的。
+  const previousLines = await loadJournalLines(tx, ctx.organizationId, input.transactionId);
   await deleteJournalLines(tx, ctx.organizationId, input.transactionId);
   const accountCodes = await insertJournalLines(
     tx,
@@ -283,6 +296,10 @@ export async function repostJournal(
       baseAmountMinor: existing.baseAmountMinor.toString(),
       rateSource: existing.rateSource,
       categoryId: existing.categoryId,
+      // 改科目是编辑里最常见的一种，而只记表头的话它完全看不出来：把一笔
+      // 支出从「水电」改挂到「交通」，before 与 after 的每一个表头字段都
+      // 一模一样。after 一直带着分录与科目代码，before 补齐才对称。
+      lines: previousLines,
     },
     after: {
       occurredOn: input.occurredOn,

@@ -165,3 +165,49 @@ export async function deleteJournalLines(
     where transaction_id = ${transactionId} and organization_id = ${organizationId}
   `;
 }
+
+/** 编辑前那一版分录行，形状与审计快照里的 lines 一致。 */
+export type PostedJournalLine = {
+  accountId: string;
+  accountCode: string | null;
+  direction: string;
+  amountMinor: string;
+};
+
+/**
+ * 读出一笔交易当前的分录行，供编辑路径写审计的 before 用。
+ *
+ * 必须在 deleteJournalLines 之前调用——之后就没有「之前」了。
+ *
+ * 为什么审计的 before 需要它：repostJournal 的 before 原来只有表头字段
+ * （日期、摘要、币种、金额、汇率来源、分类），一个字都没有科目。而编辑
+ * 最常改的恰恰就是科目——把一笔支出从「水电」改挂到「交通」，两条记录
+ * 金额一模一样，审计日志里的 before 与 after 逐字相同，等于没记。after
+ * 早就带着 accountCode 了（见 auditLines），before 补齐才对称。
+ *
+ * 排序是显式的，不靠 Postgres 返回行的偶然顺序：借方在前、同侧按金额从大
+ * 到小、再按科目代码。after 那一侧是 templateFor 的顺序（借方永远第一行），
+ * 两边用同一种排法，翻日志的人才能把 before 与 after 逐行对着看。
+ */
+export async function loadJournalLines(
+  tx: Tx,
+  organizationId: string,
+  transactionId: string,
+): Promise<PostedJournalLine[]> {
+  const rows = await tx`
+    select l.account_id, a.code, l.direction, l.amount_minor
+    from journal_lines l
+    left join accounts a on a.id = l.account_id
+    where l.transaction_id = ${transactionId} and l.organization_id = ${organizationId}
+    order by case when l.direction = 'debit' then 0 else 1 end,
+             l.amount_minor desc,
+             a.code
+  `;
+
+  return rows.map((row) => ({
+    accountId: row.account_id as string,
+    accountCode: (row.code as string | null) ?? null,
+    direction: row.direction as string,
+    amountMinor: String(row.amount_minor),
+  }));
+}
