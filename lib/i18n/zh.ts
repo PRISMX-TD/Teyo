@@ -465,7 +465,13 @@ const zh: Translated<typeof en> = {
     endDate: '结束日期（可选）',
     interval: '每',
     save: '保存',
-    generateConfirm: '生成 {n} 笔到期交易？',
+    // {n} 数的是到期的规则条数，不是将要生成的分录笔数。
+    generateConfirm: '为 {n} 条到期的定期规则生成分录？逾期的规则会为漏掉的每个周期各生成一笔。',
+    generatedCount: '已记录 {n} 笔交易。',
+    generateNone: '没有到期的分录，未记录任何交易。',
+    generateDeferred: '还有 {n} 条规则没补完，再运行一次可以继续。',
+    generateResumeFrom: '下一期：{date}',
+    generateBlocked: '有 {n} 条规则未能生成：',
   },
   budgets: {
     title: '预算',

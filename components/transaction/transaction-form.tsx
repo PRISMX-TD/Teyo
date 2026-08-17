@@ -388,8 +388,9 @@ export function TransactionForm({
         </fieldset>
       ) : kind === 'transfer' ? (
         <>
-          {/* counterAccountId is the transfer's source — buildJournalLines
-              credits it (see server/domain/ledger.ts). moneyAccountId above
+          {/* counterAccountId is the transfer's source — templateFor credits
+              it (see server/domain/posting-templates.ts, the one place that
+              decides posting direction). moneyAccountId above
               is the destination ("Transfer into"). Sharing the generic
               moneyAccount label here made both fields read as destinations
               top to bottom, and a reversed source/destination entry still

@@ -14,5 +14,8 @@
 -- owner 通常是每家公司打开仪表盘最频繁的角色。补上这两个索引让查询回到
 -- 索引扫描。
 
-create index contacts_by_org on contacts (organization_id);
-create index invitations_by_org on invitations (organization_id);
+-- if not exists：这两个索引已经在开发库里存在，但 schema_migrations 里没有
+-- 对应记录——它们是在某次手工执行 SQL 时先建起来的。没有这个子句，整批
+-- 迁移会在第一条语句上直接撞 42P07，后面的 0018-0020 也一条都跑不成。
+create index if not exists contacts_by_org on contacts (organization_id);
+create index if not exists invitations_by_org on invitations (organization_id);

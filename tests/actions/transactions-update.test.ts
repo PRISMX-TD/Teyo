@@ -148,6 +148,62 @@ describe('updateTransaction', () => {
     expect(entry.after).toMatchObject({ amountMinor: '99900', description: 'Updated note' });
   });
 
+  /**
+   * 改科目而金额不变，是编辑里最常见的一种：分错类了，挪一下。
+   *
+   * before 原来只有表头字段（日期、摘要、币种、金额、汇率来源、分类），
+   * 一个字都没有科目。于是这一种编辑在审计日志里 before 与 after 的每个
+   * 字段都一模一样——真正被改掉的那样东西，恰恰是没被记下来的那样。
+   * 「这笔钱原来记在哪个科目上」事后再也查不回来，而这正是有人翻审计日志
+   * 时要问的问题。
+   */
+  it('keeps the old accounts in the audit before when an edit moves a record between accounts', async () => {
+    const id = await newExpense(ownerId);
+
+    currentUserId = ownerId;
+    // 只换科目：金额、日期、摘要一律照旧，所以表头字段 before 与 after 相同。
+    await updateTransaction(orgSlug, id, {
+      occurredOn: '2026-08-10',
+      amount: '300.00',
+      currency: 'MYR',
+      moneyAccountId: bankId,
+      categoryId: utilitiesCategoryId,
+      description: 'Original note',
+    });
+
+    const [entry] = await admin`
+      select before, after from audit_logs
+      where entity_id = ${id} and action = 'transaction.updated'
+      order by created_at desc limit 1
+    `;
+
+    const codesOf = (side: unknown) =>
+      (side as { lines?: { direction: string; accountCode: string }[] }).lines?.map((line) => [
+        line.direction,
+        line.accountCode,
+      ]);
+
+    // 原来是「借 房租 / 贷 现金」，改成了「借 水电 / 贷 银行」。
+    expect(codesOf(entry.before)).toEqual([
+      ['debit', 'rent'],
+      ['credit', 'cash'],
+    ]);
+    expect(codesOf(entry.after)).toEqual([
+      ['debit', 'utilities'],
+      ['credit', 'bank'],
+    ]);
+
+    // 表头那几个字段确实没变——也就是说，少了 lines 这一条就什么都看不出来。
+    expect(entry.before).toMatchObject({ amountMinor: '30000', description: 'Original note' });
+    expect(entry.after).toMatchObject({ amountMinor: '30000', description: 'Original note' });
+
+    // before 与 after 形状一致，翻日志的人可以逐行对着看。
+    const beforeLines = (entry.before as { lines: Record<string, unknown>[] }).lines;
+    const afterLines = (entry.after as { lines: Record<string, unknown>[] }).lines;
+    expect(Object.keys(beforeLines[0]).sort()).toEqual(Object.keys(afterLines[0]).sort());
+    expect(beforeLines.map((l) => l.amountMinor)).toEqual(['30000', '30000']);
+  });
+
   it('lets a bookkeeper edit their own record', async () => {
     const id = await newExpense(bookkeeperId);
 

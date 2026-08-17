@@ -23,5 +23,5 @@
 --
 -- 未应用：迁移按批次由人工执行，这里只是把索引定义留档。
 
-create index transactions_by_category_recent on transactions (category_id, occurred_on)
+create index if not exists transactions_by_category_recent on transactions (category_id, occurred_on)
   where voided_at is null;

@@ -2,9 +2,10 @@
 
 import { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName } from '@/lib/i18n';
+import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { TransactionKind } from '@/server/domain/ledger';
+import type { RecurringEditFields, RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 
 type MoneyAccountOption = {
@@ -62,18 +63,9 @@ type CreatePayload = {
   endDate?: string;
 };
 
-type EditPayload = {
-  description?: string;
-  amount?: string;
-  currency?: string;
-  debitAccountId?: string;
-  creditAccountId?: string;
-  categoryId?: string;
-  frequency?: RecurringFrequency;
-  interval?: number;
-  startDate?: string;
-  endDate?: string | null;
-};
+// 直接用 action 导出的类型，而不是在这里再抄一份：amount 与 currency 必须
+// 成对出现这条规则一旦两边各写各的就会漂移，而漂移的那一侧编译不报错。
+type EditPayload = RecurringEditFields;
 
 type Props = {
   orgSlug: string;
@@ -86,7 +78,7 @@ type Props = {
   createAction: (orgSlug: string, input: CreatePayload) => Promise<{ id: string }>;
   editAction: (orgSlug: string, id: string, fields: EditPayload) => Promise<void>;
   toggleAction: (orgSlug: string, id: string, active: boolean) => Promise<void>;
-  generateAction: (orgSlug: string) => Promise<{ generated: number }>;
+  generateAction: (orgSlug: string) => Promise<RecurringRunReport>;
 };
 
 function toOption(row: { nameEn: string | null; nameZh: string | null }) {
@@ -100,6 +92,21 @@ const FREQUENCIES: { key: string; label: string }[] = [
   { key: 'quarterly', label: 'quarterly' },
   { key: 'yearly', label: 'yearly' },
 ];
+
+/**
+ * 与 getDueRecurring 的 where 子句同一套判断，三个条件缺一不可。
+ *
+ * 少了 endDate 那一条时，一条已经跑完的规则（游标停在结束日期之后，而且
+ * 没有任何东西会去翻 is_active）会永远算作到期：按钮一直亮着，确认框说
+ * 「1 条到期的规则」，点下去服务端一条都不选，结果又报「没有到期的分录」。
+ */
+function isDue(entry: RecurringEntry, today: string): boolean {
+  return (
+    entry.isActive &&
+    entry.nextDueDate <= today &&
+    (entry.endDate === null || entry.nextDueDate <= entry.endDate)
+  );
+}
 
 export function RecurringList({
   orgSlug,
@@ -130,6 +137,10 @@ export function RecurringList({
   });
   const [submitting, setSubmitting] = useState(false);
   const [generating, setGenerating] = useState(false);
+  // 生成结果必须显示出来。生成可以部分成功之后，「什么都不说」就有歧义了：
+  // 规则全被挡下的用户和规则全部入账的用户看到的是同一个空界面。
+  const [runReport, setRunReport] = useState<RecurringRunReport | null>(null);
+  const [runError, setRunError] = useState<string | null>(null);
 
   const handleCreate = useCallback(async () => {
     if (!form.amount || !form.debitAccountId || !form.creditAccountId) return;
@@ -168,15 +179,20 @@ export function RecurringList({
   }, [form, orgSlug, createAction]);
 
   const handleGenerate = useCallback(async () => {
-    const dueCount = entries.filter(
-      (e) => e.isActive && e.nextDueDate <= new Date().toISOString().slice(0, 10),
-    ).length;
-    if (dueCount === 0) return;
-    if (!window.confirm(t.recurring.generateConfirm.replace('{n}', String(dueCount)))) return;
+    // 数的是到期的规则条数，不是将要生成的分录笔数——补记会让后者更大。
+    // 文案已经改成明说自己数的是规则，并提醒逾期规则会一期一笔。
+    const today = new Date().toISOString().slice(0, 10);
+    const dueRules = entries.filter((e) => isDue(e, today)).length;
+    if (dueRules === 0) return;
+    if (!window.confirm(interpolate(t.recurring.generateConfirm, { n: dueRules }))) return;
 
     setGenerating(true);
+    setRunReport(null);
+    setRunError(null);
     try {
-      await generateAction(orgSlug);
+      setRunReport(await generateAction(orgSlug));
+    } catch (e) {
+      setRunError((e as Error).message);
     } finally {
       setGenerating(false);
     }
@@ -195,14 +211,71 @@ export function RecurringList({
           onClick={handleGenerate}
           disabled={
             generating ||
-            entries.filter(
-              (e) => e.isActive && e.nextDueDate <= new Date().toISOString().slice(0, 10),
-            ).length === 0
+            !entries.some((e) => isDue(e, new Date().toISOString().slice(0, 10)))
           }
         >
           {generating ? t.common.loading : 'Run due now'}
         </button>
       </div>
+
+      {runError ? (
+        <p role="alert" className="form-error">
+          {runError}
+        </p>
+      ) : null}
+
+      {runReport ? (
+        <div
+          role="status"
+          className={runReport.blocked.length > 0 ? 'form-error' : 'form-success'}
+        >
+          <p>
+            {/*
+              「没有到期的分录」和「没记上任何东西」是两回事。全部规则都被挡下时
+              前者是假话——下面的 generateBlocked 才是真正的原因，标题不该跟它打架。
+              只有真正无事可做时才说无事可做。
+            */}
+            {runReport.generated === 0 &&
+            runReport.blocked.length === 0 &&
+            runReport.deferred.length === 0
+              ? t.recurring.generateNone
+              : interpolate(t.recurring.generatedCount, { n: runReport.generated })}
+          </p>
+
+          {runReport.deferred.length > 0 ? (
+            <>
+              <p>{interpolate(t.recurring.generateDeferred, { n: runReport.deferred.length })}</p>
+              <ul>
+                {runReport.deferred.map((rule) => (
+                  <li key={rule.id}>
+                    {rule.description} &mdash;{' '}
+                    {interpolate(t.recurring.generateResumeFrom, { date: rule.resumeFrom })}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+
+          {runReport.blocked.length > 0 ? (
+            <>
+              <p>{interpolate(t.recurring.generateBlocked, { n: runReport.blocked.length })}</p>
+              <ul>
+                {runReport.blocked.map((rule) => (
+                  <li key={rule.id}>
+                    {/*
+                      卡在哪一期要说出来：补记可能已经记好了前几期，停在第四期。
+                      用户要去处理的是那一天（补一条那天的汇率之类），不是整条规则。
+                      ISO 日期不需要翻译，所以这里不必再加一个文案键。
+                    */}
+                    {rule.description}
+                    {rule.occurredOn ? ` (${rule.occurredOn})` : ''} &mdash; {rule.reason}
+                  </li>
+                ))}
+              </ul>
+            </>
+          ) : null}
+        </div>
+      ) : null}
 
       {showForm && (
         <form

@@ -223,7 +223,8 @@ describe('getAccountBalances', () => {
     const cash = balances.find((b) => b.accountId === cashId);
     const bank = balances.find((b) => b.accountId === bankId);
 
-    // 转账的 moneyAccountId 是「转入方」，会被记借方（见 buildJournalLines）。
+    // 转账的 moneyAccountId 是「转入方」，会被记借方
+    // （见 server/domain/posting-templates.ts 的 accountPair）。
     // 种子里那笔转账 moneyAccountId 是现金、counterAccountId 是银行，
     // 所以是银行转出 400 到现金，不是反过来。
     // 现金：+500 收入 -300 水电 -200 交通 +400 转入 = +400

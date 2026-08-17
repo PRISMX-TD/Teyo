@@ -1,6 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
-import { assertLineInvariants, type DraftJournalLine } from '@/server/domain/ledger';
-import { RATE_SCALE } from '@/server/domain/exchange-rate';
+import { formatScaledRate } from '@/server/domain/exchange-rate';
 
 export type DepreciationMethod = 'straight_line' | 'declining_balance';
 
@@ -139,6 +138,12 @@ export async function getFixedAsset(
   return row ? mapAsset(row) : null;
 }
 
+/**
+ * purchase_exchange_rate 是 numeric(20,8)，而应用内部用放大 10^8 的 bigint。
+ * 这里原样 toString() 会把 0.031 写成 3100000——留痕栏记下的汇率大一亿倍，
+ * 而它只作留痕、今天没有任何页面读它，所以谁也不会发现。与 insertTransaction
+ * 写 exchange_rate 那一列同样走 formatScaledRate，全程不经 Number。
+ */
 export async function insertFixedAsset(
   tx: Tx,
   row: {
@@ -182,7 +187,7 @@ export async function insertFixedAsset(
       ${row.depnAccumAccountId},
       ${row.originalCurrency ?? null},
       ${row.originalCostMinor ? row.originalCostMinor.toString() : null},
-      ${row.purchaseExchangeRate ? row.purchaseExchangeRate.toString() : null}
+      ${row.purchaseExchangeRate ? formatScaledRate(row.purchaseExchangeRate) : null}
     )
     returning id
   `;
@@ -382,39 +387,48 @@ export async function getDepreciationSchedules(
   }));
 }
 
-export async function postDepreciation(
+/** 过一期折旧所需的全部内容，读自库并已校验完毕。 */
+export type PendingDepreciation = {
+  /** 过账成功后要标记的那一行排程。 */
+  scheduleId: string;
+  assetName: string;
+  depnExpenseAccountId: string;
+  depnAccumAccountId: string;
+  depreciationMinor: bigint;
+};
+
+/**
+ * 读出并校验某一期折旧，分录由调用方交给 postJournal 去写。
+ *
+ * 这里原本是 postDepreciation：靠一个 opts 把 insertTransaction /
+ * insertJournalLines 注进来，仓储层自己写记账凭证。那个注入点存在的唯一
+ * 理由是绕开分层，代价是这条路径同时绕开了期间锁检查与审计快照——两者
+ * 都在 postJournal 里，而它从来没走过 postJournal。注入删掉之后，仓储只
+ * 做它本来该做的事：读自己那两张表、把四条校验跑完，一行分录也不写。
+ *
+ * 四条校验一条不少、文案逐字不变：资产在不在本公司、这一期有没有排程、
+ * 是不是已经过账、金额是不是正数。
+ *
+ * for update 是这里唯一新增的东西。is_posted 才是这条路径真正的幂等键：
+ * clientUuid 每次都新随机一个，postJournal 自己那道幂等查询永远命中不了。
+ * 而 READ COMMITTED 下，两次同时点「过账」（两个标签页就够）会各自读到
+ * is_posted = false，各自过一笔，同一期折旧记两遍——与任务 5 给定期规则
+ * 修掉的是同一个缺陷。加上行锁后，第二次会停在锁上，等第一次提交，
+ * Postgres 用 EvalPlanQual 取这一行的最新版本重跑，读到的 is_posted 已经
+ * 是 true，下面那句检查随即抛错，第二次一个字节都不写。锁一直持有到调用方
+ * 那个 withTransaction 提交为止，所以「读到 false」与「写成 true」之间不
+ * 存在任何窗口。
+ *
+ * 锁只要 RLS 的 using 子句（成员即可），而随后 markDepreciationPosted 那句
+ * UPDATE 要的是 with check（owner/admin）——调用方的 account:manage 本就
+ * 只有 owner 与 admin 有，两者对得上，不会出现「锁得住却写不进」。
+ */
+export async function loadDepreciationPosting(
   tx: Tx,
   organizationId: string,
   assetId: string,
   period: string,
-  opts: {
-    userId: string;
-    baseCurrency: string;
-    insertTransaction: (
-      tx: Tx,
-      row: {
-        organizationId: string;
-        kind: 'journal';
-        occurredOn: string;
-        description: string;
-        currency: string;
-        amountMinor: bigint;
-        baseAmountMinor: bigint;
-        scaledRate: bigint;
-        rateSource: 'auto';
-        categoryId: null;
-        createdBy: string;
-        clientUuid: string;
-      },
-    ) => Promise<{ id: string }>;
-    insertJournalLines: (
-      tx: Tx,
-      organizationId: string,
-      transactionId: string,
-      lines: DraftJournalLine[],
-    ) => Promise<void>;
-  },
-): Promise<{ transactionId: string }> {
+): Promise<PendingDepreciation> {
   const assetRows = await tx`
     select name, depn_expense_account_id, depn_accum_account_id
     from fixed_assets
@@ -427,6 +441,7 @@ export async function postDepreciation(
     select id, depreciation_minor, is_posted
     from depreciation_schedules
     where fixed_asset_id = ${assetId} and period = ${period}::date
+    for update
   `;
   const schedule = scheduleRows.at(0);
   if (!schedule) throw new Error('No depreciation schedule found for this period.');
@@ -435,47 +450,51 @@ export async function postDepreciation(
   const depnMinor = BigInt(schedule.depreciation_minor as string);
   if (depnMinor <= 0n) throw new Error('Depreciation amount must be greater than zero.');
 
-  const assetName = asset.name as string;
-  const expenseAccountId = asset.depn_expense_account_id as string;
-  const accumAccountId = asset.depn_accum_account_id as string;
-  const occurredOn = period;
+  return {
+    scheduleId: schedule.id as string,
+    assetName: asset.name as string,
+    depnExpenseAccountId: asset.depn_expense_account_id as string,
+    depnAccumAccountId: asset.depn_accum_account_id as string,
+    depreciationMinor: depnMinor,
+  };
+}
 
-  const clientUuid = crypto.randomUUID();
-
-  const lines: DraftJournalLine[] = [
-    { accountId: expenseAccountId, direction: 'debit', amountMinor: depnMinor, baseAmountMinor: depnMinor },
-    { accountId: accumAccountId, direction: 'credit', amountMinor: depnMinor, baseAmountMinor: depnMinor },
-  ];
-
-  const { id: transactionId } = await opts.insertTransaction(tx, {
-    organizationId,
-    kind: 'journal',
-    occurredOn,
-    description: `Depreciation: ${assetName} (${period})`,
-    currency: opts.baseCurrency,
-    amountMinor: depnMinor,
-    baseAmountMinor: depnMinor,
-    scaledRate: RATE_SCALE,
-    rateSource: 'auto',
-    categoryId: null,
-    createdBy: opts.userId,
-    clientUuid,
-  });
-
-  assertLineInvariants(lines, {
-    currency: opts.baseCurrency,
-    baseCurrency: opts.baseCurrency,
-    scaledRate: RATE_SCALE,
-    rateSource: 'auto',
-  });
-
-  await opts.insertJournalLines(tx, organizationId, transactionId, lines);
-
-  await tx`
+/**
+ * 把一期排程标成已过账，并记下那笔交易的 id。
+ *
+ * 与 loadDepreciationPosting 分成两半，正是因为夹在中间的那一步——写分录
+ * ——已经不归仓储管了：postJournal 是记账凭证的唯一出口。
+ *
+ * where 子句里带上公司：id 本身来自上面那次已经按公司过滤过的查询，多这
+ * 一层不是为了当下，而是为了这个函数日后被别处调用时，仍然是它自己在保证
+ * 只改本公司的行，而不是依赖某个调用方先查对了。
+ *
+ * 但多一个 where 条件就多一种「一行都没匹配上」的可能，而 UPDATE 匹配零行
+ * 不会报错——从调用方看来，没改动和改成功长得一模一样。走到这一步时
+ * postJournal 已经把分录写完了，于是静默的空更新留下的是：交易在账上、
+ * 排程仍是 is_posted = false。用户看不出异常，再点一次「过账」就又是一笔，
+ * 两笔各自配平，谁也发现不了。所以这里必须 fail closed：数一下真正改了几行，
+ * 不是恰好一行就抛错，让整个事务连同那笔分录一起回滚。
+ */
+export async function markDepreciationPosted(
+  tx: Tx,
+  organizationId: string,
+  scheduleId: string,
+  transactionId: string,
+): Promise<void> {
+  const updated = await tx`
     update depreciation_schedules
     set is_posted = true, transaction_id = ${transactionId}
-    where id = ${schedule.id}
+    where id = ${scheduleId}
+      and fixed_asset_id in (
+        select id from fixed_assets where organization_id = ${organizationId}
+      )
+    returning id
   `;
 
-  return { transactionId };
+  if (updated.length !== 1) {
+    throw new Error(
+      `Could not mark depreciation schedule ${scheduleId} as posted (${updated.length} rows matched).`,
+    );
+  }
 }

@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
+import { currencyExponent } from '@/server/domain/money';
 import { createFixedAsset } from '@/server/actions/fixed_assets';
 
 type AccountOption = {
@@ -49,13 +50,43 @@ export function AssetForm({
 
   const isForeign = originalCurrency !== baseCurrency;
 
+  // 一个币种能有几位小数由币种自己决定，不是一律两位：JPY / VND 没有分币。
+  // 服务端按这个位数解析金额，多出来的小数会被拒绝而不是像以前那样截掉两位
+  // （见 server/actions/fixed_assets.ts 的 parseAmountMinor）。表单必须先把
+  // 这件事说清楚——提示位数、当场拦住——而不是让用户提交后撞一句报错。
+  const costDecimals = currencyExponent(originalCurrency);
+  const baseDecimals = currencyExponent(baseCurrency);
+  const amountPlaceholder = (decimals: number) => (decimals === 0 ? '0' : '0.00');
+
+  /** 这个数的小数位超出币种能表达的位数了吗。空串与非数字交给服务端报错。 */
+  function tooManyDecimals(value: string, decimals: number): boolean {
+    const cleaned = value.trim().replace(/,/g, '');
+    if (!/^\d+(\.\d+)?$/.test(cleaned)) return false;
+    const [, fraction = ''] = cleaned.split('.');
+    return fraction.length > decimals;
+  }
+
+  function decimalsHint(currency: string, decimals: number): string {
+    if (decimals === 0) {
+      return locale === 'zh'
+        ? `${currency} 没有小数位，请填整数金额。`
+        : `${currency} amounts have no decimal places — enter a whole number.`;
+    }
+    return locale === 'zh'
+      ? `${currency} 最多 ${decimals} 位小数。`
+      : `${currency} amounts take at most ${decimals} decimal place(s).`;
+  }
+
+  const costDecimalsError = tooManyDecimals(cost, costDecimals);
+  const salvageDecimalsError = tooManyDecimals(salvageValue, baseDecimals);
+
   // 实时预览折算后的基准币种金额
   const convertedPreview = (() => {
     if (!isForeign || !cost) return null;
     const amount = Number(cost.replace(/,/g, ''));
     const rate = Number(exchangeRate);
     if (!Number.isFinite(amount) || !Number.isFinite(rate) || rate <= 0) return null;
-    return (amount * rate).toFixed(2);
+    return (amount * rate).toFixed(baseDecimals);
   })();
 
   async function handleSubmit() {
@@ -147,8 +178,12 @@ export function AssetForm({
           <input
             value={cost}
             onChange={(e) => setCost(e.target.value)}
-            placeholder="0.00"
+            placeholder={amountPlaceholder(costDecimals)}
+            inputMode="decimal"
           />
+          {costDecimalsError ? (
+            <span className="hint" role="alert">{decimalsHint(originalCurrency, costDecimals)}</span>
+          ) : null}
         </div>
       </div>
 
@@ -184,8 +219,12 @@ export function AssetForm({
         <input
           value={salvageValue}
           onChange={(e) => setSalvageValue(e.target.value)}
-          placeholder="0.00"
+          placeholder={amountPlaceholder(baseDecimals)}
+          inputMode="decimal"
         />
+        {salvageDecimalsError ? (
+          <span className="hint" role="alert">{decimalsHint(baseCurrency, baseDecimals)}</span>
+        ) : null}
       </div>
 
       <div className="inline-edit-row">
@@ -252,7 +291,19 @@ export function AssetForm({
 
       {error ? <p role="alert" className="form-error">{error}</p> : null}
 
-      <button onClick={handleSubmit} disabled={pending || !name.trim() || !cost || !assetAccountId || !depnExpenseAccountId || !depnAccumAccountId}>
+      <button
+        onClick={handleSubmit}
+        disabled={
+          pending ||
+          !name.trim() ||
+          !cost ||
+          costDecimalsError ||
+          salvageDecimalsError ||
+          !assetAccountId ||
+          !depnExpenseAccountId ||
+          !depnAccumAccountId
+        }
+      >
         {pending ? t.common.loading : t.invoices.save ?? 'Save'}
       </button>
     </div>

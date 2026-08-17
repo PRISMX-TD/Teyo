@@ -77,9 +77,9 @@ describe('createJournal - direction chain', () => {
   // debits the money account and credits suspense; money out reverses it.
   // createJournal itself just posts whatever debit/credit pair it is given,
   // so these two cases exercise both directions the client can produce and
-  // pin down that buildJournalLines' 'journal' branch (ledger.ts:66-67)
-  // really does debit = debitAccountId / credit = creditAccountId, not the
-  // reverse.
+  // pin down that templateFor's 'journal' branch (see accountPair in
+  // server/domain/posting-templates.ts) really does debit = debitAccountId /
+  // credit = creditAccountId, not the reverse.
   it('money in: debits the money account and credits suspense', async () => {
     currentUserId = ownerId;
     const { id } = await createJournal(
@@ -147,11 +147,15 @@ describe('createJournal - amounts, kind and category', () => {
       select after from audit_logs
       where entity_id = ${id} and action = 'transaction.created'
     `;
-    expect(row.after).toMatchObject({
-      kind: 'journal',
-      debitAccount: 'cash',
-      creditAccount: 'suspense',
-    });
+    expect(row.after).toMatchObject({ kind: 'journal' });
+
+    // 科目代码从 after.debitAccount / after.creditAccount 搬到了每一条分录
+    // 行上（after.lines[].accountCode），四种 kind 一视同仁，不再只有手工
+    // 凭证才有。借方永远是第一行——见 templateFor。
+    const after = row.after as { lines: { accountCode: string; direction: string }[] };
+    expect(after.lines).toHaveLength(2);
+    expect(after.lines[0]).toMatchObject({ direction: 'debit', accountCode: 'cash' });
+    expect(after.lines[1]).toMatchObject({ direction: 'credit', accountCode: 'suspense' });
   });
 });
 
