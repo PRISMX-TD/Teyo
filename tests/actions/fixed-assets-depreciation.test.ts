@@ -79,10 +79,11 @@ afterAll(async () => {
   // depreciation_schedules.transaction_id 指向 transactions(id)，而且没有
   // on delete cascade —— 0016 只补了那一批 organization_id 外键。于是任何一家
   // 过过折旧的公司都删不掉：删公司时 transactions 与 depreciation_schedules
-  // 各自被级联删除，先删到哪一支不确定，撞上这条外键就整句失败。这是生产里
-  // 同样存在的洞（organization:delete 与 PDPA 删除都会撞上），补丁写在
-  // 0020_depreciation_schedule_transaction_cascade.sql，等人工执行。在那之前
-  // 清理必须自己先把引用摘掉。
+  // 各自被级联删除，而 NO ACTION 的完整性检查与 CASCADE 同在一条语句的触发器
+  // 队列里，检查排在前面就会看到还没删掉的排程行，把整句 delete 顶回来。
+  // 这是生产里同样存在的洞，指向 transactions 的六条外键都是这个形状，
+  // 0020_transaction_fk_cascade.sql 一并扫掉，等人工执行。在那之前清理必须
+  // 自己先把引用摘掉。
   if (orgIds.length > 0) {
     await admin`
       update depreciation_schedules set transaction_id = null
@@ -340,13 +341,20 @@ describe('postDepreciationAction - is_posted is the real idempotency guard', () 
       },
     );
 
-    // 第二笔要做的只是两条 select，没有锁的话远早于这个时限就返回了
-    // （实测在几十毫秒内）。留 3 秒是给远端库的余量：这个等待偏长只会让
-    // 用例变慢或变红，不会让缺陷混过去。
-    await new Promise((resolve) => setTimeout(resolve, 3_000));
-    expect(secondSettled).toBe(false);
+    // finally 不能省：断言一旦失败就直接抛出，第一笔那个事务会一直开着、
+    // 一直攥着行锁，afterAll 里清理用的那句 UPDATE 随即挂在同一行上，
+    // 一个失败的断言会变成一整份挂死的测试文件。这个用例针对的那次回归
+    // （没有锁）正好走不到这一步，但任何别的早退都会。
+    try {
+      // 第二笔要做的只是两条 select，没有锁的话远早于这个时限就返回了
+      // （实测在几十毫秒内）。留 3 秒是给远端库的余量：这个等待偏长只会让
+      // 用例变慢或变红，不会让缺陷混过去。
+      await new Promise((resolve) => setTimeout(resolve, 3_000));
+      expect(secondSettled).toBe(false);
+    } finally {
+      release();
+    }
 
-    release();
     const firstTransactionId = await first;
     await second;
 
@@ -366,6 +374,38 @@ describe('postDepreciationAction - is_posted is the real idempotency guard', () 
     expect(row.is_posted).toBe(true);
     expect(row.transaction_id).toBe(firstTransactionId);
   }, 30_000);
+});
+
+describe('markDepreciationPosted - fails closed when it matches nothing', () => {
+  // 公司那一层 where 是为「日后别的调用方」加的，而它同时也多了一条
+  // 「一行都没匹配上」的路。UPDATE 匹配零行不报错，走到这里时 postJournal
+  // 已经把分录写完了——静默的空更新会留下「交易在账上、排程仍未过账」，
+  // 用户再点一次就是第二笔，两笔各自配平，没人看得出来。
+  it('throws on a mismatched organisation instead of leaving the schedule unposted', async () => {
+    const asset = await newAsset(org, 'Fail closed rig', {
+      expense: org.accountsByCode.depreciation,
+      accum: org.accountsByCode['ad-equipment'],
+    });
+
+    currentUserId = ownerId;
+    const { transactionId } = await postDepreciationAction(org.slug, asset, '2026-01-01');
+
+    const [target] = await admin`
+      select id from depreciation_schedules
+      where fixed_asset_id = ${asset} and period = '2026-02-01'::date
+    `;
+
+    await expect(
+      withTransaction(ownerId, (tx) =>
+        // 一个语法合法但不是这家公司的 id。
+        markDepreciationPosted(tx, randomUUID(), target.id as string, transactionId),
+      ),
+    ).rejects.toThrow(/0 rows matched/i);
+
+    const row = await scheduleRow(asset, '2026-02-01');
+    expect(row.is_posted).toBe(false);
+    expect(row.transaction_id).toBeNull();
+  });
 });
 
 describe('postDepreciationAction - an asset whose two accounts are the same', () => {

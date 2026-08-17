@@ -461,6 +461,13 @@ export async function loadDepreciationPosting(
  * where 子句里带上公司：id 本身来自上面那次已经按公司过滤过的查询，多这
  * 一层不是为了当下，而是为了这个函数日后被别处调用时，仍然是它自己在保证
  * 只改本公司的行，而不是依赖某个调用方先查对了。
+ *
+ * 但多一个 where 条件就多一种「一行都没匹配上」的可能，而 UPDATE 匹配零行
+ * 不会报错——从调用方看来，没改动和改成功长得一模一样。走到这一步时
+ * postJournal 已经把分录写完了，于是静默的空更新留下的是：交易在账上、
+ * 排程仍是 is_posted = false。用户看不出异常，再点一次「过账」就又是一笔，
+ * 两笔各自配平，谁也发现不了。所以这里必须 fail closed：数一下真正改了几行，
+ * 不是恰好一行就抛错，让整个事务连同那笔分录一起回滚。
  */
 export async function markDepreciationPosted(
   tx: Tx,
@@ -468,12 +475,19 @@ export async function markDepreciationPosted(
   scheduleId: string,
   transactionId: string,
 ): Promise<void> {
-  await tx`
+  const updated = await tx`
     update depreciation_schedules
     set is_posted = true, transaction_id = ${transactionId}
     where id = ${scheduleId}
       and fixed_asset_id in (
         select id from fixed_assets where organization_id = ${organizationId}
       )
+    returning id
   `;
+
+  if (updated.length !== 1) {
+    throw new Error(
+      `Could not mark depreciation schedule ${scheduleId} as posted (${updated.length} rows matched).`,
+    );
+  }
 }
