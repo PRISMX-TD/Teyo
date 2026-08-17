@@ -18,63 +18,6 @@ export type DraftJournalLine = {
   baseAmountMinor: bigint;
 };
 
-export type BuildLinesInput = {
-  kind: TransactionKind;
-  amountMinor: bigint;
-  currency: string;
-  baseCurrency: string;
-  scaledRate: bigint;
-  /** Income: destination. Expense: source of funds. Transfer: destination. */
-  moneyAccountId: string;
-  /** Income: revenue account. Expense: expense account. Transfer: source account. */
-  counterAccountId: string;
-};
-
-/**
- * Maps a user-facing operation onto a balanced pair of journal lines.
- *
- * income   debit money account   / credit revenue account
- * expense  debit expense account / credit money account
- * transfer debit destination     / credit source
- * journal  debit account         / credit account
- */
-export function buildJournalLines(input: BuildLinesInput): DraftJournalLine[] {
-  const { kind, amountMinor, currency, baseCurrency, scaledRate, moneyAccountId, counterAccountId } =
-    input;
-
-  if (amountMinor <= 0n) {
-    throw new LedgerError('Transaction amount must be greater than zero.');
-  }
-  if (scaledRate <= 0n) {
-    throw new LedgerError('Exchange rate must be greater than zero.');
-  }
-  if (!moneyAccountId || !counterAccountId) {
-    throw new LedgerError('Both accounts are required.');
-  }
-  if ((kind === 'transfer' || kind === 'journal') && moneyAccountId === counterAccountId) {
-    throw new LedgerError('This operation requires two different accounts.');
-  }
-
-  const baseAmountMinor = convertToBaseMinor({
-    amountMinor,
-    currency,
-    baseCurrency,
-    scaledRate,
-  });
-
-  // journal: debit moneyAccountId, credit counterAccountId (same as income)
-  const debitAccountId = (kind === 'expense') ? counterAccountId : moneyAccountId;
-  const creditAccountId = (kind === 'expense') ? moneyAccountId : counterAccountId;
-
-  const lines: DraftJournalLine[] = [
-    { accountId: debitAccountId, direction: 'debit', amountMinor, baseAmountMinor },
-    { accountId: creditAccountId, direction: 'credit', amountMinor, baseAmountMinor },
-  ];
-
-  assertBalanced(lines);
-  return lines;
-}
-
 export type DraftLineSpec = {
   accountId: string;
   direction: Direction;
@@ -91,10 +34,18 @@ export type BuildLinesContext = {
 /**
  * Builds a balanced journal from an arbitrary number of lines (n >= 2).
  *
- * `buildJournalLines` above is a fixed two-line special case for the three
- * user-facing operations (income/expense/transfer/journal). This is the
- * general builder: phase 4 posts invoices (debit receivable / credit revenue
- * / credit output tax -- three lines) and asset disposals (four lines).
+ * 谁借谁贷不在这里决定，而在 server/domain/posting-templates.ts 的
+ * templateFor：这个函数只认 DraftLineSpec 上已经写好的 direction。
+ *
+ * 这里原来还有一个 buildJournalLines，把 income/expense/transfer/journal
+ * 四种操作各自映射成一对固定的借贷分录。templateFor 接管之后它在生产代码
+ * 里一个调用者都没有了，却仍然留着第二份「哪种操作借哪个科目」的映射——
+ * 两份记账方向的定义，正是本阶段要删掉的东西，也正是本计划已经出过一次的
+ * 那种 bug 的形状（转账的借贷两端被写反，照样配平、照样没人看得出来）。
+ * 已删除；方向只剩 templateFor 一处定义。
+ *
+ * n >= 2 而不是恰好 2：phase 4 posts invoices (debit receivable / credit
+ * revenue / credit output tax -- three lines) and asset disposals (four lines).
  *
  * Each line is converted to base currency independently via
  * `convertToBaseMinor`, which rounds half up per line. Rounding each line

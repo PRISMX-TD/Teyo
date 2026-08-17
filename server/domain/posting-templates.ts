@@ -16,8 +16,9 @@ export function templateFor(event: PostingEvent): DraftLineSpec[] {
   const { debitAccountId, creditAccountId } = accountPair(event);
 
   // 一借一贷落在同一个科目上照样配平：assertBalanced 拦不住，账户归属校验
-  // 也拦不住，最后落库的是一笔毫无意义的对冲分录。buildJournalLines 以前
-  // 顺手挡着这条，改走模板后它没了，于是补在这里。
+  // 也拦不住，最后落库的是一笔毫无意义的对冲分录。这一条以前顺手挂在
+  // ledger.ts 的 buildJournalLines 上（那个函数已删除，方向映射只剩这里
+  // 一处），改走模板后没人再挡它，于是补在这里。
   //
   // 挡在 templateFor 而不是 buildLines/assertLineInvariants：后两者收的是
   // 任意 n 行的 DraftLineSpec[]，多行同侧命中同一科目在 n 行事件里是合法的

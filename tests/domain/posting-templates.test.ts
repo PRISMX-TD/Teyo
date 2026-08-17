@@ -90,8 +90,9 @@ describe('posting-templates', () => {
     expect(creditLine.amountMinor).toBe(15000n);
   });
 
-  // buildJournalLines used to refuse a transfer or journal whose two sides
-  // named the same account. buildLines cannot carry that rule -- it takes an
+  // ledger.ts's buildJournalLines used to refuse a transfer or journal whose
+  // two sides named the same account; that function is gone, and posting
+  // direction now lives only here. buildLines cannot carry that rule -- it takes an
   // arbitrary n-line spec, where two lines on one account on the same side are
   // legitimate. templateFor is where it belongs: all four shapes are exactly
   // one debit against one credit, and a debit and a credit on one account

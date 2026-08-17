@@ -85,8 +85,11 @@ async function resolveCounterAccountId(
  * 转账这一对是反的，务必看清：表单里 moneyAccountId 那个选择器的标签是
  * transaction.destinationAccount，counterAccountId 的标签是
  * sourceAccount（见 transaction-form.tsx 的 transfer 分支）——资金账户是
- * 转入方，对方科目才是转出方。buildJournalLines 一直就是这么记的
- * （借 moneyAccountId / 贷 counterAccountId），迁移不能把它掉个个儿。
+ * 转入方，对方科目才是转出方。所以这里必须映射成
+ * toAccountId = moneyAccountId / fromAccountId = counterAccountId，而
+ * templateFor 的 transfer 分支再把 toAccountId 记借方、fromAccountId 记贷方
+ * （见 server/domain/posting-templates.ts 的 accountPair——那是记账方向的
+ * 唯一定义）。掉个个儿的分录照样配平，看板上的总额也一分不差。
  */
 function toPostingEvent(
   kind: TransactionKind,

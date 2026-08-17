@@ -77,9 +77,9 @@ describe('createJournal - direction chain', () => {
   // debits the money account and credits suspense; money out reverses it.
   // createJournal itself just posts whatever debit/credit pair it is given,
   // so these two cases exercise both directions the client can produce and
-  // pin down that buildJournalLines' 'journal' branch (ledger.ts:66-67)
-  // really does debit = debitAccountId / credit = creditAccountId, not the
-  // reverse.
+  // pin down that templateFor's 'journal' branch (see accountPair in
+  // server/domain/posting-templates.ts) really does debit = debitAccountId /
+  // credit = creditAccountId, not the reverse.
   it('money in: debits the money account and credits suspense', async () => {
     currentUserId = ownerId;
     const { id } = await createJournal(

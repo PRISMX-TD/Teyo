@@ -3,23 +3,32 @@ import { RATE_SCALE } from '@/server/domain/exchange-rate';
 import {
   LedgerError,
   assertLineInvariants,
-  buildJournalLines,
+  buildLines,
+  type BuildLinesContext,
   type DraftJournalLine,
 } from '@/server/domain/ledger';
+import { templateFor } from '@/server/domain/posting-templates';
 
 const BANK = 'account-bank';
 const SALES = 'account-sales';
 
+/**
+ * 生产路径构造分录的那两步：templateFor 定方向，buildLines 换算本位币。
+ * 这里原来调的是 buildJournalLines，它已随记账方向的第二份定义一起删除。
+ */
+function postedLines(amountMinor: bigint, ctx: BuildLinesContext): DraftJournalLine[] {
+  return buildLines(
+    templateFor({ type: 'income', moneyAccountId: BANK, revenueAccountId: SALES, amountMinor }),
+    ctx,
+  );
+}
+
 describe('assertLineInvariants - I3 base amount consistency', () => {
-  it('accepts lines produced by buildJournalLines', () => {
-    const lines = buildJournalLines({
-      kind: 'income',
-      amountMinor: 10000n,
+  it('accepts lines the boundary actually builds', () => {
+    const lines = postedLines(10000n, {
       currency: 'SGD',
       baseCurrency: 'MYR',
       scaledRate: 3_50000000n,
-      moneyAccountId: BANK,
-      counterAccountId: SALES,
     });
 
     expect(() =>
@@ -162,14 +171,10 @@ describe('assertLineInvariants - I4 fabricated 1:1 rate', () => {
   });
 
   it('allows a rate of exactly 1 for a domestic posting', () => {
-    const lines = buildJournalLines({
-      kind: 'income',
-      amountMinor: 50000n,
+    const lines = postedLines(50000n, {
       currency: 'MYR',
       baseCurrency: 'MYR',
       scaledRate: RATE_SCALE,
-      moneyAccountId: BANK,
-      counterAccountId: SALES,
     });
 
     expect(() =>
@@ -208,20 +213,12 @@ describe('assertLineInvariants - property sweep', () => {
   ];
   const RATES = [RATE_SCALE, 3_50000000n, 4_71834900n, 1000000n, 25_00000000n];
 
-  it('every buildJournalLines output satisfies I3 and I4', () => {
+  it('every posting the boundary builds satisfies I3 and I4', () => {
     for (const [currency, baseCurrency] of PAIRS) {
       for (const scaledRate of RATES) {
         if (currency === baseCurrency && scaledRate !== RATE_SCALE) continue;
         for (const amountMinor of [1n, 7n, 999n, 100000n, 123456789n]) {
-          const lines = buildJournalLines({
-            kind: 'income',
-            amountMinor,
-            currency,
-            baseCurrency,
-            scaledRate,
-            moneyAccountId: BANK,
-            counterAccountId: SALES,
-          });
+          const lines = postedLines(amountMinor, { currency, baseCurrency, scaledRate });
 
           const rateSource = currency !== baseCurrency && scaledRate === RATE_SCALE
             ? 'manual'
