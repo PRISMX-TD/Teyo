@@ -113,7 +113,10 @@ export function buildLines(specs: DraftLineSpec[], ctx: BuildLinesContext): Draf
   }
   for (const spec of specs) {
     if (spec.amountMinor <= 0n) {
-      throw new LedgerError('Each journal line amount must be greater than zero.');
+      // 用户读得懂的说法。这条会原样出现在记账表单上，而「journal line」
+      // 对一个没有会计基础的用户不是任何东西——他刚才输入的是一个金额。
+      // 对 n 行事件同样成立：任何一行为零，这笔账的金额就有问题。
+      throw new LedgerError('Transaction amount must be greater than zero.');
     }
   }
 

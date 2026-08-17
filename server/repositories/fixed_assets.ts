@@ -407,12 +407,14 @@ export async function postDepreciation(
         clientUuid: string;
       },
     ) => Promise<{ id: string }>;
+    // 返回值这里用不上（折旧分录不写审计快照），写成 unknown 而不是 void，
+    // 免得 posting 层给写入函数加返回值时这个注入点跟着一起改。
     insertJournalLines: (
       tx: Tx,
       organizationId: string,
       transactionId: string,
       lines: DraftJournalLine[],
-    ) => Promise<void>;
+    ) => Promise<unknown>;
   },
 ): Promise<{ transactionId: string }> {
   const assetRows = await tx`

@@ -426,7 +426,13 @@ describe('createTransaction - permissions and locking', () => {
 
   it('rejects a zero or negative amount', async () => {
     currentUserId = ownerId;
-    await expect(createTransaction(orgSlug, expenseInput({ amount: '0.00' }))).rejects.toThrow();
+    // 断言的是文案本身，不只是「抛了个错」。这条错误会原样显示在记账表单
+    // 上，用户没有会计基础，读到 "journal line" 只会一头雾水——上一次改写
+    // 分录构造时它就悄悄从「金额」变成了「分录行」，两条 bare toThrow()
+    // 谁也没拦住。
+    await expect(createTransaction(orgSlug, expenseInput({ amount: '0.00' }))).rejects.toThrow(
+      /transaction amount must be greater than zero/i,
+    );
     await expect(createTransaction(orgSlug, expenseInput({ amount: '-5.00' }))).rejects.toThrow();
   });
 

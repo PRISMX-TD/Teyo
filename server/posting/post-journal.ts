@@ -16,7 +16,11 @@ import {
   findTransactionByClientUuid,
   updateTransactionHead,
 } from '@/server/repositories/transactions';
-import { insertJournalLines, insertTransaction } from '@/server/posting/insert';
+import {
+  insertJournalLines,
+  insertTransaction,
+  type AccountCodesById,
+} from '@/server/posting/insert';
 
 /** 两个入口共有的记账内容：记什么、记多少、记在哪一天。 */
 type PostingCore = {
@@ -33,14 +37,6 @@ export type PostJournalInput = PostingCore & {
   clientUuid: string;
   sourceType?: string | null;
   sourceId?: string | null;
-  /**
-   * 调用方补充的审计字段，只进审计快照，不参与任何记账计算。
-   *
-   * 存在的理由是有些业务语境从分录行里读不出来：手工凭证的审计记录了借贷
-   * 两端的科目代码（人能直接看懂），而分录行里只有 uuid。合并时它排在规范
-   * 字段之前，规范字段后写覆盖它——补充字段不能改写记账事实本身。
-   */
-  auditExtra?: Record<string, unknown>;
 };
 
 /**
@@ -127,8 +123,9 @@ export async function postJournal(
     clientUuid: input.clientUuid,
   });
 
-  // 8. 写分录行。insertJournalLines 内部会先核实每个 accountId 属于本公司。
-  await insertJournalLines(tx, ctx.organizationId, transactionId, lines);
+  // 8. 写分录行。insertJournalLines 内部会先核实每个 accountId 属于本公司，
+  // 并把那次查询顺手取到的 id -> code 带回来给审计用。
+  const accountCodes = await insertJournalLines(tx, ctx.organizationId, transactionId, lines);
 
   // 9. 审计，与业务写入同事务。
   await recordAudit(tx, {
@@ -138,7 +135,6 @@ export async function postJournal(
     entityType: 'transaction',
     entityId: transactionId,
     after: {
-      ...(input.auditExtra ?? {}),
       kind,
       occurredOn: input.occurredOn,
       description: input.description,
@@ -150,7 +146,7 @@ export async function postJournal(
       categoryId,
       sourceType: input.sourceType ?? null,
       sourceId: input.sourceId ?? null,
-      lines: auditLines(lines),
+      lines: auditLines(lines, accountCodes),
     },
   });
 
@@ -257,7 +253,12 @@ export async function repostJournal(
 
   // 8. 分录整体重建，而不是原地改。
   await deleteJournalLines(tx, ctx.organizationId, input.transactionId);
-  await insertJournalLines(tx, ctx.organizationId, input.transactionId, lines);
+  const accountCodes = await insertJournalLines(
+    tx,
+    ctx.organizationId,
+    input.transactionId,
+    lines,
+  );
 
   // 9. 审计，与业务写入同事务。before 全部来自调用方已查过的 existing 行。
   await recordAudit(tx, {
@@ -283,7 +284,7 @@ export async function repostJournal(
       baseAmountMinor: baseAmountMinor.toString(),
       rateSource,
       categoryId,
-      lines: auditLines(lines),
+      lines: auditLines(lines, accountCodes),
     },
   });
 
@@ -345,10 +346,18 @@ function categoryForKind(kind: TransactionKind, categoryId: string | null): stri
   return kind === 'transfer' || kind === 'journal' ? null : categoryId;
 }
 
-/** bigint 不能直接进 JSON，统一转字符串，保持 jsonb 可查询。 */
-function auditLines(lines: DraftJournalLine[]) {
+/**
+ * 分录行的审计快照。bigint 不能直接进 JSON，统一转字符串，保持 jsonb 可查询。
+ *
+ * accountCode 与 accountId 并列：日后翻审计日志的人认得 'cash'，认不得
+ * 一串 uuid，而科目可能早已改名甚至停用。代码取自 insertJournalLines 刚
+ * 跑完的那次归属校验，不额外查库。校验通不过就抛错了，所以这里 get 必中；
+ * ?? null 只是让这个函数保持全函数，不留一个隐式 undefined 进 jsonb。
+ */
+function auditLines(lines: DraftJournalLine[], codesById: AccountCodesById) {
   return lines.map((line) => ({
     accountId: line.accountId,
+    accountCode: codesById.get(line.accountId) ?? null,
     direction: line.direction,
     amountMinor: line.amountMinor.toString(),
   }));

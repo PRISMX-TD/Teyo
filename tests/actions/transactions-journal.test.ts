@@ -147,11 +147,15 @@ describe('createJournal - amounts, kind and category', () => {
       select after from audit_logs
       where entity_id = ${id} and action = 'transaction.created'
     `;
-    expect(row.after).toMatchObject({
-      kind: 'journal',
-      debitAccount: 'cash',
-      creditAccount: 'suspense',
-    });
+    expect(row.after).toMatchObject({ kind: 'journal' });
+
+    // 科目代码从 after.debitAccount / after.creditAccount 搬到了每一条分录
+    // 行上（after.lines[].accountCode），四种 kind 一视同仁，不再只有手工
+    // 凭证才有。借方永远是第一行——见 templateFor。
+    const after = row.after as { lines: { accountCode: string; direction: string }[] };
+    expect(after.lines).toHaveLength(2);
+    expect(after.lines[0]).toMatchObject({ direction: 'debit', accountCode: 'cash' });
+    expect(after.lines[1]).toMatchObject({ direction: 'credit', accountCode: 'suspense' });
   });
 });
 

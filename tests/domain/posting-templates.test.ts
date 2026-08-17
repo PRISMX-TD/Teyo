@@ -90,6 +90,26 @@ describe('posting-templates', () => {
     expect(creditLine.amountMinor).toBe(15000n);
   });
 
+  // buildJournalLines used to refuse a transfer or journal whose two sides
+  // named the same account. buildLines cannot carry that rule -- it takes an
+  // arbitrary n-line spec, where two lines on one account on the same side are
+  // legitimate. templateFor is where it belongs: all four shapes are exactly
+  // one debit against one credit, and a debit and a credit on one account
+  // balance perfectly, pass assertBalanced, pass the ownership check and post
+  // a meaningless wash entry.
+  it('refuses an event whose debit and credit name the same account', () => {
+    const sameAccountEvents: PostingEvent[] = [
+      { type: 'income', moneyAccountId: 'cash', revenueAccountId: 'cash', amountMinor: 100n },
+      { type: 'expense', moneyAccountId: 'cash', expenseAccountId: 'cash', amountMinor: 100n },
+      { type: 'transfer', fromAccountId: 'cash', toAccountId: 'cash', amountMinor: 100n },
+      { type: 'journal', debitAccountId: 'cash', creditAccountId: 'cash', amountMinor: 100n },
+    ];
+
+    for (const event of sameAccountEvents) {
+      expect(() => templateFor(event)).toThrow(/different accounts/i);
+    }
+  });
+
   it('each event returns exactly one debit line and one credit line', () => {
     const events: PostingEvent[] = [
       {

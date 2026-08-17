@@ -56,12 +56,13 @@ async function resolveCounterAccountId(
 
   if (input.kind === 'transfer') {
     if (!input.counterAccountId) {
-      throw new LedgerError('A transfer needs a destination account.');
+      // counterAccountId 是转出方（表单标签 t.transaction.sourceAccount，
+      // 「从哪个账户转出」）；转入方是 moneyAccountId，前面已经查过了。
+      throw new LedgerError('A transfer needs a source account.');
     }
     const counter = await getMoneyAccount(tx, organizationId, input.counterAccountId);
-    // 转账两端必须是不同账户。这条以前是 buildJournalLines 顺手拦下的；
-    // 改走 templateFor + buildLines 之后，同一账户上的一借一贷照样配平、
-    // 落库也不报错，于是必须在解析入参这一层显式挡住。
+    // 转账两端必须是不同账户。templateFor 里有同一条断言兜底，这一层留着
+    // 是因为它更早触发、且此时还知道是哪个字段填错了。
     if (counter.id === input.moneyAccountId) {
       throw new LedgerError('This operation requires two different accounts.');
     }
@@ -234,9 +235,6 @@ export async function createJournal(
       currency,
       categoryId: null,
       clientUuid,
-      // 分录行里只有科目 uuid；凭证的审计快照一直记的是两端的科目代码，
-      // 那是人翻审计日志时唯一读得懂的东西，迁移不能把它丢掉。
-      auditExtra: { debitAccount: debitAccount.code, creditAccount: creditAccount.code },
     });
 
     return { id: posted.transactionId, deduplicated: posted.deduplicated };

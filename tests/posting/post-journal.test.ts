@@ -163,6 +163,15 @@ describe('postJournal - audit trail', () => {
       { type: 'journal', debitAccountId: org.accountsByCode.cash, creditAccountId: org.accountsByCode.suspense, amountMinor: 100n },
     ];
 
+    // 借方代码、贷方代码。审计快照要能被人读懂，uuid 读不懂，而科目日后
+    // 还可能改名或停用，所以代码要在事发当时就写进快照。
+    const expectedCodes: Record<string, [string, string]> = {
+      income: ['cash', 'sales'],
+      expense: ['purchases', 'cash'],
+      transfer: ['bank', 'cash'],
+      journal: ['cash', 'suspense'],
+    };
+
     for (const event of events) {
       const categoryId =
         event.type === 'income'
@@ -181,6 +190,16 @@ describe('postJournal - audit trail', () => {
         sourceType: 'test-fixture',
         sourceId: 'abc-123',
       });
+
+      const after = auditRows[0].after as {
+        lines: { accountId: string; accountCode: string; direction: string }[];
+      };
+      expect(after.lines.map((line) => [line.direction, line.accountCode])).toEqual([
+        ['debit', expectedCodes[event.type][0]],
+        ['credit', expectedCodes[event.type][1]],
+      ]);
+      // uuid 没被代码顶替掉，两者并存。
+      expect(after.lines.every((line) => typeof line.accountId === 'string')).toBe(true);
     }
   });
 });

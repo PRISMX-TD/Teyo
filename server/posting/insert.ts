@@ -63,8 +63,12 @@ export async function insertTransaction(
   return { id: inserted[0].id as string };
 }
 
+/** 科目 id -> 科目代码，取自归属校验那一次查询。 */
+export type AccountCodesById = ReadonlyMap<string, string>;
+
 /**
- * 断言分录里出现的每一个科目 id 都属于 organizationId 这家公司。
+ * 断言分录里出现的每一个科目 id 都属于 organizationId 这家公司，
+ * 并把这次查到的 id -> code 映射带回去。
  *
  * PostgreSQL 的外键约束只保证 account_id 在 accounts 表里确实存在，不检查
  * 它是否属于当前公司——RLS 不对外键校验生效。调用方一旦把别家公司的
@@ -74,38 +78,52 @@ export async function insertTransaction(
  * 之前这层校验完全靠调用方各自记得先查（findAccount/getMoneyAccount 之
  * 类），是约定而不是结构性保证。这里把它收紧成写入路径本身的强制条件：
  * 不管调用方有没有先查过，insertJournalLines 落库前总会再核一遍。
+ *
+ * code 是顺手取的：这条 select 本来就要按 id 扫这几行，多带一列不多一次
+ * 往返。审计快照要靠它写下人读得懂的科目代码——分录行里只有 uuid。
  */
 async function assertAccountsBelongToOrg(
   tx: Tx,
   organizationId: string,
   accountIds: string[],
-): Promise<void> {
+): Promise<AccountCodesById> {
+  const codesById = new Map<string, string>();
+
   const uniqueIds = [...new Set(accountIds)];
-  if (uniqueIds.length === 0) return;
+  if (uniqueIds.length === 0) return codesById;
 
   const rows = await tx`
-    select id from accounts
+    select id, code from accounts
     where organization_id = ${organizationId} and id = any(${uniqueIds}::uuid[])
   `;
-  const found = new Set(rows.map((row) => row.id as string));
-  const missing = uniqueIds.filter((id) => !found.has(id));
+  for (const row of rows) {
+    codesById.set(row.id as string, row.code as string);
+  }
 
+  const missing = uniqueIds.filter((id) => !codesById.has(id));
   if (missing.length > 0) {
     throw new LedgerError(
       `Account(s) not found in this company: ${missing.join(', ')}`,
     );
   }
+
+  return codesById;
 }
 
+/** 写分录行，返回这批科目的 id -> code 映射，供调用方写审计快照。 */
 export async function insertJournalLines(
   tx: Tx,
   organizationId: string,
   transactionId: string,
   lines: DraftJournalLine[],
-): Promise<void> {
-  if (lines.length === 0) return;
+): Promise<AccountCodesById> {
+  if (lines.length === 0) return new Map();
 
-  await assertAccountsBelongToOrg(tx, organizationId, lines.map((line) => line.accountId));
+  const codesById = await assertAccountsBelongToOrg(
+    tx,
+    organizationId,
+    lines.map((line) => line.accountId),
+  );
 
   await tx`
     insert into journal_lines ${tx(
@@ -127,4 +145,6 @@ export async function insertJournalLines(
       'base_amount_minor',
     )}
   `;
+
+  return codesById;
 }
