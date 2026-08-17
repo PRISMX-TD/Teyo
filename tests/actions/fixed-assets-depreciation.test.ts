@@ -408,6 +408,132 @@ describe('markDepreciationPosted - fails closed when it matches nothing', () => 
   });
 });
 
+describe('createFixedAsset - a zero-decimal purchase currency', () => {
+  // JPY 没有分币（money.ts 的 ZERO_DECIMAL_CURRENCIES），JPY 150,000 就是
+  // 150000 minor。这条路径以前用一个自己写的 parseMinor，无论币种一律补两位
+  // 小数，于是 150000 先被读成 15,000,000 minor，convertToBaseMinor 又按
+  // fromExponent = 0 再乘一次 100 折算——0.031 的汇率下账面原值成了
+  // MYR 465,000 而不是 MYR 4,650，而且资产表、排程表、每一期折旧分录全都
+  // 照着这个数走，账面处处配平，没有任何地方看得出来错了一百倍。
+  //
+  // 购入币种下拉框列的就是 SUPPORTED_CURRENCIES，JPY 与 VND 都在里面
+  // （见 app/(app)/[orgSlug]/fixed-assets/new/page.tsx），从界面上点得到。
+  //
+  // 因此这里断言的是落库的那个数，不是「没有抛错」。
+  const JPY_COST = '150000';
+  const RATE = '0.031';
+  const EXPECTED_COST_MINOR = '465000'; // MYR 4,650.00；旧解析给的是 46500000
+  const EXPECTED_PER_PERIOD = '116250'; // 4 期直线法，每期 MYR 1,162.50
+
+  it('books the base-currency cost the purchase-date rate actually gives', async () => {
+    currentUserId = ownerId;
+    const { id } = await createFixedAsset(org.slug, {
+      name: 'Tokyo lathe',
+      description: null,
+      purchaseDate: PURCHASE_DATE,
+      cost: JPY_COST,
+      originalCurrency: 'JPY',
+      originalCostMinor: JPY_COST,
+      exchangeRate: RATE,
+      salvageValue: '0',
+      usefulLifeMonths: 4,
+      method: 'straight_line',
+      decliningRateBps: null,
+      assetAccountId: org.accountsByCode.equipment,
+      depnExpenseAccountId: org.accountsByCode.depreciation,
+      depnAccumAccountId: org.accountsByCode['ad-equipment'],
+    });
+
+    const [asset] = await admin`
+      select cost_minor, original_cost_minor, original_currency, purchase_exchange_rate
+      from fixed_assets where id = ${id}
+    `;
+    expect(asset.cost_minor).toBe(EXPECTED_COST_MINOR);
+    // 原币金额同样按 JPY 的小数位读，不补两位。
+    expect(asset.original_cost_minor).toBe(JPY_COST);
+    expect(asset.original_currency).toBe('JPY');
+    expect(Number(asset.purchase_exchange_rate)).toBe(0.031);
+
+    // 排程是照 cost_minor 摊的，错一百倍会一路传下去，所以连着量。
+    const schedule = await admin`
+      select depreciation_minor from depreciation_schedules
+      where fixed_asset_id = ${id} order by period
+    `;
+    expect(schedule.map((row) => row.depreciation_minor)).toEqual(
+      Array(4).fill(EXPECTED_PER_PERIOD),
+    );
+
+    // 一路到分录：这才是用户最后在账上看到的数。
+    const { transactionId } = await postDepreciationAction(org.slug, id, PURCHASE_DATE);
+    expect(await linesFor(transactionId)).toEqual([
+      { code: 'depreciation', direction: 'debit', amount_minor: EXPECTED_PER_PERIOD, base_amount_minor: EXPECTED_PER_PERIOD },
+      { code: 'ad-equipment', direction: 'credit', amount_minor: EXPECTED_PER_PERIOD, base_amount_minor: EXPECTED_PER_PERIOD },
+    ]);
+  });
+
+  it('refuses a fraction the currency cannot express instead of truncating it', async () => {
+    currentUserId = ownerId;
+
+    const base = {
+      description: null,
+      purchaseDate: PURCHASE_DATE,
+      salvageValue: '0',
+      usefulLifeMonths: 4,
+      method: 'straight_line' as const,
+      decliningRateBps: null,
+      assetAccountId: org.accountsByCode.equipment,
+      depnExpenseAccountId: org.accountsByCode.depreciation,
+      depnAccumAccountId: org.accountsByCode['ad-equipment'],
+    };
+
+    // JPY 填了小数：旧解析读成 15000010 minor，用户看不出多了什么。
+    await expect(
+      createFixedAsset(org.slug, {
+        ...base,
+        name: 'Fractional yen',
+        cost: '150000.1',
+        originalCurrency: 'JPY',
+        originalCostMinor: '150000.1',
+        exchangeRate: RATE,
+      }),
+    ).rejects.toThrow(/decimal place/i);
+
+    // 本位币填了三位小数：旧解析 slice(0,2) 悄悄把 100.999 记成 100.99。
+    await expect(
+      createFixedAsset(org.slug, { ...base, name: 'Truncated ringgit', cost: '100.999' }),
+    ).rejects.toThrow(/decimal place/i);
+
+    const rows = await admin`
+      select id from fixed_assets
+      where organization_id = ${org.id} and name in ('Fractional yen', 'Truncated ringgit')
+    `;
+    expect(rows).toHaveLength(0);
+  });
+
+  // 原币不是本位币、却没带汇率时，这条路径以前落回「直接用 cost」那一支，
+  // 把一笔 JPY 的成本原样记成 MYR。与 resolveRate 拒绝回退 1:1 是同一条规矩。
+  it('refuses a foreign purchase currency with no rate rather than treating it as base', async () => {
+    currentUserId = ownerId;
+    await expect(
+      createFixedAsset(org.slug, {
+        name: 'Rateless yen',
+        description: null,
+        purchaseDate: PURCHASE_DATE,
+        cost: JPY_COST,
+        originalCurrency: 'JPY',
+        originalCostMinor: JPY_COST,
+        salvageValue: '0',
+        usefulLifeMonths: 4,
+        method: 'straight_line',
+        decliningRateBps: null,
+        assetAccountId: org.accountsByCode.equipment,
+        depnExpenseAccountId: org.accountsByCode.depreciation,
+        depnAccumAccountId: org.accountsByCode['ad-equipment'],
+      }),
+    ).rejects.toThrow(/rate on the purchase date/i);
+  });
+});
+
 describe('postDepreciationAction - an asset whose two accounts are the same', () => {
   // 任务 4 把「借贷不能是同一个科目」的断言放进了 templateFor，走进边界之后
   // 这种资产就会抛错，而不是像以前那样记一笔毫无意义的对冲分录。

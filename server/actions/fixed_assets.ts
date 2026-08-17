@@ -17,6 +17,7 @@ import {
 } from '@/server/repositories/fixed_assets';
 import { postJournal } from '@/server/posting/post-journal';
 import { parseRateToScaled, convertToBaseMinor } from '@/server/domain/exchange-rate';
+import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 
 const createFixedAssetSchema = z.object({
   name: z.string().min(1).max(200),
@@ -49,12 +50,26 @@ const updateFixedAssetSchema = z.object({
   depnAccumAccountId: z.string().uuid().optional(),
 });
 
-function parseMinor(value: string): bigint {
-  const cleaned = value.trim().replace(/,/g, '');
-  if (!/^\d+(\.\d+)?$/.test(cleaned)) throw new Error(`Invalid amount: ${value}`);
-  const [whole, fraction = ''] = cleaned.split('.');
-  const padded = fraction.padEnd(2, '0').slice(0, 2);
-  return BigInt(`${whole}${padded}`);
+/**
+ * 表单送来的十进制金额 -> 最小货币单位，小数位由币种决定。
+ *
+ * 这里原来有一个自己写的 parseMinor，无论币种一律 `padEnd(2,'0').slice(0,2)`。
+ * 两处都会出错：
+ *
+ * 1. 零小数币种被放大一百倍。JPY 没有分币（见 money.ts 的 ZERO_DECIMAL_CURRENCIES），
+ *    JPY 150000 应当就是 150000 minor；按两位解析成 15000000 minor 之后，
+ *    convertToBaseMinor 又按 fromExponent = 0 再乘一次 10^2 折算到 MYR——
+ *    0.031 的汇率下账面原值成了 MYR 465,000 而不是 MYR 4,650，并且这条资产
+ *    往后每一期折旧都照着这个数摊。购入币种下拉框列的就是 SUPPORTED_CURRENCIES，
+ *    JPY 与 VND 都在里面，从界面上点得到。
+ * 2. 多余的小数被静默截断。`.slice(0,2)` 把 100.999 变成 100.99，用户看到的
+ *    是保存成功，账上是另一个数——与本阶段要防的失败模式完全一致。
+ *    parseDecimalToMinor 遇到这种输入抛错，表单会把错误显示出来。
+ *
+ * 之所以要传币种：原币成本按原币的小数位解析，账面原值与残值按本位币的。
+ */
+function parseAmountMinor(value: string, currency: string): bigint {
+  return parseDecimalToMinor(value, currencyExponent(currency));
 }
 
 export async function createFixedAsset(
@@ -71,13 +86,25 @@ export async function createFixedAsset(
     let originalCostMinor: bigint | null = null;
     let purchaseExchangeRate: bigint | null = null;
 
-    if (parsed.originalCurrency && parsed.originalCurrency !== context.baseCurrency && parsed.exchangeRate) {
-      // 有原币且不同于基准币种，需要换算
+    if (parsed.originalCurrency && parsed.originalCurrency !== context.baseCurrency) {
+      // 有原币且不同于基准币种，需要换算。
+      //
+      // 汇率缺失时不能落回 else 那一支：那一支把 cost 当作本位币直接入账，
+      // 一笔 JPY 的成本会被原样记成 MYR。与 resolveRate 拒绝回退 1:1 同理，
+      // 宁可当场报错，也不写一个事后看不出来的数。
+      if (!parsed.exchangeRate) {
+        throw new Error(
+          `Enter the ${parsed.originalCurrency} to ${context.baseCurrency} rate on the purchase date.`,
+        );
+      }
       originalCurrency = parsed.originalCurrency;
-      originalCostMinor = parseMinor(parsed.originalCostMinor || parsed.cost);
+      originalCostMinor = parseAmountMinor(
+        parsed.originalCostMinor || parsed.cost,
+        originalCurrency,
+      );
       const scaledRate = parseRateToScaled(parsed.exchangeRate);
       purchaseExchangeRate = scaledRate;
-      
+
       costMinor = convertToBaseMinor({
         amountMinor: originalCostMinor,
         currency: originalCurrency,
@@ -86,7 +113,7 @@ export async function createFixedAsset(
       });
     } else {
       // 无原币或原币等于基准币种，直接用 cost
-      costMinor = parseMinor(parsed.cost);
+      costMinor = parseAmountMinor(parsed.cost, context.baseCurrency);
     }
 
     const { id } = await insertFixedAsset(tx, {
@@ -95,7 +122,9 @@ export async function createFixedAsset(
       description: parsed.description ?? null,
       purchaseDate: parsed.purchaseDate,
       costMinor,
-      salvageValueMinor: parseMinor(parsed.salvageValue),
+      // 残值与账面原值同为本位币：表单上这一栏的标签写的就是本位币
+      // （见 components/fixed-assets/asset-form.tsx），排程表也按本位币摊。
+      salvageValueMinor: parseAmountMinor(parsed.salvageValue, context.baseCurrency),
       usefulLifeMonths: parsed.usefulLifeMonths,
       method: parsed.method as DepreciationMethod,
       decliningRateBps: parsed.decliningRateBps ?? null,
@@ -138,8 +167,14 @@ export async function updateFixedAssetAction(
     if (parsed.name !== undefined) updates.name = parsed.name;
     if (parsed.description !== undefined) updates.description = parsed.description;
     if (parsed.purchaseDate !== undefined) updates.purchaseDate = parsed.purchaseDate;
-    if (parsed.cost !== undefined) updates.costMinor = parseMinor(parsed.cost);
-    if (parsed.salvageValue !== undefined) updates.salvageValueMinor = parseMinor(parsed.salvageValue);
+    // 编辑表单没有币种字段：cost 改的是 fixed_assets.cost_minor，那一列存的
+    // 是本位币账面原值（原币三个字段只作购入留痕，见 0011 迁移）。
+    if (parsed.cost !== undefined) {
+      updates.costMinor = parseAmountMinor(parsed.cost, context.baseCurrency);
+    }
+    if (parsed.salvageValue !== undefined) {
+      updates.salvageValueMinor = parseAmountMinor(parsed.salvageValue, context.baseCurrency);
+    }
     if (parsed.usefulLifeMonths !== undefined) updates.usefulLifeMonths = parsed.usefulLifeMonths;
     if (parsed.method !== undefined) updates.method = parsed.method as DepreciationMethod;
     if (parsed.decliningRateBps !== undefined) updates.decliningRateBps = parsed.decliningRateBps;

@@ -1,4 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
+import { formatScaledRate } from '@/server/domain/exchange-rate';
 
 export type DepreciationMethod = 'straight_line' | 'declining_balance';
 
@@ -137,6 +138,12 @@ export async function getFixedAsset(
   return row ? mapAsset(row) : null;
 }
 
+/**
+ * purchase_exchange_rate 是 numeric(20,8)，而应用内部用放大 10^8 的 bigint。
+ * 这里原样 toString() 会把 0.031 写成 3100000——留痕栏记下的汇率大一亿倍，
+ * 而它只作留痕、今天没有任何页面读它，所以谁也不会发现。与 insertTransaction
+ * 写 exchange_rate 那一列同样走 formatScaledRate，全程不经 Number。
+ */
 export async function insertFixedAsset(
   tx: Tx,
   row: {
@@ -180,7 +187,7 @@ export async function insertFixedAsset(
       ${row.depnAccumAccountId},
       ${row.originalCurrency ?? null},
       ${row.originalCostMinor ? row.originalCostMinor.toString() : null},
-      ${row.purchaseExchangeRate ? row.purchaseExchangeRate.toString() : null}
+      ${row.purchaseExchangeRate ? formatScaledRate(row.purchaseExchangeRate) : null}
     )
     returning id
   `;
