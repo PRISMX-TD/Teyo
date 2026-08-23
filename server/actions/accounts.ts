@@ -25,6 +25,35 @@ function normaliseNames(input: { nameEn?: string; nameZh?: string }) {
   };
 }
 
+/**
+ * 科目改动会影响的每一个页面。
+ *
+ * 与分类同一个问题：之前只刷新科目设置页，而消费科目列表的页面有十三个。
+ * 一个人新建了银行账户，回到「记一笔」却在账户下拉里找不到它——资金账户
+ * 恰恰是新用户最早要建的东西，所以这是最容易被撞上的那一个。
+ *
+ * 动态路由要带 'page' 参数按路由刷新，因为这里不可能知道是哪一条记录。
+ */
+function revalidateAccountConsumers(orgSlug: string): void {
+  for (const path of [
+    `/${orgSlug}/settings/accounts`,
+    `/${orgSlug}/settings/categories`,
+    `/${orgSlug}/settings/inventory`,
+    `/${orgSlug}/settings/recurring`,
+    `/${orgSlug}/transactions`,
+    `/${orgSlug}/transactions/new`,
+    `/${orgSlug}/transactions/journal`,
+    `/${orgSlug}/general-ledger`,
+    `/${orgSlug}/reconciliation`,
+    `/${orgSlug}/bank-import`,
+    `/${orgSlug}/fixed-assets`,
+    `/${orgSlug}/fixed-assets/new`,
+  ]) {
+    revalidatePath(path);
+  }
+  revalidatePath(`/${orgSlug}/transactions/[id]`, 'page');
+}
+
 export async function createMoneyAccount(
   orgSlug: string,
   input: { nameEn?: string; nameZh?: string },
@@ -64,7 +93,7 @@ export async function createMoneyAccount(
     return { id };
   });
 
-  revalidatePath(`/${orgSlug}/settings/accounts`);
+  revalidateAccountConsumers(orgSlug);
   return result;
 }
 
@@ -110,7 +139,7 @@ export async function createAccount(
     return { id };
   });
 
-  revalidatePath(`/${orgSlug}/settings/accounts`);
+  revalidateAccountConsumers(orgSlug);
   return result;
 }
 
@@ -137,7 +166,7 @@ export async function renameAccount(
     });
   });
 
-  revalidatePath(`/${orgSlug}/settings/accounts`);
+  revalidateAccountConsumers(orgSlug);
 }
 
 /**
@@ -179,5 +208,5 @@ export async function setAccountActive(
     });
   });
 
-  revalidatePath(`/${orgSlug}/settings/accounts`);
+  revalidateAccountConsumers(orgSlug);
 }
