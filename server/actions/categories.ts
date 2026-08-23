@@ -15,6 +15,25 @@ import {
   updateCategoryNames,
 } from '@/server/repositories/categories';
 
+/**
+ * 分类改动会影响的每一个页面。
+ *
+ * 之前这里只刷新分类设置页本身，于是新增一个分类后，设置页立刻能看到它，
+ * 录入页的下拉却还是旧的——用户加完分类回去记账，发现自己刚建的分类不在
+ * 选项里，只能猜是不是没保存成功，然后重复添加。设置页是唯一一个「加完
+ * 之后不会再去看」的页面，却是唯一被刷新的。
+ *
+ * 交易详情页是动态路由，必须带 'page' 参数按路由而不是按具体 URL 刷新，
+ * 否则要刷新哪条交易的 id 这里根本不知道。
+ */
+function revalidateCategoryConsumers(orgSlug: string): void {
+  revalidatePath(`/${orgSlug}/settings/categories`);
+  revalidatePath(`/${orgSlug}/transactions/new`);
+  revalidatePath(`/${orgSlug}/transactions`);
+  revalidatePath(`/${orgSlug}/transactions/[id]`, 'page');
+  revalidatePath(`/${orgSlug}/settings/recurring`);
+}
+
 export async function createCategory(
   orgSlug: string,
   input: { nameEn?: string; nameZh?: string; kind: 'income' | 'expense'; accountId: string },
@@ -94,7 +113,7 @@ async function createCategoryChecked(
     return { id };
   });
 
-  revalidatePath(`/${orgSlug}/settings/categories`);
+  revalidateCategoryConsumers(orgSlug);
   return result;
 }
 
@@ -125,7 +144,7 @@ export async function renameCategory(
     });
   });
 
-  revalidatePath(`/${orgSlug}/settings/categories`);
+  revalidateCategoryConsumers(orgSlug);
 }
 
 export async function setCategoryActive(
@@ -150,5 +169,5 @@ export async function setCategoryActive(
     });
   });
 
-  revalidatePath(`/${orgSlug}/settings/categories`);
+  revalidateCategoryConsumers(orgSlug);
 }
