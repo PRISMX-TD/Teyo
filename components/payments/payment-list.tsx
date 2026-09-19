@@ -8,6 +8,11 @@ import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { PaymentRow } from '@/server/repositories/payments';
 import { voidPaymentAction } from '@/server/actions/payments';
+import {
+  PrepaymentApplyDialog,
+  type OpenPrepaymentView,
+  type OutstandingDocumentView,
+} from '@/components/payments/prepayment-apply-dialog';
 
 type Props = {
   orgSlug: string;
@@ -15,6 +20,13 @@ type Props = {
   i18n: Messages;
   payments: PaymentRow[];
   contacts: { id: string; name: string }[];
+  /**
+   * 还挂着钱的预收/预付款。可选，缺省为空——传不传由页面决定，这个组件
+   * 不该因为少一个 prop 就崩掉（收付款列表在别处也被复用过）。
+   */
+  openPrepayments?: OpenPrepaymentView[];
+  /** 可供核销的未结单据（发票 + 账单），对话框里按往来对象与币种再过滤。 */
+  outstandingDocuments?: OutstandingDocumentView[];
 };
 
 const METHOD_LABELS: Record<string, string> = {
@@ -25,7 +37,15 @@ const METHOD_LABELS: Record<string, string> = {
   other: 'Other',
 };
 
-export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props) {
+export function PaymentList({
+  orgSlug,
+  locale,
+  i18n,
+  payments,
+  contacts,
+  openPrepayments,
+  outstandingDocuments,
+}: Props) {
   const t = getMessages(locale);
   const router = useRouter();
 
@@ -34,6 +54,11 @@ export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props
   const [error, setError] = useState<string | null>(null);
   // 只禁用被点的那一行，不锁整张表。
   const [pendingId, setPendingId] = useState<string | null>(null);
+  /** 正在核销的那一笔预收款；null 表示对话框关着。 */
+  const [applying, setApplying] = useState<OpenPrepaymentView | null>(null);
+
+  const prepayments = openPrepayments ?? [];
+  const documents = outstandingDocuments ?? [];
 
   const filtered = payments.filter((p) => {
     if (typeFilter !== 'all' && p.type !== typeFilter) return false;
@@ -80,6 +105,67 @@ export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props
         <p role="alert" className="form-error">
           {error}
         </p>
+      ) : null}
+
+      {/*
+        挂账的款项单独成一块，不是表里的一列。
+
+        理由是它要回答的问题不一样：收付款表回答「这段时间收付了哪些钱」，
+        而这一块回答「哪几笔钱还悬在半空、我现在能拿它去冲哪张单」。后者
+        是一份待办，混进一张按日期排的流水表里就看不见了——而看不见正是
+        预收款最大的风险：一笔一年前的定金没人记得核销，预收账款就一直
+        虚高，客户也一直显示欠款。
+      */}
+      {prepayments.length > 0 ? (
+        <section className="pp-open-list">
+          <h2>{i18n.payments.openPrepayments}</h2>
+          <p className="field-hint">{i18n.payments.openPrepaymentsHint}</p>
+          <ul>
+            {prepayments.map((prepayment) => (
+              <li key={prepayment.id}>
+                <span>
+                  {prepayment.paymentDate} · {prepayment.contactName} ·{' '}
+                  <span
+                    className={
+                      prepayment.type === 'received'
+                        ? 'badge badge-success'
+                        : 'badge badge-danger'
+                    }
+                  >
+                    {prepayment.type === 'received' ? i18n.payments.received : i18n.payments.made}
+                  </span>
+                </span>
+                <strong className="mono">
+                  {formatMoney(prepayment.unappliedMinor, prepayment.currency)}
+                </strong>
+                <button
+                  type="button"
+                  className="btn-small"
+                  onClick={() => setApplying(prepayment)}
+                >
+                  {i18n.payments.apply}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
+
+      {applying ? (
+        <PrepaymentApplyDialog
+          orgSlug={orgSlug}
+          locale={locale}
+          i18n={i18n}
+          payment={applying}
+          documents={documents}
+          onClose={() => setApplying(null)}
+          onApplied={() => {
+            setApplying(null);
+            // 核销改了三处：预收余额、单据状态、总账。整页刷新最省事，
+            // 也最不容易漏——手工改本地 state 只会让这三处各自漂移。
+            router.refresh();
+          }}
+        />
       ) : null}
 
       <div className="filters">

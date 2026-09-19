@@ -193,6 +193,11 @@ const en = {
     statusActive: 'Active',
     statusInvited: 'Invited',
     statusSuspended: 'Suspended',
+    inviteLinkTitle: 'Invitation link for {email}',
+    inviteLinkHint: 'We do not send the email for you — copy this link and send it to them yourself (WhatsApp, email, however you normally reach them).',
+    inviteLinkOnce: 'This link is shown once. If you lose it, revoke the invitation and send a new one.',
+    copyLink: 'Copy link',
+    copied: 'Copied',
   },
   invite: {
     title: 'You have been invited',
@@ -249,6 +254,61 @@ const en = {
     phone: 'Phone',
     address: 'Address',
     notes: 'Notes',
+    yearEnd: 'Year-end closing',
+    fiscalYearStart: 'Financial year starts in',
+    fiscalYearStartHint:
+      'Your reports, your general ledger and the year-end closing all use this month as the start of the year. Most companies use January, but yours may not.',
+    month1: 'January',
+    month2: 'February',
+    month3: 'March',
+    month4: 'April',
+    month5: 'May',
+    month6: 'June',
+    month7: 'July',
+    month8: 'August',
+    month9: 'September',
+    month10: 'October',
+    month11: 'November',
+    month12: 'December',
+  },
+  yearEnd: {
+    closingEntry: 'Year-end closing',
+    title: 'Year-end closing',
+    intro:
+      'At the end of a financial year, the profit or loss for that year is moved into Retained Earnings. Until you do this, last year’s profit has nowhere to sit on the balance sheet, and the balance sheet will stop adding up once a second year begins.',
+    periodTitle: 'Which year',
+    targetYear: 'Year waiting to be closed',
+    currentYear: 'Current financial year',
+    netIncome: 'Profit for that year',
+    changeFiscalYear: 'Change when your financial year starts',
+    previewTitle: 'What will be recorded',
+    previewHint:
+      'This entry will be dated {date}, the last day of that financial year. Check every line before you continue.',
+    confirmWarning:
+      'This changes your reports permanently. The profit for that year moves out of “current year earnings” and into Retained Earnings. You can undo it, but the undo is recorded too.',
+    confirmPrompt: 'Record this year-end closing entry?',
+    closeButton: 'Record the closing entry',
+    closing: 'Recording…',
+    notEndedYet: 'This financial year has not ended yet. It runs to {end}.',
+    lockedBlocks:
+      'Your books are locked through {date}, which covers the day this entry would be dated. Remove the lock first, then close the year.',
+    postingUnavailable:
+      'Recording the closing entry is not switched on yet in this build. Everything above is a preview only.',
+    alreadyClosedTitle: 'Already closed',
+    alreadyClosed: 'The year {start} to {end} was closed with a profit of {amount}.',
+    lockSuggestion:
+      'Now is a good moment to lock the books through the last day of that year, so nobody changes a figure you have already reported. Locking stays a separate, deliberate step — closing the year does not lock it for you.',
+    goToLock: 'Go to the lock setting',
+    historyTitle: 'Closings so far',
+    historyEmpty: 'No year has been closed yet.',
+    period: 'Year',
+    closedBy: 'Closed by',
+    entry: 'Entry',
+    viewEntry: 'View entry',
+    entryVoided: 'Voided',
+    undoButton: 'Undo',
+    undoReasonPrompt:
+      'Why are you undoing this year-end closing? This is kept with the voided entry.',
   },
   audit: {
     title: 'Activity log',
@@ -333,6 +393,7 @@ const en = {
     ownersDraw_cf: "Owner's Draw",
     unclassified_cf: 'Unclassified movement',
     unclassifiedHint_cf: 'This amount comes from accounts not yet classified for cash flow. Ask your accountant to categorise these accounts.',
+    periodRange: '{from} to {to}',
   },
   account: {
     title: 'My account',
@@ -668,10 +729,30 @@ const en = {
     settlementRequiredBills: 'Tick at least one bill below. A payment has to say which bill it settles.',
     noOutstandingInvoices: 'Nothing unpaid for this customer in {currency}. A payment can only settle an invoice in the same currency.',
     noOutstandingBills: 'Nothing unpaid for this vendor in {currency}. A payment can only settle a bill in the same currency.',
-    prepaymentUnsupported: 'Money received before there is an invoice cannot be recorded here yet.',
     appliedTotal: 'Applied to documents',
     overApplied: 'You have applied more than the payment itself: {applied} against {amount}.',
     actions: 'Actions',
+    amountRequired: 'Enter how much this payment was for.',
+    // 预收 / 预付
+    onAccount: 'Leave on account for now',
+    onAccountHintReceived:
+      'Money received before you have raised an invoice is held under Customer Deposits — that is money you owe the customer until you deliver, not income. Apply it to an invoice later.',
+    onAccountHintMade:
+      'Money paid before the supplier has billed you is held under Supplier Deposits — that is something the supplier owes you, not an expense yet. Apply it to a bill later.',
+    onAccountAmount: 'Held on account: {amount}',
+    unapplied: 'On account',
+    apply: 'Apply',
+    applyTitle: 'Apply money on account',
+    applyAvailable: 'Available to apply: {amount}',
+    applyDate: 'Date applied',
+    applySubmit: 'Apply',
+    applyNothingSelected: 'Tick at least one document to apply this money to.',
+    applyOverBalance: 'This payment only has {balance} left on account, but {applied} was entered.',
+    applyNoDocuments: 'Nothing unpaid for this contact in {currency}.',
+    openPrepayments: 'Money on account',
+    openPrepaymentsEmpty: 'Nothing sitting on account.',
+    openPrepaymentsHint:
+      'Deposits and advances that have no document yet. Apply one to an invoice or bill once it exists.',
   },
   creditNotes: {
     title: 'Credit Notes',
@@ -776,6 +857,17 @@ const en = {
     dateFormatMdy: 'Month first — 03/31/2026',
     dateFormatHint:
       'Leave this on automatic. We only ask when the file itself cannot tell us — a file where every day is 12 or below reads the same either way. Most Malaysian banks put the day first.',
+    // 从对账单行直接生成交易
+    category: 'Category',
+    categoryPrompt: 'Pick a category',
+    createTransaction: 'Record',
+    createSelected: 'Record ticked lines ({count})',
+    createNone: 'Tick a line and pick a category for it first.',
+    createHint:
+      'A line with a positive amount becomes money in, a negative one money out. It is recorded against the account you chose when you imported this statement.',
+    createdCount: 'Recorded {created} line(s). {skipped} were already handled.',
+    createFailed: 'Those lines could not be recorded.',
+    selectLine: 'Record this line',
   },
 } as const;
 

@@ -1,5 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
-import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
+import { LedgerError, type UserEntryKind } from '@/server/domain/ledger';
 import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
 
 /**
@@ -33,7 +33,7 @@ export function normaliseRecurringAmount(amount: string, currency: string): stri
 export type RecurringTransactionRow = {
   id: string;
   organizationId: string;
-  kind: TransactionKind;
+  kind: UserEntryKind;
   description: string | null;
   amount: string;
   currency: string;
@@ -61,7 +61,7 @@ function mapRecurring(row: Record<string, unknown>): RecurringTransactionRow {
   return {
     id: row.id as string,
     organizationId: row.organization_id as string,
-    kind: row.kind as TransactionKind,
+    kind: row.kind as UserEntryKind,
     description: (row.description as string | null) ?? null,
     amount: row.amount as string,
     currency: row.currency as string,
@@ -98,7 +98,7 @@ export async function insertRecurring(
   tx: Tx,
   row: {
     organizationId: string;
-    kind: TransactionKind;
+    kind: UserEntryKind;
     description: string | null;
     amount: string;
     currency: string;

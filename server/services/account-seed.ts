@@ -59,6 +59,10 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   // prepaid-expenses 同 AR/inventory：server/repositories/reports.ts 已把
   // -netFlow('prepaid-expenses') 计入 operatingTotal，是营运资金调整项。
   { code: 'prepaid-expenses', nameEn: 'Prepaid Expenses', nameZh: '预付费用', type: 'asset', isMoneyAccount: false, sortOrder: 90, cashFlowCategory: 'operating' },
+  // supplier-deposits 与 prepaid-expenses 分开：后者是「已知用途、按期摊销」
+  // （预付一年的租金、保险），这个是「钱付出去了，单据还没来」。混在一起
+  // 的话，月末要摊销多少就算不出来了。
+  { code: 'supplier-deposits', nameEn: 'Supplier Deposits', nameZh: '预付账款', type: 'asset', isMoneyAccount: false, sortOrder: 92, cashFlowCategory: 'operating' },
   // suspense：用户不确定一笔钱属于什么时的合法去处。账依然配平，该笔挂在
   // 「待确认」队列里直到有人处理。cash_flow_category 留空：它不是现金的
   // 最终去向，只是暂存，不是资金账户本身也不该被归入现金流量表的任何一类。
@@ -68,10 +72,16 @@ export const SEED_ACCOUNTS: readonly SeedAccount[] = [
   { code: 'loans', nameEn: 'Loans', nameZh: '贷款', type: 'liability', isMoneyAccount: false, sortOrder: 120, cashFlowCategory: 'financing' },
   { code: 'tax-payable', nameEn: 'Tax Payable', nameZh: '待缴税款', type: 'liability', isMoneyAccount: false, sortOrder: 130, cashFlowCategory: 'operating' },
   { code: 'deferred-revenue', nameEn: 'Deferred Revenue', nameZh: '递延收入', type: 'liability', isMoneyAccount: false, sortOrder: 140, cashFlowCategory: 'operating' },
+  // 收了定金但还没开票：钱是你的，货或服务还没交付，所以它是欠客户的一笔
+  // 债，不是收入。与 deferred-revenue（递延收入）分开：后者是已经开了票、
+  // 按期确认收入的那种；这个是连单据都还没有。
+  { code: 'customer-deposits', nameEn: 'Customer Deposits', nameZh: '预收账款', type: 'liability', isMoneyAccount: false, sortOrder: 145, cashFlowCategory: 'operating' },
   // 权益
   { code: 'capital', nameEn: 'Capital', nameZh: '股本', type: 'equity', isMoneyAccount: false, sortOrder: 210, cashFlowCategory: 'financing' },
-  // retained-earnings 留空：server/ 下没有任何地方对它过账（净利润结转不是
-  // 一笔现金分录的对方科目），因此它从不是现金移动的对方科目，没有可分类的行为。
+  // retained-earnings 的 cash_flow_category 留空：年结分录会对它过账
+  // （借各收入科目 / 贷各费用科目，差额进留存收益），但那笔分录里一分现金
+  // 都没动——它只是把损益类科目的余额挪个位置。给它分类会让现金流量表把
+  // 一笔纯账面结转当成现金变动。
   { code: 'retained-earnings', nameEn: 'Retained Earnings', nameZh: '留存收益', type: 'equity', isMoneyAccount: false, sortOrder: 220 },
   { code: 'owners-draw', nameEn: "Owner's Draw", nameZh: '股东提取', type: 'equity', isMoneyAccount: false, sortOrder: 230, cashFlowCategory: 'financing' },
   // 收入
@@ -124,6 +134,9 @@ export const POSTING_ACCOUNT_CODES = {
   cogs: 'cogs',
   fxGain: 'fx-gain',
   fxLoss: 'fx-loss',
+  retainedEarnings: 'retained-earnings',
+  customerDeposits: 'customer-deposits',
+  supplierDeposits: 'supplier-deposits',
 } as const;
 
 export const SEED_CATEGORIES: readonly SeedCategory[] = [

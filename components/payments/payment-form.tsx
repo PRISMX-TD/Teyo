@@ -209,32 +209,54 @@ export function PaymentForm({
   const overApplied = amount.trim() !== '' && enteredMinor > 0n && appliedMinor > enteredMinor;
 
   /**
-   * 一张单据都没勾 = 必然失败。
+   * 一张单据都没勾，不再是错误。
    *
-   * 原来这里在没勾选时送的是 `[{ invoiceId: null, billId: null, amount }]`，
-   * 而 payment_items 上有 `payment_items_one_target` CHECK，要求
-   * invoice_id / bill_id **恰好一个非空**（0009）。也就是说「记一笔不核销
-   * 任何单据的预收」这个操作今天必然撞一条裸的 Postgres 约束报错——
-   * 一句用户读不懂、也修不了的话。
+   * 这里原来会挡下提交并说「一笔收款必须说明它核销的是哪一张」——那是
+   * 承认做不到，不是做到了：payment_items 上的 payment_items_one_target
+   * 当时要求 invoice_id / bill_id **恰好一个非空**（0009），一笔不核销任何
+   * 单据的预收在数据库层面就插不进去。
    *
-   * 服务端现在会先抛一句人话（pickDocumentId 里那两条），但更早挡在这里
-   * 才不用等一个来回。要真正支持预收（收到定金时还没有发票），得先放宽
-   * 那条 CHECK 并给预收一个对应的负债科目——数据库改动，不在本轮范围，
-   * 已在报告里记下。
+   * 0024 把那条 CHECK 放宽成「至多一个非空」，服务端也有了去处（预收账款 /
+   * 预付账款，见 server/services/prepayment.ts），所以这条路现在是通的：
+   * 没勾单据 = 这笔钱先挂账。表单要做的只剩两件事——把「它会挂在哪里」
+   * 说清楚，以及在没有核销明细时要求用户自己填金额（否则送出去的是
+   * 核销合计 0，服务端必然拒）。
    */
   const settlementMissing = selectedItems.length === 0;
-  const settlementMessage =
-    paymentType === 'received' ? i18n.payments.settlementRequired : i18n.payments.settlementRequiredBills;
+
+  /**
+   * 会挂到预收/预付上的那一截 = 填的金额 − 已核销合计。
+   *
+   * 金额栏留空时恒为零（留空的含义就是「这笔款正好等于核销合计」）。
+   * 全程 bigint：这个数要显示给用户看，而它和服务端算出来的必须是同一个。
+   */
+  const enteredMinorForHint = amount.trim() === '' ? appliedMinor : minorOrZero(amount, exponent);
+  const onAccountMinor =
+    enteredMinorForHint > appliedMinor ? enteredMinorForHint - appliedMinor : 0n;
+
+  const onAccountHint =
+    paymentType === 'received'
+      ? i18n.payments.onAccountHintReceived
+      : i18n.payments.onAccountHintMade;
 
   const candidates = paymentType === 'received' ? unpaidInvoices : unpaidBills;
   const noCandidates = candidates.length === 0;
+
+  /**
+   * 一张单据都没勾时，金额栏就是这笔钱的唯一来源，不能留空。
+   *
+   * 留空的含义是「按核销合计记」，而核销合计此时是零——服务端会拒
+   * （「Transaction amount must be greater than zero.」）。挡在这里才不用
+   * 等一个来回，而且说得出是哪一栏的事。
+   */
+  const amountMissing = appliedMinor === 0n && minorOrZero(amount, exponent) <= 0n;
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setSubmitted(true);
 
-    if (settlementMissing) {
-      setError(settlementMessage);
+    if (amountMissing) {
+      setError(i18n.payments.amountRequired);
       return;
     }
     if (overApplied) {
@@ -359,7 +381,10 @@ export function PaymentForm({
         onChange={(e) => setAmount(e.target.value)}
         placeholder={appliedMinor > 0n ? appliedDecimal : ''}
         aria-describedby="amountHint"
-        aria-invalid={overApplied ? true : undefined}
+        // 两种无效：核销超额，以及「一张单据都没勾却也没填金额」。后者
+        // 只在用户按过提交之后才标红——打字打到一半就把输入框标成错误，
+        // 说的是一件还没发生的事。
+        aria-invalid={overApplied || (submitted && amountMissing) ? true : undefined}
       />
       {/* 已核销合计一直显示，不只在出错时才出现：用户需要在按下提交之前
           就看得出「我勾的这几张加起来是多少」，否则超额这件事只能靠服务端
@@ -435,12 +460,7 @@ export function PaymentForm({
         onChange={(e) => setReference(e.target.value)}
       />
 
-      <fieldset
-        // aria-invalid 挂在 fieldset 上而不是某个复选框上：无效的不是
-        // 哪一个勾选框，而是「一个都没勾」这件事，它属于整组。
-        aria-invalid={submitted && settlementMissing ? true : undefined}
-        aria-describedby="settlementHint"
-      >
+      <fieldset aria-describedby="settlementHint">
         <legend>
           {paymentType === 'received' ? i18n.payments.applyToInvoices : i18n.payments.applyToBills}
         </legend>
@@ -453,8 +473,6 @@ export function PaymentForm({
                 : i18n.payments.noOutstandingBills,
               { currency },
             )}
-            {' '}
-            {i18n.payments.prepaymentUnsupported}
           </p>
         ) : (
           <>
@@ -525,10 +543,30 @@ export function PaymentForm({
                 })}
 
             <p className="field-hint" id="settlementHint" role="status">
-              {settlementMissing ? settlementMessage : null}
+              {settlementMissing ? i18n.payments.onAccount : null}
             </p>
           </>
         )}
+
+        {/*
+          挂账说明。只在真的会挂账时出现——一笔全额核销的收款不该被一段
+          关于预收账款的解释打扰。
+
+          说的是「这笔钱会去哪个科目、为什么是那里」，而不是「已挂账」：
+          一个不懂会计的店主看到「预收账款」四个字大概率不知道那是负债，
+          而「在交货之前那是你欠客户的，不是收入」他一读就懂——这正是这
+          条提示存在的理由。
+        */}
+        {onAccountMinor > 0n ? (
+          <p className="pp-on-account" role="status">
+            <strong>
+              {interpolate(i18n.payments.onAccountAmount, {
+                amount: formatMoney(onAccountMinor, currency),
+              })}
+            </strong>
+            <span className="field-hint">{onAccountHint}</span>
+          </p>
+        ) : null}
       </fieldset>
 
       <label htmlFor="notes">{i18n.invoices.notes}</label>
@@ -547,11 +585,11 @@ export function PaymentForm({
       ) : null}
 
       <div className="form-actions">
-        {/* 没有可核销的单据时禁用提交：这一步一定失败，而失败的原因
-            （数据库要求恰好一个核销目标）不是用户在这个页面上解决得了的。
-            有单据可勾时不禁用——那时要的是把「你还没勾」说出来，
-            一个灰掉的按钮说不出任何理由。 */}
-        <button type="submit" disabled={pending || noCandidates}>
+        {/* 不再因为「没有可核销的单据」而禁用。那条判断成立的前提是
+            「一笔不核销任何单据的收款必然失败」——0024 之后它不再成立：
+            那样的一笔钱会挂在预收/预付账款上，这正是定金该有的记法。
+            一个灰掉的按钮说不出任何理由，而现在它也没有理由可说。 */}
+        <button type="submit" disabled={pending}>
           {pending ? t.common.loading : i18n.payments.save}
         </button>
       </div>

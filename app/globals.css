@@ -882,6 +882,16 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .add-form select, .add-form textarea,
 .invite-form input:not([type='checkbox']):not([type='radio']),
 .invite-form select { width: 100%; min-width: 0; }
+
+/* 刚生成的邀请链接。产品不发邮件，链接由邀请人自己转给对方——所以这一块
+   必须显眼、可全选、可一键复制，而且要说清楚它只出现这一次（库里只存
+   token 的哈希，关掉就再也拿不回来）。 */
+.invite-link { margin-top: var(--space-4); padding: var(--space-3); border: 1px solid var(--border-primary); border-radius: var(--radius-md); background: var(--bg-elevated); }
+.invite-link-title { margin: 0 0 var(--space-1); font-weight: 600; }
+.invite-link-hint { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--text-secondary); }
+.invite-link-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.invite-link-row input { flex: 1 1 18rem; min-width: 0; font-family: var(--font-mono); font-size: var(--text-xs); }
+.invite-link-once { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--text-tertiary); }
 .add-form > h3, .invite-form > h3 {
   grid-column: 1 / -1;
   font-size: var(--text-sm); font-weight: 600; color: var(--text-primary);
@@ -1430,6 +1440,124 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
      `button:not(.text-button)` 的全局兜底够不着它。 */
   .doc-actions a.btn-small { min-height: 44px !important; }
   .doc-lifecycle__steps { gap: var(--space-1); }
+}
+
+/* ==========================================================================
+   Year-end closing（设置 → 年度结转）
+   ==========================================================================
+   前缀统一用 ye-，与 .doc- / .coa- / .ye- 这一套按功能区分段的写法一致。
+   这一页只有 owner 看得到，内容是「一段说明 + 一张预览分录表 + 历史」，
+   所以样式全部围绕「读得清楚」而不是「排得漂亮」：一个会永久改变报表
+   数字的确认界面，密度高一点也好过让用户漏看一行。 */
+
+.ye-panel { display: flex; flex-direction: column; gap: var(--space-8); }
+.ye-intro { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; max-width: 70ch; }
+.ye-section > h2 { font-size: var(--text-xl); margin-bottom: var(--space-4); }
+
+/* 起止日期与净利润三行事实。沿用 .record-detail 的两列网格观感，但这里
+   只有三行，不值得为它引一整套定义列表样式。 */
+.ye-facts {
+  display: grid; grid-template-columns: minmax(140px, 220px) 1fr;
+  background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md); overflow: hidden; margin-bottom: var(--space-3);
+}
+.ye-facts dt, .ye-facts dd {
+  padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-primary);
+  font-size: var(--text-sm);
+}
+.ye-facts dt {
+  color: var(--text-tertiary); background: var(--bg-tertiary);
+  border-right: 1px solid var(--border-primary);
+  font-size: var(--text-xs); letter-spacing: 0.03em; text-transform: uppercase;
+}
+.ye-facts dd { margin: 0; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ye-facts dt:first-of-type, .ye-facts dt:first-of-type + dd { border-top: none; }
+.ye-facts dd.ye-amount { font-family: var(--font-mono); font-weight: 600; }
+
+/* 留存收益那一行是这张预览表的结论——被冲平的损益科目是过程，它才是
+   「这一年赚了多少、进了哪里」。加一条上边框和一点底色，让它在十几行
+   科目里一眼可辨；不用颜色区分盈亏，盈亏由借贷两列自己表达。 */
+.ye-preview tbody tr.ye-line-retained td {
+  border-top: 2px solid var(--border-secondary);
+  background: var(--bg-tertiary); font-weight: 600;
+}
+
+/* 挡住结转的原因（财年没结束、已封账、功能未开通）。不是错误，是状态，
+   所以用中性底色而不是 .form-error 的红色——红色会让用户以为自己做错了
+   什么，而这几条说的是「现在还不到时候」。 */
+.ye-blocked {
+  margin-top: var(--space-4); padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm); color: var(--text-secondary);
+  background: var(--bg-tertiary); border: 1px solid var(--border-primary);
+  border-left: 3px solid var(--border-secondary); border-radius: var(--radius-sm);
+}
+
+/* 这一条必须比上面几条更显眼：它说的是「点下去之后会永久改变你的报表」。 */
+.ye-warning {
+  margin: var(--space-5) 0 var(--space-4); padding: var(--space-4);
+  font-size: var(--text-sm); color: var(--text-primary); line-height: 1.6;
+  background: var(--amber-subtle);
+  border: 1px solid var(--border-primary); border-left: 3px solid var(--amber);
+  border-radius: var(--radius-sm); max-width: 70ch;
+}
+
+@media (max-width: 767px) {
+  /* 窄屏下两列网格会把日期挤成两行。事实列表改成单列堆叠，标签在上。 */
+  .ye-facts { grid-template-columns: 1fr; }
+  .ye-facts dt { border-right: none; }
+  .ye-facts dt + dd { border-top: none; }
+}
+
+/* ==========================================================================
+   Prepayments & bank-import posting（pp- 前缀）
+   ========================================================================== */
+
+/* 收付款表单里那段「这笔钱会挂在哪」的说明。
+   做成一个有边框的块而不是一行灰色小字：它陈述的是一个**会计后果**
+   （这笔钱进了负债科目，不是收入），用户至少该看见一次。 */
+.pp-on-account {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  margin-top: var(--space-4); padding: var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary); border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.pp-on-account .field-hint { margin: 0; }
+
+/* 收付款列表顶上那块「挂账的款项」。它是一份待办，不是流水，所以不进表。 */
+.pp-open-list { margin-bottom: var(--space-6); }
+.pp-open-list ul { list-style: none; margin: var(--space-3) 0 0; padding: 0; }
+.pp-open-list li {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-primary); border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.pp-open-list li + li { margin-top: var(--space-2); }
+/* 金额靠右、按钮再靠右：一行里最先要读的是「谁、多少」，最后才是动作。 */
+.pp-open-list li strong { margin-left: auto; }
+
+/* 核销对话框里那行可用余额。它是这个对话框唯一的硬约束，要显眼。 */
+.pp-apply-balance {
+  margin: var(--space-2) 0 0; font-weight: 600; font-size: var(--text-sm);
+}
+
+/* 银行导入页顶上那条批量操作栏。 */
+.pp-import-batch {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  margin: var(--space-4) 0; padding: var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary); border-radius: var(--radius-sm);
+}
+.pp-import-batch button { align-self: flex-start; }
+.pp-import-batch p { margin: 0; }
+
+@media (max-width: 767px) {
+  /* 窄屏上金额不再靠右浮到天边：一行挤成三段之后 margin-left:auto 会把
+     按钮推到下一行的最右侧，离它要操作的那笔钱最远。 */
+  .pp-open-list li strong { margin-left: 0; }
+  .pp-import-batch button { align-self: stretch; }
 }
 
 /* ==========================================================================

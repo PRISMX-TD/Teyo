@@ -9,7 +9,7 @@ import {
 } from '@/lib/schemas';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission } from '@/server/auth/guard';
-import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
+import { LedgerError, type TransactionKind, type UserEntryKind } from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import type { PostingEvent } from '@/server/domain/posting-templates';
 import { assertPeriodOpen } from '@/server/domain/period-lock';
@@ -26,7 +26,7 @@ import {
 import { postJournal, repostJournal } from '@/server/posting/post-journal';
 
 export type CreateTransactionInput = {
-  kind: TransactionKind;
+  kind: UserEntryKind;
   occurredOn: string;
   amount: string;
   currency: string;
@@ -50,7 +50,7 @@ async function resolveCounterAccountId(
   tx: Tx,
   organizationId: string,
   input: {
-    kind: TransactionKind;
+    kind: UserEntryKind;
     moneyAccountId: string;
     counterAccountId?: string;
     categoryId?: string;
@@ -100,7 +100,7 @@ async function resolveCounterAccountId(
  * 唯一定义）。掉个个儿的分录照样配平，看板上的总额也一分不差。
  */
 function toPostingEvent(
-  kind: TransactionKind,
+  kind: UserEntryKind,
   moneyAccountId: string,
   counterAccountId: string,
   amountMinor: bigint,
@@ -331,6 +331,16 @@ export async function updateTransaction(
     // transactions/[id]/page.tsx），所以走到这里的只可能是直接调 Action 的人。
     if (kind === 'journal') {
       throw new LedgerError('Journal entries do not use categories.');
+    }
+
+    // 年结分录同理，而且理由更硬：它是一整个财年损益的结转，改动它等于
+    // 悄悄改写已经定案的年度利润。要撤销只能走
+    // server/actions/year_end.ts 的 undoFiscalYearCloseAction——那条路径会
+    // 连同 fiscal_year_closings 的登记一起撤掉，两边不会各说各的。
+    if (kind === 'closing') {
+      throw new LedgerError(
+        'Year-end closing entries cannot be edited. Undo the year-end close instead.',
+      );
     }
 
     // 校验放在读出 existing 之后，原因只有一个：kind 由库里那一行说了算，

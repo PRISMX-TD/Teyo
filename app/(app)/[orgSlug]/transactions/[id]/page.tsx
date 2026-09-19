@@ -70,7 +70,9 @@ export default async function TransactionDetailPage({
           ? t.transaction.expense
           : row.kind === 'journal'
             ? t.transaction.journal
-            : t.transaction.transfer;
+            : row.kind === 'closing'
+              ? t.yearEnd.closingEntry
+              : t.transaction.transfer;
 
     return (
       <Layout orgSlug={orgSlug} t={t}>
@@ -96,12 +98,17 @@ export default async function TransactionDetailPage({
     );
   }
 
-  if (row.kind === 'journal') {
+  if (row.kind === 'journal' || row.kind === 'closing') {
     // 挂起分录——"不确定"队列指向的正是这类记录，不可编辑，只能查看与
     // 作废。updateTransaction 把 kind 钉死在原值上，kind 为 journal 时
     // resolveCounterAccountId 对任何分类都会抛
     // 'Journal entries do not use categories.'，Save 必然失败。这里绝不
     // 渲染那个必败的可编辑表单，只提供确实有效的操作。
+    //
+    // 年结分录（kind = 'closing'）走同一条分支，理由更硬：它是一整个财年
+    // 损益的结转，改动它等于悄悄改写已经定案的年度利润。要撤销只能走
+    // 设置里的年结页——那条路径会连同 fiscal_year_closings 的登记一起撤掉，
+    // 两边不会各说各的。updateTransaction 对它也会明确抛错。
     const debitLine = row.lines.find((line) => line.direction === 'debit');
     const creditLine = row.lines.find((line) => line.direction === 'credit');
 
@@ -216,8 +223,8 @@ export default async function TransactionDetailPage({
           description: row.description ?? '',
           exchangeRate: row.exchangeRate ?? '1',
           rateSource: row.rateSource,
-          // 安全：journal 已经在上面单独 return，走到这里的 row.kind
-          // 只可能是 income/expense/transfer。
+          // 安全：journal 与 closing 都已经在上面单独 return，走到这里的
+          // row.kind 只可能是 income/expense/transfer。
           kind: row.kind,
         }}
         attachments={attachmentItems}

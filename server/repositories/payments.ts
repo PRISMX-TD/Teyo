@@ -254,6 +254,111 @@ export async function voidPayment(
 }
 
 // ============================================================
+// 预收 / 预付款：还没核销到任何单据的那一部分
+// ============================================================
+
+/**
+ * 一笔收付款里「还没有单据」的余额 = amount_minor − Σ payment_items。
+ *
+ * 为什么是**算出来的**而不是存一行「未核销 7,000」的 payment_items：
+ *
+ *   0024 把 payment_items_one_target 放宽成「至多一个非空」之后，确实可以
+ *   插一条两列都为空的明细来代表挂账的那一截，而且那样
+ *   `payments.amount_minor = Σ payment_items` 会成为一条恒等式，看上去更整齐。
+ *   代价在**日后核销**那一步：核销 3,000 就必须把那条 7,000 的行改成 4,000，
+ *   也就是 UPDATE 一条已经写下的明细。账本这一侧从不改写历史——收付款、
+ *   分录、单据状态全是「只新增、只作废」。为了一条恒等式换来一处 UPDATE，
+ *   而那处 UPDATE 还要自己保证并发下不会把余额改成负数，不划算。
+ *
+ *   现在的做法是：核销就往同一笔收付款上**追加**一条指向单据的明细，余额
+ *   自然减少。任何时刻的余额都由一条 sum 查询给出，没有第二个真相来源。
+ *
+ * 只算未作废的收付款：作废的那一笔上的明细不该让任何单据显示为已付，
+ * 同理它自己的余额也不该被谁核销。
+ */
+export async function sumAppliedByPayment(
+  tx: Tx,
+  organizationId: string,
+  paymentIds: readonly string[],
+): Promise<Map<string, bigint>> {
+  if (paymentIds.length === 0) return new Map();
+
+  const rows = await tx`
+    select p.id as payment_id, coalesce(sum(pi.amount_minor), 0) as applied
+    from payments p
+    left join payment_items pi on pi.payment_id = p.id
+    where p.organization_id = ${organizationId}
+      and p.id = any(${[...paymentIds]}::uuid[])
+    group by p.id
+  `;
+
+  return new Map(rows.map((row) => [row.payment_id as string, BigInt(row.applied as string)]));
+}
+
+/** 一笔还有未核销余额的收付款，够界面把它列出来并核销掉。 */
+export type OpenPrepayment = {
+  id: string;
+  contactId: string;
+  contactName: string;
+  type: 'received' | 'made';
+  currency: string;
+  paymentDate: string;
+  reference: string | null;
+  amountMinor: bigint;
+  appliedMinor: bigint;
+  /** amountMinor − appliedMinor，恒大于零（否则这一行不会出现在结果里）。 */
+  unappliedMinor: bigint;
+};
+
+/**
+ * 列出所有还挂着钱的预收/预付款。
+ *
+ * having 里的判断放在 SQL 而不是取回来再 filter：一家开了三年的公司有几千
+ * 笔收付款，其中有余额的通常只有几笔，把筛选留给数据库才不会每次打开
+ * 收款页都把全部历史读进内存。
+ *
+ * voided_at is null 不可省：作废的收款上那笔钱已经不在账上了，它不该出现
+ * 在「可以核销的定金」列表里——真让人点下去，核销分录会去借一个已经被
+ * 反过账的预收余额。
+ */
+export async function listOpenPrepayments(
+  tx: Tx,
+  organizationId: string,
+): Promise<OpenPrepayment[]> {
+  const rows = await tx`
+    select
+      p.id, p.contact_id, c.name as contact_name, p.type, p.currency,
+      p.payment_date, p.reference, p.amount_minor,
+      coalesce(sum(pi.amount_minor), 0) as applied_minor
+    from payments p
+    join contacts c on c.id = p.contact_id
+    left join payment_items pi on pi.payment_id = p.id
+    where p.organization_id = ${organizationId}
+      and p.voided_at is null
+    group by p.id, c.name
+    having p.amount_minor > coalesce(sum(pi.amount_minor), 0)
+    order by p.payment_date desc, p.created_at desc, p.id desc
+  `;
+
+  return rows.map((row) => {
+    const amountMinor = BigInt(row.amount_minor as string);
+    const appliedMinor = BigInt(row.applied_minor as string);
+    return {
+      id: row.id as string,
+      contactId: row.contact_id as string,
+      contactName: row.contact_name as string,
+      type: row.type as 'received' | 'made',
+      currency: row.currency as string,
+      paymentDate: formatDateOnly(row.payment_date as Date | string),
+      reference: (row.reference as string | null) ?? null,
+      amountMinor,
+      appliedMinor,
+      unappliedMinor: amountMinor - appliedMinor,
+    };
+  });
+}
+
+// ============================================================
 // 结算：被核销的单据、已核销金额、单据状态
 // ============================================================
 

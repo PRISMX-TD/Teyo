@@ -17,7 +17,7 @@ import {
   MAX_CATCH_UP_PER_RULE,
 } from '@/server/repositories/recurring';
 import { recordAudit } from '@/server/repositories/audit-logs';
-import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
+import { LedgerError, type UserEntryKind } from '@/server/domain/ledger';
 import { PeriodLockedError } from '@/server/domain/period-lock';
 import type { PostingEvent } from '@/server/domain/posting-templates';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
@@ -41,7 +41,7 @@ function assertValidInterval(interval: number): void {
 export async function createRecurring(
   orgSlug: string,
   input: {
-    kind: TransactionKind;
+    kind: UserEntryKind;
     description: string;
     amount: string;
     currency: string;

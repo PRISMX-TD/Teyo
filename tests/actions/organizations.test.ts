@@ -183,14 +183,19 @@ describe('updateOrganization', () => {
       name: 'Editable Co Renamed',
       timezone: 'Asia/Singapore',
       industry: 'services',
+      // 表单送来的一定是字符串（<select> 的 value），schema 里用 coerce
+      // 接住。这里照表单的形状传，才测得到那条转换。
+      fiscalYearStartMonth: '7',
     });
 
     const [row] = await admin`
-      select name, timezone, industry from organizations where id = ${org.id}
+      select name, timezone, industry, fiscal_year_start_month
+      from organizations where id = ${org.id}
     `;
     expect(row.name).toBe('Editable Co Renamed');
     expect(row.timezone).toBe('Asia/Singapore');
     expect(row.industry).toBe('services');
+    expect(row.fiscal_year_start_month).toBe(7);
 
     const actions = await admin`
       select action from audit_logs where organization_id = ${org.id} order by created_at

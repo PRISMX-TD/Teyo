@@ -331,6 +331,27 @@ export const TABLE_ACCESS: Readonly<Record<string, TableAccess>> = {
     delete: 'document:edit',
     parent: { table: 'bank_reconciliations', foreignKey: 'reconciliation_id' },
   },
+
+  // ---------- 年结 ----------
+  //
+  // 与上面所有表都不同的一张：它**没有 update 策略**，而且这是有意的。
+  // 一次年结的内容（期间、净利润、产生的那笔分录）在它发生的那一刻就
+  // 定死了；要改只能撤销重做，而撤销是 delete。允许 update 等于允许把
+  // 「去年结转了多少利润」事后改成另一个数字，而对应的分录一动不动。
+  //
+  // update 取 'document:delete' 这个空角色集合的哨兵值——含义与 delete 那
+  // 一列上的用法相同：不建这条策略。0024 末尾有一条断言钉住了这件事
+  // （fiscal_year_closings 不得有 UPDATE 或 FOR ALL 策略）。
+  //
+  // insert/delete 用 period:lock 而不是新造一个 Action：两者都是 owner 独有，
+  // 而且做的是同一类事——把某一段时间的账定下来/放开。年结之后通常紧接着
+  // 就是把那个期间封掉。
+  fiscal_year_closings: {
+    select: 'document:read',
+    insert: 'period:lock',
+    update: 'document:delete',
+    delete: 'period:lock',
+  },
 };
 
 /**

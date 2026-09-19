@@ -7,6 +7,7 @@ import { withTransaction } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
   generateUniqueSlug,
+  getOrganizationSettings,
   insertOrganization,
   setPeriodLock,
   updateOrganizationSettings,
@@ -62,16 +63,27 @@ export async function createOrganization(
 
 export async function updateOrganization(
   orgSlug: string,
-  input: { name: string; timezone: string; industry?: string },
+  input: {
+    name: string;
+    timezone: string;
+    industry?: string;
+    fiscalYearStartMonth: number | string;
+  },
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'account:manage');
   const data = updateOrgSchema.parse(input);
 
   await withTransaction(context.userId, async (tx) => {
+    // 改财年起始月会改变**每一张**报表的默认期间，所以审计的 before 必须
+    // 带上旧值：日后看到「去年的损益表怎么突然换了个期间」，答案只能从这
+    // 一条记录里找回来。其余字段一并带上，before/after 才对称。
+    const before = await getOrganizationSettings(tx, context.organizationId);
+
     await updateOrganizationSettings(tx, context.organizationId, {
       name: data.name,
       timezone: data.timezone,
       industry: data.industry ?? null,
+      fiscalYearStartMonth: data.fiscalYearStartMonth,
     });
 
     await recordAudit(tx, {
@@ -80,11 +92,18 @@ export async function updateOrganization(
       action: 'organization.update',
       entityType: 'organization',
       entityId: context.organizationId,
+      before,
       after: data,
     });
   });
 
   revalidatePath(`/${orgSlug}/settings/general`);
+  // 财年一变，这三个页面的默认区间就全变了。不 revalidate 的话，用户改完
+  // 财年回到报表页，看到的仍然是按旧财年缓存的那一版数字——而那张表看起来
+  // 完全正常，没有任何迹象表明它用的是已经被改掉的期间。
+  revalidatePath(`/${orgSlug}/reports`);
+  revalidatePath(`/${orgSlug}/general-ledger`);
+  revalidatePath(`/${orgSlug}/settings/year-end`);
 }
 
 export async function updatePeriodLock(

@@ -132,8 +132,25 @@ describe('矩阵的结构性质', () => {
     }
   });
 
-  it('TABLE_ACCESS 正好覆盖 0010 管辖的 22 张表', () => {
-    expect(Object.keys(TABLE_ACCESS)).toHaveLength(22);
+  it('0010 管辖的那 22 张表一张都没从 TABLE_ACCESS 里掉出去', () => {
+    // 这一条原来写的是 `toHaveLength(22)`。那个数字守的是「别把表删掉」，
+    // 但它同时也禁止**加**表——0024 新增 fiscal_year_closings 时它就是这样
+    // 红的，而报错只说 "expected 22 got 23"，看不出该做什么。
+    //
+    // 改成逐张点名 0010 那一批：删掉任何一张仍然会红（这是要守的），
+    // 而新增一张不会（那是正常演进，覆盖完整性由
+    // tests/db/rls-matrix.test.ts 对着 pg_class 的全称断言守着）。
+    const zeroTenTables = [
+      'bank_reconciliations', 'bill_items', 'bills', 'budgets', 'contacts',
+      'credit_note_items', 'credit_notes', 'depreciation_schedules', 'fixed_assets',
+      'imported_transactions', 'inventory_items', 'inventory_transactions',
+      'invoice_items', 'invoices', 'payment_items', 'payments', 'po_items',
+      'projects', 'purchase_orders', 'reconciliation_items', 'recurring_transactions',
+      'tax_rates',
+    ];
+    expect(zeroTenTables).toHaveLength(22);
+    const missing = zeroTenTables.filter((table) => !(table in TABLE_ACCESS));
+    expect(missing, '这些表从 TABLE_ACCESS 里掉出去了，它们的策略会变成无人断言').toEqual([]);
   });
 
   it('明细表的父表也在 TABLE_ACCESS 里，且父表本身不是明细表', () => {
@@ -170,10 +187,18 @@ describe('矩阵的结构性质', () => {
       .map(([table]) => table)
       .sort();
 
-    // 与 0022 迁移里「断言 3」的白名单逐字对应。
+    // 与 0022 迁移里「断言 3」的白名单逐字对应，外加 0024 的年结登记。
+    //
+    // 名单是显式的、不是数出来的：这一条守的正是「不要再多一张表可以被
+    // 硬删」——账本里的东西一律软删除，能硬删的必须逐个说得出理由。
+    //   六张 *_items      单据编辑时整体重建明细，删的是自己的行
+    //   imported_transactions  银行对账单的暂存区，不是账
+    //   fiscal_year_closings   撤销年结就是删这一行（它没有 update 策略，
+    //                          一次年结的内容在发生那一刻就定死了）
     expect(deletable).toEqual([
       'bill_items',
       'credit_note_items',
+      'fiscal_year_closings',
       'imported_transactions',
       'invoice_items',
       'payment_items',
@@ -182,11 +207,37 @@ describe('矩阵的结构性质', () => {
     ]);
   });
 
-  it('可硬删的表，其 delete 角色集合与 update 相同', () => {
+  it('可硬删的表，其 delete 角色集合与 update 相同（除非它根本不允许 update）', () => {
     // 能改却不能删、或能删却不能改，都是两次独立判断留下的缝。
+    //
+    // 唯一的例外是「连 update 都没有」的表：那不是缝，是一个更严的选择。
+    // fiscal_year_closings 就是这样——一次年结的内容（期间、净利润、产生的
+    // 那笔分录）在它发生的那一刻就定死了，允许 update 等于允许把「去年
+    // 结转了多少利润」事后改成另一个数字而对应的分录一动不动。要改只能
+    // 撤销重做，而撤销是 delete。
+    //
+    // 所以这条不变量的准确说法是：**delete 不得宽于 update，除非 update
+    // 是空集**。写成「相等或 update 为空」而不是干脆放宽成「不得更宽」，
+    // 是因为后者会放过「能删不能改」以外的另一种缝：update 给了 bookkeeper
+    // 而 delete 只给 owner——那种不对称同样是两次独立判断的产物。
     for (const [table, access] of Object.entries(TABLE_ACCESS)) {
-      if (rolesFor(access.delete).length === 0) continue;
-      expect(rolesFor(access.delete), table).toEqual(rolesFor(access.update));
+      const deleteRoles = rolesFor(access.delete);
+      if (deleteRoles.length === 0) continue;
+
+      const updateRoles = rolesFor(access.update);
+      if (updateRoles.length === 0) continue;
+
+      expect(deleteRoles, table).toEqual(updateRoles);
     }
+  });
+
+  it('不允许 update 的表，必须是有意为之的那几张', () => {
+    // 上一条给「update 为空」开了口子，这一条把那个口子收住：不是任何表
+    // 都可以靠「我不允许 update」绕过一致性检查。
+    const noUpdate = Object.entries(TABLE_ACCESS)
+      .filter(([, access]) => rolesFor(access.update).length === 0)
+      .map(([table]) => table)
+      .sort();
+    expect(noUpdate).toEqual(['fiscal_year_closings']);
   });
 });

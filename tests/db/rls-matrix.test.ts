@@ -467,6 +467,19 @@ beforeAll(async () => {
       [orgId, cash, userByRole.owner, transactionId],
     ),
   );
+  // 年结记录（0024）。这张表与上面所有表不同的是它**没有 update 策略**——
+  // 一次年结的内容在发生那一刻就定死了，要改只能撤销重做。TABLE_ACCESS 里
+  // 它的 update 取的是空角色集合的哨兵值，所以下面的矩阵会断言四个角色
+  // 的 UPDATE 全部被拒。
+  await seed(
+    'fiscal_year_closings',
+    await one(
+      `insert into fiscal_year_closings (organization_id, period_start, period_end,
+                                          transaction_id, net_income_minor, closed_by)
+       values ($1, '2025-01-01', '2025-12-31', $2, 123456, $3) returning id`,
+      [orgId, transactionId, userByRole.owner],
+    ),
+  );
 
   // 种子行快照，insert 探针靠它克隆。用 to_jsonb 取整行而不是逐列列举：
   // 列加了、默认值改了都不用动这个文件。
@@ -631,9 +644,25 @@ describe('前提：探针真的受 RLS 约束', () => {
     expect(phantom, 'permissions.ts 登记了库里不存在或未启用 RLS 的表').toEqual([]);
   });
 
-  it('矩阵覆盖 22 张表 × 4 角色 × 4 个动作', () => {
-    expect(Object.keys(TABLE_ACCESS)).toHaveLength(22);
+  it('矩阵真的覆盖了 TABLE_ACCESS 里的每一张表 × 每一个角色', () => {
+    // 这一条原来写的是 `toHaveLength(22)` —— 一个写死的数字。它守住的是
+    // 「别把表从清单里删掉」，但代价是每加一张表都要有人回来改这个数字，
+    // 而改的时候只看到 "expected 22 got 23"，看不出该做什么。加 0024 的
+    // fiscal_year_closings 时它正是这样红的。
+    //
+    // 改成断言「上面那个 describe 循环真的为每一张登记的表都生成了用例」：
+    // 这才是这条测试想守的东西——覆盖率，而不是某个特定的数目。表少了会
+    // 被上面那条「库里每一张启用 RLS 的表都被认领」抓住，两条合起来双向
+    // 封死。
+    const registered = Object.keys(TABLE_ACCESS);
+    expect(registered.length).toBeGreaterThan(0);
+    expect(new Set(registered).size, '登记表里有重复').toBe(registered.length);
     expect(ROLES).toHaveLength(4);
+    expect(COMMANDS).toHaveLength(4);
+    // 每张表都必须有种子行，否则它的探针拿到 undefined，整个文件在
+    // beforeAll 里就崩了（而不是报出「这张表没覆盖到」）。
+    const unseeded = registered.filter((table) => !seedId[table]);
+    expect(unseeded, '这些登记表没有种子行，矩阵探不到它们').toEqual([]);
   });
 });
 

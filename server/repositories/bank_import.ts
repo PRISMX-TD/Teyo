@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { Tx } from '@/server/db/transaction';
 
 /**
@@ -144,6 +145,85 @@ export async function insertImportedTransactions(
       'created_by',
     )}
   `;
+}
+
+/**
+ * 单次「从对账单行生成交易」最多处理多少条。
+ *
+ * 与 MAX_IMPORT_ROWS 同一个道理，但更紧：那一条限的是一次插入 5000 行
+ * imported_transactions（一条 insert），这一条限的是**过账** N 笔交易——
+ * 每一笔都要查汇率、查科目归属、写表头、写分录、写审计，全都在同一个事务里。
+ * 生产连接池只有 3 条连接（server/db/client.ts 的 max: 3），一条几千笔的
+ * 长事务足以把整个应用卡住。
+ *
+ * 200 条覆盖「把这个月对账单里没匹配上的都记进去」这个真实用法，再多就该
+ * 分两次点。
+ */
+export const MAX_POSTABLE_IMPORT_ROWS = 200;
+
+/**
+ * 取一条导入行，按公司维度收窄。
+ *
+ * organization_id 条件不可省：id 来自客户端，而 imported_transactions 上的
+ * 外键（money_account_id、matched_transaction_id）都不带公司维度，RLS 对
+ * 外键校验也不生效——参考 server/posting/insert.ts 的 assertAccountsBelongToOrg。
+ * 查不到就是不存在或属于别家公司，两种都不该把 id 回显给调用方。
+ */
+export async function getImportedTransaction(
+  tx: Tx,
+  organizationId: string,
+  id: string,
+): Promise<ImportedTransactionRow | null> {
+  const rows = await tx`
+    select
+      id, organization_id, money_account_id, source, raw_data,
+      transaction_date, description, amount_minor,
+      matched_transaction_id, status, created_at, created_by
+    from imported_transactions
+    where id = ${id} and organization_id = ${organizationId}
+  `;
+
+  const row = rows.at(0);
+  return row ? mapRow(row) : null;
+}
+
+/**
+ * 一条导入行生成的交易该用哪个 client_uuid。
+ *
+ * postJournal 的幂等完全建立在 (organization_id, client_uuid) 上。这条路径
+ * 上没有客户端生成的 uuid——用户点的是列表里那一行的「生成交易」，一次
+ * 双击、一次断网重发、一次 Server Action 重试都会带着同样的 imported id
+ * 再来一次。随机 uuid 等于关掉幂等：同一条银行流水记成两笔交易，两笔都
+ * 各自配平，触发器与不变量校验全都看不出任何问题，而银行余额凭空多了一倍。
+ *
+ * 一条导入行与一笔交易是严格的一一对应（matched_transaction_id 只有一列），
+ * 所以从它的 id 确定性派生是这里最强的形状：重放必然命中，什么也不会多写。
+ *
+ * 为什么不复用 server/services/document-posting.ts 的 documentClientUuid：
+ * 它的 DocumentKind 是一个闭合联合（invoice / bill / payment / credit-note），
+ * 加一个值要改那个文件，而它不归本次改动。派生名里带 'imported-transaction'
+ * 保证了即使两边的 uuid 命名空间有一天合并，也不会撞号。
+ *
+ * 形状按 RFC 4122 v5 摆（sha1 前 16 字节，改写版本位与变体位）——不是为了
+ * 与任何标准命名空间互通，只因为 client_uuid 列是 uuid 类型。
+ */
+export function importedTransactionClientUuid(importedTransactionId: string): string {
+  const digest = createHash('sha1')
+    .update(`imported-transaction:${importedTransactionId}`)
+    .digest();
+  const bytes = Buffer.from(digest.subarray(0, 16));
+
+  bytes[6] = (bytes[6] & 0x0f) | 0x50; // version 5
+  bytes[8] = (bytes[8] & 0x3f) | 0x80; // RFC 4122 variant
+
+  const hex = bytes.toString('hex');
+  return [
+    hex.slice(0, 8),
+    hex.slice(8, 12),
+    hex.slice(12, 16),
+    hex.slice(16, 20),
+    hex.slice(20, 32),
+  ].join('-');
 }
 
 export async function matchImportedTransaction(

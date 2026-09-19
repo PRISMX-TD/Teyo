@@ -40,6 +40,22 @@ export type PostingEvent =
   | { type: 'customer-receipt'; moneyAccountId: string; receivableAccountId: string; amountMinor: bigint }
   /** 付款给供应商：借应付 / 贷资金账户。 */
   | { type: 'supplier-payment'; moneyAccountId: string; payableAccountId: string; amountMinor: bigint }
+  /**
+   * 年结：把一整个财年的损益科目余额结转到留存收益。
+   *
+   * 这是唯一一种由调用方给出全部分录行的事件，也是唯一一种行数不定的
+   * 事件——一个财年通常有十几个有余额的损益科目，而上面每一种事件的
+   * 行数与科目角色都是写死的。
+   *
+   * 「方向只在这个文件里定义」这条规矩在这里怎么算数：年结没有「哪一侧
+   * 是收入、哪一侧是费用」这种可以预先写下来的映射，方向完全由每个科目
+   * 当时的余额符号决定（收入科目是贷方余额，结转时借它；费用相反）。
+   * 能写在这里的规则只有「必须配平」「必须落成 kind = 'closing'」，
+   * 这两条都在下面。真正决定每一行方向的是
+   * server/services/year-end-close.ts 的 buildClosingPlan，它那一份也是
+   * 唯一的一份——没有第二处在算年结的方向。
+   */
+  | { type: 'closing'; lines: readonly DraftLineSpec[]; amountMinor: bigint }
   /** 开贷项通知单（销售退回/折让）：借收入 / 借销项税 / 贷应收。发票的反向。 */
   | {
       type: 'credit-note';
@@ -128,6 +144,31 @@ export function templateFor(event: PostingEvent): DraftLineSpec[] {
       ];
     }
 
+    case 'closing': {
+      if (event.lines.length < 2) {
+        throw new LedgerError('A closing entry needs at least two journal lines.');
+      }
+
+      // 表头金额必须等于借方合计。postJournal 把 event.amountMinor 原样写进
+      // transactions.amount_minor，而本位币那一列取的是分录的借方合计
+      // （headerBaseAmount）。年结是纯本位币分录，两者必须是同一个数——
+      // 不等的话表头与分录就对不上，而数据库的配平触发器只看分录、看不到
+      // 表头，它会放行。
+      const debitTotal = sumMinor(
+        event.lines.filter((line) => line.direction === 'debit').map((line) => line.amountMinor),
+      );
+      if (debitTotal !== event.amountMinor) {
+        throw new LedgerError(
+          `Closing entry total ${event.amountMinor} does not equal its debit side ${debitTotal}.`,
+        );
+      }
+
+      // 配平、金额为正、行数下限由 buildLines 统一把关（它对任意 n 行都
+      // 成立），这里不再重复一遍——重复的校验会在两处各自演化，最后谁也
+      // 不知道哪一份才是真的。
+      return [...event.lines];
+    }
+
     case 'supplier-payment': {
       if (event.moneyAccountId === event.payableAccountId) {
         throw new LedgerError('This operation requires two different accounts.');
@@ -172,6 +213,11 @@ export function kindFor(event: PostingEvent): TransactionKind {
     case 'supplier-payment':
     case 'credit-note':
       return 'journal';
+    // 年结必须落成自己的 kind，不能并进 'journal'：损益表正是靠它把年结
+    // 排除在外（见 server/repositories/reports.ts 的 getProfitLoss）。
+    // 用 'journal' 顶上的话，刚结转过的那一年损益表会变成全零。
+    case 'closing':
+      return 'closing';
   }
 }
 

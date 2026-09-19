@@ -14,6 +14,19 @@ import {
 } from '@/server/services/export-builder';
 import { createTestOrgWithSeed, createTestUser, joinOrg, resetTestData } from '@/tests/helpers/test-db';
 
+/**
+ * 邮箱与 slug 都带随机后缀。
+ *
+ * 这个文件原来用的是写死的 'owner-exp@example.com'。auth.users 的邮箱上有
+ * 唯一约束，所以只要有一次跑被中断（超时、速率限制、Ctrl-C），afterAll 的
+ * resetTestData 不执行，那个用户就留在库里——**之后每一次跑都会在 beforeAll
+ * 里撞唯一约束，整个文件 29 条用例全部跳过**，而失败信息是一句
+ * "duplicate key value violates unique constraint"，看不出是残留数据。
+ *
+ * 仓库里其余每个集成测试文件都带随机后缀，这个是漏网的。
+ */
+const RUN = randomUUID().slice(0, 8);
+
 let currentUserId: string | null = null;
 
 vi.mock('@/server/auth/session', () => ({
@@ -32,9 +45,9 @@ let cashId: string;
 let rentCategoryId: string;
 
 beforeAll(async () => {
-  ownerId = await createTestUser('owner-exp@example.com', 'Owner');
+  ownerId = await createTestUser(`test-owner-exp-${RUN}@example.com`, 'Owner');
 
-  const org = await createTestOrgWithSeed(ownerId, 'Export Co', `export-co-${Date.now()}`, 'MYR');
+  const org = await createTestOrgWithSeed(ownerId, 'Export Co', `export-co-${RUN}`, 'MYR');
   orgId = org.id;
   orgSlug = org.slug;
   cashId = org.accountsByCode['cash'];
@@ -412,7 +425,7 @@ describe('exportReport', () => {
   });
 
   it('lets a viewer export', async () => {
-    const viewerId = await createTestUser('viewer-exp@example.com', 'Viewer');
+    const viewerId = await createTestUser(`test-viewer-exp-${RUN}@example.com`, 'Viewer');
     await joinOrg(viewerId, orgId, 'viewer');
 
     currentUserId = viewerId;
@@ -428,7 +441,7 @@ describe('exportReport', () => {
   });
 
   it('refuses a non-member', async () => {
-    const outsiderId = await createTestUser('outsider-exp@example.com', 'Outsider');
+    const outsiderId = await createTestUser(`test-outsider-exp-${RUN}@example.com`, 'Outsider');
     currentUserId = outsiderId;
 
     await expect(

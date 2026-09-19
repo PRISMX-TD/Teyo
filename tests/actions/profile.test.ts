@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from '@/server/db/client';
 import {
@@ -5,6 +6,13 @@ import {
   createTestUser,
   resetTestData,
 } from '@/tests/helpers/test-db';
+
+/**
+ * 邮箱带随机后缀。auth.users 的邮箱有唯一约束，写死的话一次被中断的跑
+ * （afterAll 没执行）就会让这个文件此后永远撞唯一约束——而报错只说
+ * "duplicate key"，看不出是残留数据。
+ */
+const RUN = randomUUID().slice(0, 8);
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
@@ -27,8 +35,8 @@ let orgSlug: string;
 
 beforeAll(async () => {
   await resetTestData();
-  userId = await createTestUser('profile@example.com', 'Original Name');
-  ownerId = await createTestUser('owner-prof@example.com', 'Owner');
+  userId = await createTestUser(`test-profile-${RUN}@example.com`, 'Original Name');
+  ownerId = await createTestUser(`test-owner-prof-${RUN}@example.com`, 'Owner');
   await createTestOrg(ownerId, 'Preview Co', 'preview-co');
   orgSlug = 'preview-co';
 });

@@ -45,10 +45,42 @@ export const createOrgSchema = z.object({
   industry: z.string().trim().max(60).optional(),
 });
 
+/**
+ * 财年起始月，1–12。
+ *
+ * 用 coerce 是因为它唯一的来源是 <select>，而表单里一切都是字符串。
+ * 不接受小数、不接受 13：数据库上有同样的 CHECK
+ * （organizations_fiscal_year_start_month_valid，见 0024 迁移），这里挡一遍
+ * 是为了让用户读到一句人话而不是裸的约束报错。
+ */
+const fiscalYearStartMonth = z.coerce
+  .number()
+  .int('Pick one of the months in the list.')
+  .min(1, 'Pick one of the months in the list.')
+  .max(12, 'Pick one of the months in the list.');
+
 export const updateOrgSchema = z.object({
   name: nonEmpty.max(120),
   timezone: nonEmpty.max(60),
   industry: z.string().trim().max(60).optional(),
+  fiscalYearStartMonth,
+});
+
+/**
+ * 年结与撤销年结。
+ *
+ * periodStart 是幂等键（fiscal_year_closings 的唯一约束建在它上面），
+ * 由服务端按财年起始月算出来再交给表单，不是用户手填的——但它会经由表单
+ * 回到服务端，所以仍然要校验格式。真正的防线是服务端拿到之后**重新**算
+ * 一遍财年并比对：见 server/actions/year_end.ts。
+ */
+export const closeFiscalYearSchema = z.object({
+  periodStart: isoDate,
+});
+
+export const undoFiscalYearCloseSchema = z.object({
+  closingId: uuid,
+  reason: nonEmpty.max(300, 'Keep the reason under 300 characters.'),
 });
 
 export const periodLockSchema = z.object({

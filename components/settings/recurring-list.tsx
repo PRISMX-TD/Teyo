@@ -4,7 +4,7 @@ import { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import type { TransactionKind } from '@/server/domain/ledger';
+import type { UserEntryKind } from '@/server/domain/ledger';
 import type { RecurringEditFields, RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 import { todayLocalISO } from '@/lib/date';
@@ -51,7 +51,8 @@ type RecurringEntry = {
 type RecurringFrequency = RecurringTransactionRow['frequency'];
 
 type CreatePayload = {
-  kind: TransactionKind;
+  // 定期规则只能是用户能直接创建的四种之一——'closing' 只由年结产生。
+  kind: UserEntryKind;
   description: string;
   amount: string;
   currency: string;
@@ -124,7 +125,7 @@ export function RecurringList({
 }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
-    kind: 'expense' as TransactionKind,
+    kind: 'expense' as UserEntryKind,
     description: '',
     amount: '',
     currency: moneyAccounts[0]?.id ? '' : 'USD',
@@ -290,7 +291,7 @@ export function RecurringList({
             {t.transaction.kind}
             <select
               value={form.kind}
-              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as TransactionKind }))}
+              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as UserEntryKind }))}
             >
               <option value="income">{t.transaction.income}</option>
               <option value="expense">{t.transaction.expense}</option>

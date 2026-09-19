@@ -418,7 +418,10 @@ function headerBaseAmount(lines: DraftJournalLine[]): bigint {
  * 用户都该读到同一句话。
  */
 function categoryForKind(kind: TransactionKind, categoryId: string | null): string | null {
-  if (kind === 'transfer' || kind === 'journal') return null;
+  // 'closing' 与 transfer/journal 同属「不带分类」那一支（0024 把它并进了
+  // transactions_category_matches_kind）。年结结转的是一整批科目的余额，
+  // 「这笔属于哪个分类」这个问题本身不成立。
+  if (kind === 'transfer' || kind === 'journal' || kind === 'closing') return null;
 
   if (categoryId === null) {
     throw new LedgerError('Income and expense records need a category.');
