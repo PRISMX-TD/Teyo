@@ -1,14 +1,19 @@
 import Link from 'next/link';
 import { AuthForm } from '@/components/auth/auth-form';
 import { getMessages } from '@/lib/i18n';
+import { resolveAnonymousLocale } from '@/lib/i18n/server';
 import { requestPasswordReset } from '@/server/actions/auth';
 
-export default function ForgotPasswordPage() {
-  const t = getMessages('en');
+export default async function ForgotPasswordPage() {
+  const t = getMessages(await resolveAnonymousLocale());
 
   async function action(formData: FormData) {
     'use server';
-    await requestPasswordReset(String(formData.get('email') ?? ''));
+    // 必须 return。requestPasswordReset 现在会对「这不像一个邮箱地址」
+    // 返回 { error }，而 AuthForm 是靠这个返回值来渲染错误的——把它
+    // await 掉再返回 undefined，等于那句校验永远不会显示给用户。
+    // reset-password/page.tsx 一直是 return 的写法。
+    return requestPasswordReset(String(formData.get('email') ?? ''));
   }
 
   return (

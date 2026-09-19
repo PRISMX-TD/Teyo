@@ -1,6 +1,21 @@
 import type { Tx } from '@/server/db/transaction';
 
-export type InvoiceStatus = 'draft' | 'sent' | 'paid' | 'overdue' | 'voided';
+/**
+ * 与数据库的 invoice_status 枚举逐项对应。
+ *
+ * 'partially_paid' 是 0009 迁移给枚举追加的值，而这个联合类型一直没跟上。
+ * 后果不是编译错误而是更隐蔽的一种：refreshSettlementStatuses 每天都在往
+ * 这一列写这个值，而任何写成 Record<InvoiceStatus, ...> 的映射（比如列表页
+ * 的状态徽章）都会让 TypeScript 认定这个分支不可能出现——于是那些组件只能
+ * 退回按 string 索引，把类型检查整个让出去。
+ */
+export type InvoiceStatus =
+  | 'draft'
+  | 'sent'
+  | 'partially_paid'
+  | 'paid'
+  | 'overdue'
+  | 'voided';
 
 export type InvoiceListRow = {
   id: string;
@@ -261,25 +276,85 @@ export async function setInvoiceStatus(
   `;
 }
 
+/**
+ * 把过账产生的 transaction_id 写回发票。
+ *
+ * 这一列从 0008 建表起就存在，到这次改动之前**从未被写入过任何一行**——
+ * 发票与它的分录之间没有任何连接，于是作废发票时找不到该连带作废哪笔交易，
+ * 交易详情页也说不出这笔账是从哪张单据来的。
+ *
+ * where 里带 organization_id 而不是只认 id：RLS 已经挡住跨公司写入，但那是
+ * 第二道；仓储层自己收窄公司维度是第一道，两道都在才不依赖某一条策略永远
+ * 不被改错。
+ */
+export async function setInvoiceTransactionId(
+  tx: Tx,
+  organizationId: string,
+  id: string,
+  transactionId: string,
+): Promise<void> {
+  await tx`
+    update invoices
+    set transaction_id = ${transactionId}, updated_at = now()
+    where id = ${id} and organization_id = ${organizationId}
+  `;
+}
+
+/**
+ * 作废发票：状态与 voided_at 一起写。
+ *
+ * 原来只有 setInvoiceStatus(…, 'voided')，voided_at 留空——而列表查询
+ * （listInvoices）与税务报表（repositories/tax.ts 的 `i.voided_at is null`）
+ * 读的是 voided_at，不是 status。于是一张「已作废」的发票在税务报表里仍然
+ * 贡献着销项税。两个字段必须一起写。
+ *
+ * invoices 上没有 voided_by / void_reason 两列（只有 transactions 有），
+ * 作废理由记在它那笔交易上，由 voidDocumentPosting 写。
+ */
+export async function markInvoiceVoided(
+  tx: Tx,
+  organizationId: string,
+  id: string,
+): Promise<void> {
+  await tx`
+    update invoices
+    set status = 'voided', voided_at = now(), updated_at = now()
+    where id = ${id} and organization_id = ${organizationId}
+  `;
+}
+
+/**
+ * 下一个发票号。
+ *
+ * 原来是「按 created_at 取最近一张，解析它的号码，加一」，两处不对：
+ *
+ * 1. 取的是「最近创建的那张」，不是「号码最大的那张」。created_at 相同时
+ *    排序不确定，而一旦最近那张的号码不合 INV-NNNNN 的形状，函数就整个
+ *    退回 'INV-00001'——那个号通常早就被用掉了，于是必然撞唯一约束。
+ *    库里现在就有 'INV-7eaba18b-2' 这种形状的历史数据。
+ * 2. 没有并发保护。两个并发创建读到同一个最大号，算出同一个下一号。
+ *    这一条在这里解决不了（见 withDocumentNumberRetry 里那段关于
+ *    FOR UPDATE 为什么挡不住幻读的论证），由调用方的重试兜住。
+ *
+ * 改成在 SQL 里对合规号码的数字后缀取 max：与 created_at 无关，不合规的
+ * 号码被忽略而不是让整个序列回到 1。
+ *
+ * 正则里用 [0-9] 而不是 \d：这是一个带标签的模板字符串，JS 会把 \d 的
+ * 反斜杠在 cooked 串里吃掉（'\d' === 'd'），于是传到 Postgres 的是
+ * '^INV-(d+)$'——匹配字面的字母 d，一张也匹配不到，max 恒为 0，每次都
+ * 返回 INV-00001。这个坑不会报错，只会安静地把序列钉死在 1。
+ */
 export async function getNextInvoiceNumber(
   tx: Tx,
   organizationId: string,
 ): Promise<string> {
   const rows = await tx`
-    select invoice_number
+    select coalesce(max((substring(invoice_number from '^INV-([0-9]+)$'))::bigint), 0) as last
     from invoices
     where organization_id = ${organizationId}
-    order by created_at desc
-    limit 1
+      and invoice_number ~ '^INV-[0-9]+$'
   `;
 
-  const last = rows.at(0);
-  if (!last) return 'INV-00001';
-
-  const lastNumber = last.invoice_number as string;
-  const match = lastNumber.match(/^INV-(\d+)$/);
-  if (!match) return 'INV-00001';
-
-  const next = parseInt(match[1], 10) + 1;
-  return `INV-${String(next).padStart(5, '0')}`;
+  const next = BigInt(rows[0].last as string) + 1n;
+  return `INV-${next.toString().padStart(5, '0')}`;
 }

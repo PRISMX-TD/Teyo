@@ -31,6 +31,9 @@ export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props
 
   const [typeFilter, setTypeFilter] = useState<'all' | 'received' | 'made'>('all');
   const [contactFilter, setContactFilter] = useState<string>('all');
+  const [error, setError] = useState<string | null>(null);
+  // 只禁用被点的那一行，不锁整张表。
+  const [pendingId, setPendingId] = useState<string | null>(null);
 
   const filtered = payments.filter((p) => {
     if (typeFilter !== 'all' && p.type !== typeFilter) return false;
@@ -40,11 +43,19 @@ export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props
 
   async function handleVoid(id: string) {
     if (!confirm(t.common.confirm + '?')) return;
+    setPendingId(id);
+    setError(null);
     try {
       await voidPaymentAction(orgSlug, id);
       router.refresh();
-    } catch {
-      // ignore
+    } catch (e) {
+      // 原来这里是 `catch { /* ignore */ }`。作废一笔收款会反向过账三笔分录
+      // （收款本身 + 汇兑收益 + 汇兑损失），期间封账、权限不足、单据已经
+      // 结转都会抛错——而用户看到的只是「点了没反应」。更糟的是这一行
+      // **看上去**还没作废，他会再点一次，以为是自己手滑。
+      setError((e as Error).message);
+    } finally {
+      setPendingId(null);
     }
   }
 
@@ -64,6 +75,12 @@ export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props
       <Link href={`/${orgSlug}/payments/new`} className="primary-button">
         {i18n.payments.newTitle}
       </Link>
+
+      {error ? (
+        <p role="alert" className="form-error">
+          {error}
+        </p>
+      ) : null}
 
       <div className="filters">
         <label>
@@ -97,7 +114,9 @@ export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props
             <th scope="col">{i18n.payments.method}</th>
             <th scope="col">{i18n.payments.reference}</th>
             <th scope="col">{i18n.invoices.status}</th>
-            <th scope="col"></th>
+            {/* 空表头的整一列在读屏器里是没有名字的：按列导航时念到这里
+                只有「空白」。操作列也要有名字。 */}
+            <th scope="col">{i18n.payments.actions}</th>
           </tr>
         </thead>
         <tbody>
@@ -124,7 +143,12 @@ export function PaymentList({ orgSlug, locale, i18n, payments, contacts }: Props
               </td>
               <td>
                 {!p.voidedAt ? (
-                  <button type="button" className="btn-small" onClick={() => handleVoid(p.id)}>
+                  <button
+                    type="button"
+                    className="btn-small btn-danger"
+                    disabled={pendingId === p.id}
+                    onClick={() => handleVoid(p.id)}
+                  >
                     {i18n.transaction.void}
                   </button>
                 ) : null}

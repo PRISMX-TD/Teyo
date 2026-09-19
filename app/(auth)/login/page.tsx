@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { AuthForm } from '@/components/auth/auth-form';
 import { getMessages } from '@/lib/i18n';
+import { resolveAnonymousLocale } from '@/lib/i18n/server';
 import { signIn } from '@/server/actions/auth';
 
 export default async function LoginPage({
@@ -8,7 +9,7 @@ export default async function LoginPage({
 }: {
   searchParams: Promise<{ checkEmail?: string }>;
 }) {
-  const t = getMessages('en');
+  const t = getMessages(await resolveAnonymousLocale());
   const { checkEmail } = await searchParams;
 
   async function action(formData: FormData) {

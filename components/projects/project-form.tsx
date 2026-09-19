@@ -49,7 +49,11 @@ export function ProjectForm({ orgSlug, locale, contacts }: Props) {
         name: name.trim(),
         description: description.trim() || undefined,
         contactId: contactId || undefined,
-        budgetMinor: budget ? String(Math.round(parseFloat(budget) * 100)) : undefined,
+        // 十进制字符串交给服务端解析（server/actions/projects.ts 的
+        // budgetToMinor 按本位币的小数位走 parseDecimalToMinor）。原来这里
+        // 是 Math.round(parseFloat(budget) * 100)：浮点，而且两位小数写死
+        // ——本位币是 JPY/VND/KRW 的公司预算会整整放大 100 倍。
+        budget: budget || undefined,
         startDate: startDate || undefined,
         endDate: endDate || undefined,
       });

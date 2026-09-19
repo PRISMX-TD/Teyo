@@ -11,9 +11,11 @@ type Props = {
     netProfit: bigint;
   };
   locale: Locale;
+  /** 三处金额原来都硬写 'USD'——项目的收支记在本位币上。 */
+  baseCurrency: string;
 };
 
-export function ProjectProfitability({ profitability, locale }: Props) {
+export function ProjectProfitability({ profitability, locale, baseCurrency }: Props) {
   const t = getMessages(locale);
   const { totalIncome, totalExpense, netProfit } = profitability;
 
@@ -23,11 +25,11 @@ export function ProjectProfitability({ profitability, locale }: Props) {
       <tbody>
         <tr>
           <td>{t.projects.income}</td>
-          <td className="numeric money-in">{formatMoney(totalIncome, 'USD')}</td>
+          <td className="numeric money-in">{formatMoney(totalIncome, baseCurrency, locale)}</td>
         </tr>
         <tr>
           <td>{t.projects.expense}</td>
-          <td className="numeric money-out">{formatMoney(totalExpense, 'USD')}</td>
+          <td className="numeric money-out">{formatMoney(totalExpense, baseCurrency, locale)}</td>
         </tr>
       </tbody>
       <tfoot>
@@ -36,7 +38,7 @@ export function ProjectProfitability({ profitability, locale }: Props) {
             <strong>{t.projects.netProfit}</strong>
           </td>
           <td className={`numeric ${netProfit >= 0n ? 'money-in' : 'money-out'}`}>
-            <strong>{formatMoney(netProfit >= 0n ? netProfit : -netProfit, 'USD')}</strong>
+            <strong>{formatMoney(netProfit >= 0n ? netProfit : -netProfit, baseCurrency, locale)}</strong>
           </td>
         </tr>
       </tfoot>

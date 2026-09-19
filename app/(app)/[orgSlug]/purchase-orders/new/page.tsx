@@ -3,6 +3,7 @@ import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
+import { listTaxRates } from '@/server/repositories/tax';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
 export default async function NewPurchaseOrderPage({
@@ -15,7 +16,7 @@ export default async function NewPurchaseOrderPage({
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const vendors = await withTransaction(context.userId, async (tx) => {
+  const { vendors, taxRates } = await withTransaction(context.userId, async (tx) => {
     const rows = await tx`
       select id, name
       from contacts
@@ -24,7 +25,11 @@ export default async function NewPurchaseOrderPage({
         and is_active = true
       order by name
     ` as { id: string; name: string }[];
-    return rows;
+
+    // 采购单明细的 tax_rate_id 是 tax_rates 上的外键。表单里原来那排
+    // 写死的 0/6/10/12 对不上任何一条记录，所以它选什么都没往下传。
+    const rates = await listTaxRates(tx, context.organizationId);
+    return { vendors: rows, taxRates: rates };
   });
 
   if (vendors.length === 0) {
@@ -44,6 +49,14 @@ export default async function NewPurchaseOrderPage({
         locale={locale}
         vendors={vendors}
         currencies={[...SUPPORTED_CURRENCIES]}
+        // 本位币：币种缺省值，同时决定汇率栏渲不渲染。外币采购单在没有
+        // 汇率的情况下会被 resolvePoRate 直接拒绝，见 po-form.tsx。
+        baseCurrency={context.baseCurrency}
+        taxRates={taxRates.map((rate) => ({
+          id: rate.id,
+          name: (locale === 'zh' ? rate.nameZh : rate.nameEn) || rate.nameEn || rate.nameZh,
+          rateBps: rate.rateBps,
+        }))}
       />
     </>
   );

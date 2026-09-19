@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
+import { todayLocalISO } from '@/lib/date';
+import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 
 type MoneyAccountOption = {
   id: string;
@@ -68,7 +70,7 @@ export function ReconciliationView({
   const [pastReconciliations, setPastReconciliations] = useState<PastReconciliation[]>([]);
   const [bookBalance, setBookBalance] = useState<string>('0');
   const [statementDate, setStatementDate] = useState<string>(
-    new Date().toISOString().slice(0, 10),
+    todayLocalISO(),
   );
   const [statementBalance, setStatementBalance] = useState<string>('');
   const [checked, setChecked] = useState<Set<string>>(new Set());
@@ -116,17 +118,48 @@ export function ReconciliationView({
     setAdjustments((prev) => ({ ...prev, [id]: value }));
   };
 
-  const statementBalanceMinor = (() => {
+  /**
+   * 把用户输入的十进制金额转成最小货币单位。
+   *
+   * 原来这里是 `BigInt(Math.round(parseFloat(cleaned) * 100))`，两个毛病：
+   *
+   *   1. 浮点。0.1 + 0.2 那一类误差在对账这个场景里格外难看——用户输的
+   *      对账单余额和账面余额只差几分时，差额那一栏会显示一个不存在的
+   *      零头，而两边其实是平的。这个项目其余地方一律走 bigint 定点。
+   *   2. 硬编码 ×100。零小数币种（JPY / KRW / VND，见 money.ts 的
+   *      ZERO_DECIMAL_CURRENCIES）会被放大 100 倍：一家日元公司输入
+   *      1,000,000 的对账单余额，差额那一栏会告诉他差了 9,900 万日元。
+   *
+   * 现在复用服务端的 parseDecimalToMinor + currencyExponent，和账面余额
+   * （bookBalance，服务端本来就是按本位币的最小单位存的）在同一个刻度上。
+   * 输入还没打完时解析会抛错，这时按 0 处理——差额本来就还没意义。
+   */
+  const exponent = (() => {
     try {
-      if (!statementBalance) return 0n;
-      const cleaned = statementBalance.replace(/,/g, '');
-      const parsed = parseFloat(cleaned);
-      if (isNaN(parsed)) return 0n;
-      return BigInt(Math.round(parsed * 100));
+      return currencyExponent(baseCurrency);
     } catch {
-      return 0n;
+      return 2;
     }
   })();
+
+  const toMinor = useCallback(
+    (value: string): bigint => {
+      const cleaned = value.trim().replace(/,/g, '');
+      if (!cleaned) return 0n;
+      const negative = cleaned.startsWith('-');
+      try {
+        // parseDecimalToMinor 只收非负数；负号在这里单独摘出来再补回去，
+        // 因为对账调整项确实可能是负的（银行手续费）。
+        const magnitude = parseDecimalToMinor(negative ? cleaned.slice(1) : cleaned, exponent);
+        return negative ? -magnitude : magnitude;
+      } catch {
+        return 0n;
+      }
+    },
+    [exponent],
+  );
+
+  const statementBalanceMinor = toMinor(statementBalance);
 
   const bookBalanceBig = (() => {
     try {
@@ -148,16 +181,7 @@ export function ReconciliationView({
 
   const adjSum = Object.entries(adjustments)
     .filter(([id]) => checked.has(id))
-    .reduce((sum, [, val]) => {
-      try {
-        const cleaned = val.replace(/,/g, '');
-        const parsed = parseFloat(cleaned);
-        if (isNaN(parsed)) return sum;
-        return sum + BigInt(Math.round(parsed * 100));
-      } catch {
-        return sum;
-      }
-    }, 0n);
+    .reduce((sum, [, val]) => sum + toMinor(val), 0n);
 
   const difference = statementBalanceMinor - (bookBalanceBig + adjSum);
 

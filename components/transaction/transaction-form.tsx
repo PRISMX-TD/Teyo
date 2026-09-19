@@ -1,9 +1,11 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useId, useMemo, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
-import { getMessages, localizedName } from '@/lib/i18n';
+import { getMessages, interpolate, localizedName } from '@/lib/i18n';
+import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
+import { ModalDialog } from '@/components/shell/modal-dialog';
 import { RateField } from '@/components/transaction/rate-field';
 import { AttachmentPanel } from '@/components/transaction/attachment-panel';
 import { CategoryChips } from '@/components/transaction/category-chips';
@@ -13,8 +15,9 @@ import {
   updateTransaction,
   voidTransaction,
 } from '@/server/actions/transactions';
-import { enqueueOfflineTransaction, isOnline, isRetriable } from '@/lib/offline-queue';
+import { enqueueOfflineTransaction, isOnline, neverReachedServer } from '@/lib/offline-queue';
 import type { Scenario } from '@/server/domain/scenario';
+import { todayLocalISO } from '@/lib/date';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null };
 
@@ -111,9 +114,12 @@ export function TransactionForm({
   // below — it still reads categoryId from formData, untouched, because the
   // select still carries name="categoryId" and this state drives its value.
   const [categoryId, setCategoryId] = useState(initialData?.categoryId ?? '');
+  // 受控（原来是 defaultValue）：这样「再记一笔」重建表单时它不会被一起
+  // 清空——连续录入时资金账户通常就是同一个。
+  const [moneyAccountId, setMoneyAccountId] = useState(initialData?.moneyAccountId ?? '');
   const [currency, setCurrency] = useState(initialData?.currency ?? baseCurrency);
   const [occurredOn, setOccurredOn] = useState(
-    () => initialData?.occurredOn ?? new Date().toISOString().slice(0, 10),
+    () => initialData?.occurredOn ?? todayLocalISO(),
   );
   const [amount, setAmount] = useState(initialData?.amount ?? '');
   const [error, setError] = useState<string | null>(null);
@@ -125,9 +131,82 @@ export function TransactionForm({
   // inferred. The suspense entry's debit/credit sides are derived from this
   // and only this; see handleSubmit's isJournalScenario branch.
   const [direction, setDirection] = useState<'in' | 'out' | null>(null);
+  const voidReasonId = useId();
+  const amountErrorId = useId();
 
-  // 幂等键在表单整个生命周期内固定，重复提交不会产生重复账目
-  const clientUuid = useMemo(() => crypto.randomUUID(), []);
+  /**
+   * 金额的即时校验。
+   *
+   * 全站 aria-invalid / aria-describedby 的用量原来是 0，而 globals.css 里
+   * 一直写着 `input[aria-invalid='true'] { border-color: var(--red) }`——
+   * 那条规则从来没有被触发过。这里是让它活过来的第一处，也是最该有的一处：
+   * 金额是这张表单的主字段。
+   *
+   * 校验条件刻意和服务端 parseDecimalToMinor 的那两条完全一致（非负十进制、
+   * 小数位不超过币种的 exponent），不另立一套更松或更严的规则——前端说「行」
+   * 而服务端说「不行」，比根本不校验还糟。
+   *
+   * 只在用户打完（有内容）时才判，空值交给 required：一进页面就把空的金额
+   * 框标红，是在为用户还没做的事责备他。
+   */
+  const amountIssue = (() => {
+    const raw = amount.trim();
+    if (!raw) return null;
+
+    let places: number;
+    try {
+      places = currencyExponent(currency);
+    } catch {
+      // 币种码不合法时说不出小数位应该是几，这时不对金额下结论。
+      return null;
+    }
+
+    try {
+      parseDecimalToMinor(raw, places);
+      return null;
+    } catch {
+      // parseDecimalToMinor 的两种失败分开报：小数位太多是一条具体的、
+      // 用户自己能改的信息（JPY 不收分），笼统的「格式不对」帮不上忙。
+      const normalized = raw.replace(/,/g, '');
+      if (/^\d+(\.\d+)?$/.test(normalized)) {
+        return interpolate(t.transaction.amountTooPrecise, { places });
+      }
+      return t.transaction.amountInvalid;
+    }
+  })();
+
+  // 「再记一笔」按下时 +1。它唯一的作用是换掉下面那个 clientUuid：
+  // 幂等键是按「这一份表单」发的，沿用上一笔的键提交第二笔，服务端会
+  // 认出是重复提交并直接返回上一笔，第二笔就这么凭空消失了。
+  const [entryGeneration, setEntryGeneration] = useState(0);
+
+  // 幂等键在一笔记录的录入过程中固定，重复提交不会产生重复账目。
+  // exhaustive-deps 认为 entryGeneration 是「多余依赖」，因为
+  // crypto.randomUUID() 没有用到它——但这里要的恰恰是这个副作用：
+  // 依赖变了就重新生成一个键。这是 useMemo 少见的正当反模式用法，
+  // 规则的模型看不出来，所以单行关掉。
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  const clientUuid = useMemo(() => crypto.randomUUID(), [entryGeneration]);
+
+  /**
+   * 柜台前连着记五笔的出口。
+   *
+   * 离线存下之后提交按钮会被 disable（防止同一笔被排两次队），但在这之前
+   * 页面上没有任何「下一笔」的入口——用户只能自己去点侧栏再进一次「记一笔」。
+   *
+   * entryGeneration 同时作为 <form> 的 key：换 key 会重建整棵表单子树，把
+   * description 这类非受控输入框也一并清空（只重置 state 的话它会留着上一笔
+   * 的备注）。日期和资金账户是受控 state 且不在这里清——连着录五张收据时
+   * 这两项几乎不变；金额每次都不同，留着上一笔的数字比空着危险得多。
+   */
+  function startAnotherEntry() {
+    setEntryGeneration((n) => n + 1);
+    setSavedOffline(false);
+    setError(null);
+    setAmount('');
+    setCategoryId('');
+    setDirection(null);
+  }
 
   const categories = kind === 'income' ? incomeCategories : expenseCategories;
   const recentCategories = kind === 'income' ? recentIncomeCategories : recentExpenseCategories;
@@ -177,7 +256,7 @@ export function TransactionForm({
         router.push(`/${orgSlug}/transactions`);
       } catch (e) {
         const message = (e as Error)?.message ?? '';
-        const isNetwork = !isOnline() || isRetriable(e);
+        const isNetwork = !isOnline() || neverReachedServer(e);
 
         if (isNetwork) {
           // Same offline safety net as every other scenario card gets below —
@@ -228,7 +307,7 @@ export function TransactionForm({
       router.push(`/${orgSlug}/transactions`);
     } catch (e) {
       const message = (e as Error)?.message ?? '';
-      const isNetwork = !isOnline() || isRetriable(e);
+      const isNetwork = !isOnline() || neverReachedServer(e);
 
       if (isNetwork && !isEdit) {
         // clientUuid is fixed for the lifetime of this form instance and the
@@ -261,11 +340,16 @@ export function TransactionForm({
 
   return (
     <>
-    <form action={handleSubmit} className="transaction-form">
+    <form key={entryGeneration} action={handleSubmit} className="transaction-form">
       {savedOffline ? (
-        <p role="status" className="form-success">
-          {t.transaction.savedOffline}
-        </p>
+        <div role="status" className="form-success">
+          <p>{t.transaction.savedOffline}</p>
+          {/* 提交按钮此刻是 disabled 的（同一笔不能排两次队），所以这个
+              出口必须和提示待在一起——否则用户只能自己导航离开。 */}
+          <button type="button" className="text-button" onClick={startAnotherEntry}>
+            {t.transaction.addAnother}
+          </button>
+        </div>
       ) : null}
 
       {!scenario ? (
@@ -308,9 +392,21 @@ export function TransactionForm({
         name="amount"
         inputMode="decimal"
         required
+        // aria-invalid 同时是红框的样式钩子和读屏听到的「这一项有问题」，
+        // 两者共用一个来源，不会出现只改了一半的状态。
+        aria-invalid={amountIssue ? true : undefined}
+        aria-describedby={amountIssue ? amountErrorId : undefined}
         value={amount}
         onChange={(event) => setAmount(event.target.value)}
       />
+      {amountIssue ? (
+        // 不用 role="alert"：用户还在这个框里打字，每敲一个字符就打断一次
+        // 朗读会让人没法继续输入。aria-describedby 已经把它挂在输入框上，
+        // 焦点回到金额时读屏会连着念出来。
+        <p id={amountErrorId} className="field-error">
+          {amountIssue}
+        </p>
+      ) : null}
 
       {!isJournalScenario ? (
         <>
@@ -344,7 +440,13 @@ export function TransactionForm({
       <label htmlFor="moneyAccountId">
         {kind === 'transfer' ? t.transaction.destinationAccount : t.transaction.chooseMoneyAccount}
       </label>
-      <select id="moneyAccountId" name="moneyAccountId" required defaultValue={initialData?.moneyAccountId ?? ''}>
+      <select
+        id="moneyAccountId"
+        name="moneyAccountId"
+        required
+        value={moneyAccountId}
+        onChange={(event) => setMoneyAccountId(event.target.value)}
+      >
         <option value="" disabled>
           {t.transaction.choosePlaceholder}
         </option>
@@ -452,9 +554,16 @@ export function TransactionForm({
       <div className="form-actions">
         <button
           type="submit"
-          disabled={pending || savedOffline || (isJournalScenario && direction === null)}
+          // amountIssue 也拦提交：让用户点下去、等一圈、再收到一条服务端
+          // 的英文错误，和当场告诉他「填个数字」相比毫无好处。
+          disabled={
+            pending || savedOffline || amountIssue !== null || (isJournalScenario && direction === null)
+          }
         >
-          {pending ? t.common.loading : isEdit ? t.transaction.save : t.transaction.save}
+          {/* 原来这里是 `isEdit ? t.transaction.save : t.transaction.save`，
+              两个分支同一个值，isEdit 这个判断从来没起过作用。新增和编辑
+              确实都叫「保存」，所以删掉判断而不是补一个不同的文案。 */}
+          {pending ? t.common.loading : t.transaction.save}
         </button>
 
         {isEdit ? (
@@ -469,31 +578,38 @@ export function TransactionForm({
         ) : null}
       </div>
 
-      {voidDialog ? (
-        <dialog open className="void-dialog">
-          <p>{t.transaction.voidReason}</p>
-          <input
-            value={voidReason}
-            onChange={(e) => setVoidReason(e.target.value)}
-            placeholder={t.transaction.voidReason}
-            autoFocus
-          />
-          <div className="void-dialog-actions">
-            <button type="button" onClick={() => setVoidDialog(false)}>
-              {t.common.cancel}
-            </button>
-            <button
-              type="button"
-              className="btn-danger"
-              disabled={!voidReason.trim() || pending}
-              onClick={handleVoid}
-            >
-              {t.transaction.void}
-            </button>
-          </div>
-        </dialog>
-      ) : null}
     </form>
+
+    {/* 对话框刻意留在 <form> 外面。<dialog> 即使用 showModal() 提到 top
+        layer，在 DOM 上仍然是 form 的后代，所以它里面的输入框按回车会触发
+        外层表单的隐式提交——在「确认作废」这个框里按回车，结果是把交易
+        保存一遍。 */}
+    <ModalDialog
+      open={voidDialog}
+      onClose={() => setVoidDialog(false)}
+      title={t.transaction.void}
+    >
+      <label htmlFor={voidReasonId}>{t.transaction.voidReason}</label>
+      <input
+        id={voidReasonId}
+        value={voidReason}
+        onChange={(e) => setVoidReason(e.target.value)}
+        autoFocus
+      />
+      <div className="app-dialog-actions">
+        <button type="button" onClick={() => setVoidDialog(false)}>
+          {t.common.cancel}
+        </button>
+        <button
+          type="button"
+          className="btn-danger"
+          disabled={!voidReason.trim() || pending}
+          onClick={handleVoid}
+        >
+          {t.transaction.void}
+        </button>
+      </div>
+    </ModalDialog>
 
     {isEdit && initialData ? (
       <AttachmentPanel

@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
+import { ModalDialog } from '@/components/shell/modal-dialog';
 import type { InventoryItemRow } from '@/server/repositories/inventory';
 import {
   createInventoryItem,
@@ -25,11 +26,40 @@ type Props = {
   locale: Locale;
   items: InventoryItemRow[];
   accounts: AccountOption[];
+  /** 公司本位币。库存金额原来一律按 'USD' 显示，见下面 totalValue 的注释。 */
+  baseCurrency: string;
 };
 
 const TYPES = ['purchase', 'sale', 'adjustment', 'return'] as const;
 
-export function InventoryList({ orgSlug, locale, items: initialItems, accounts }: Props) {
+/**
+ * 库存总值 = 平均成本 × 数量，**不经过浮点**。
+ *
+ * 原来写的是 `item.currentAvgCostMinor * BigInt(Math.round(item.currentQuantity))`：
+ * 数量被四舍五入成整数，0.5 kg 的存货按 1 kg 估值，2.4 米的线材按 2 米估值。
+ * 数量那一栏明明显示着 0.5，旁边的总值却是按 1 算的，对不上也看不出为什么。
+ *
+ * 这里把数量当定点小数处理：拆成整数位和小数位两段字符串，各自转 BigInt，
+ * 乘完再按小数位数除回去。除法那一步是唯一的精度损失点，且只发生在最后，
+ * 按最小货币单位四舍五入——和会计上「金额只保留到分」是同一件事。
+ */
+function inventoryValueMinor(avgCostMinor: bigint, quantity: number): bigint {
+  if (!Number.isFinite(quantity) || quantity === 0) return 0n;
+
+  const negative = quantity < 0;
+  // toFixed 的输入是 number，本身已经是浮点了；但这里只用它把数量固定到
+  // 4 位小数（数据库里 quantity 的精度），不用它算钱。
+  const [whole, fraction = ''] = Math.abs(quantity).toFixed(4).split('.');
+  const scale = 10n ** BigInt(fraction.length);
+  const scaledQuantity = BigInt(`${whole}${fraction}`);
+
+  const product = avgCostMinor * scaledQuantity;
+  // 四舍五入到最小货币单位，而不是直接截断（截断会让每一行都少几分）。
+  const rounded = (product + scale / 2n) / scale;
+  return negative ? -rounded : rounded;
+}
+
+export function InventoryList({ orgSlug, locale, items: initialItems, accounts, baseCurrency }: Props) {
   const t = getMessages(locale);
   const [items, setItems] = useState(initialItems);
   const [error, setError] = useState<string | null>(null);
@@ -241,13 +271,18 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts }
               <th scope="col" className="numeric">{t.inventory.avgCost}</th>
               <th scope="col" className="numeric">{t.inventory.totalValue}</th>
               <th scope="col">{t.inventory.status}</th>
-              <th scope="col">{t.common.cancel}</th>
+              {/* 这一列原来的表头是 t.common.cancel（「取消」）——它其实是
+                  操作列，里面放的是编辑/记录出入库/隐藏三个按钮。 */}
+              <th scope="col">{t.common.actions}</th>
             </tr>
           </thead>
           <tbody>
             {activeItems.map((item) => {
               const lowStock = item.currentQuantity <= item.reorderLevel;
-              const totalValueMinor = item.currentAvgCostMinor * BigInt(Math.round(item.currentQuantity));
+              const totalValueMinor = inventoryValueMinor(
+                item.currentAvgCostMinor,
+                item.currentQuantity,
+              );
 
               if (editing === item.id) {
                 return (
@@ -279,8 +314,12 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts }
                             value={editCostMethod}
                             onChange={(e) => setEditCostMethod(e.target.value as 'fifo' | 'average')}
                           >
-                            <option value="fifo">FIFO</option>
-                            <option value="average">{t.inventory.costMethod}</option>
+                            {/* 第二个选项原来渲染的是 t.inventory.costMethod
+                                （「成本法」——那是这个下拉本身的标题），
+                                选项名和字段名撞在一起，用户根本看不出选的是
+                                加权平均。 */}
+                            <option value="fifo">{t.inventory.fifo}</option>
+                            <option value="average">{t.inventory.average}</option>
                           </select>
                           <input
                             type="number"
@@ -334,10 +373,13 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts }
                   <td>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</td>
                   <td>{item.unit}</td>
                   <td className="numeric">{item.currentQuantity}</td>
+                  {/* 原来这两处硬写 'USD'。库存成本记的是本位币，一家
+                      马来西亚公司的货值会被标成 US$——数字对、币种错，
+                      而且零小数币种（JPY/KRW/VND）连数字都会差 100 倍。 */}
                   <td className="numeric">
-                    {formatMoney(item.currentAvgCostMinor, 'USD')}
+                    {formatMoney(item.currentAvgCostMinor, baseCurrency, locale)}
                   </td>
-                  <td className="numeric">{formatMoney(totalValueMinor, 'USD')}</td>
+                  <td className="numeric">{formatMoney(totalValueMinor, baseCurrency, locale)}</td>
                   <td>
                     {lowStock ? (
                       <span className="badge badge-danger">{t.inventory.lowStock}</span>
@@ -346,7 +388,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts }
                     )}
                   </td>
                   <td>
-                    <button onClick={() => startEdit(item)}>Edit</button>
+                    <button onClick={() => startEdit(item)}>{t.common.edit}</button>
                     <button onClick={() => setTxnItem(item)}>
                       {t.inventory.recordTransaction}
                     </button>
@@ -412,8 +454,8 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts }
             value={costMethod}
             onChange={(e) => setCostMethod(e.target.value as 'fifo' | 'average')}
           >
-            <option value="fifo">FIFO</option>
-            <option value="average">Average</option>
+            <option value="fifo">{t.inventory.fifo}</option>
+            <option value="average">{t.inventory.average}</option>
           </select>
           <input
             type="number"
@@ -451,14 +493,29 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts }
         </button>
       )}
 
-      {/* Transaction Dialog */}
-      {txnItem ? (
-        <div className="modal-overlay" role="dialog" aria-label={t.inventory.recordTransaction}>
-          <div className="modal-content">
-            <h3>
-              {t.inventory.recordTransaction}:{' '}
-              {localizedName({ name_en: txnItem.nameEn, name_zh: txnItem.nameZh }, locale)}
-            </h3>
+      {/* 库存出入库对话框。原来是 <div role="dialog">：有对话框的语义，
+          却没有对话框的任何行为——Tab 会跑到背后的库存表格里、Esc 不关、
+          背景不 inert。换成共用的 ModalDialog（内部走 showModal()）。 */}
+      <ModalDialog
+        // 这个框里有类型、数量、单价、账户四组字段，.app-dialog 默认的
+        // 400px 会把每一行挤成两截。
+        className="app-dialog--wide"
+        open={txnItem !== null}
+        onClose={() => {
+          setTxnItem(null);
+          setError(null);
+        }}
+        title={
+          txnItem
+            ? `${t.inventory.recordTransaction}: ${localizedName(
+                { name_en: txnItem.nameEn, name_zh: txnItem.nameZh },
+                locale,
+              )}`
+            : t.inventory.recordTransaction
+        }
+      >
+        {txnItem ? (
+          <>
             <label htmlFor="txn-type">{t.inventory.type}</label>
             <select
               id="txn-type"
@@ -503,17 +560,17 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts }
 
             {error ? <p role="alert" className="form-error">{error}</p> : null}
 
-            <div className="form-actions">
-              <button onClick={handleRecordTxn} disabled={pending}>
-                {pending ? t.common.loading : t.settings.save}
-              </button>
+            <div className="app-dialog-actions">
               <button onClick={() => { setTxnItem(null); setError(null); }}>
                 {t.common.cancel}
               </button>
+              <button className="primary-button" onClick={handleRecordTxn} disabled={pending}>
+                {pending ? t.common.loading : t.settings.save}
+              </button>
             </div>
-          </div>
-        </div>
-      ) : null}
+          </>
+        ) : null}
+      </ModalDialog>
     </div>
   );
 }

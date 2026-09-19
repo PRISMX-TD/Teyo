@@ -7,6 +7,12 @@ const PUBLIC_PATHS = [
   '/forgot-password',
   '/reset-password',
   '/auth/callback',
+  // /offline 是 Service Worker 的导航兜底页（见 app/sw.ts 的 fallbacks.entries）。
+  // 它此前不在这个列表里，于是「在线但未登录时打开它」会被重定向到 /login——
+  // 一个专门用来在没有网络时显示的页面，却要求先通过一次需要网络的会话检查。
+  // 真正离线时 SW 直接从缓存出这一页、根本不经过中间件，所以这个洞平时看不见，
+  // 只在会话过期后第一次点开时暴露出来。
+  '/offline',
 ];
 
 export async function middleware(request: NextRequest) {

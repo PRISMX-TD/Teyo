@@ -8,6 +8,7 @@ import type { TrialBalanceRow } from '@/server/repositories/reports';
 import type { ProfitLossResult, BalanceSheetResult, CashFlowResult } from '@/server/repositories/reports';
 import type { ArAgingRow, ApAgingRow, CustomerStatement } from '@/server/repositories/aging';
 import type { ContactRow } from '@/server/repositories/contacts';
+import { startOfLocalYear, todayLocalISO } from '@/lib/date';
 import {
   checkBalanceSheet,
   checkCashFlow,
@@ -88,20 +89,62 @@ export function ReportsView({
     { key: 'vendor-statement', label: t.vendorStatement.title },
   ];
 
+  /**
+   * 方向键在标签之间移动（WAI-ARIA tabs 模式）。
+   *
+   * 改成 role="tablist" 之后这一步是必须的，不是加分项：tablist 里只有
+   * 选中的那个标签留在 Tab 序列里（tabIndex -1/0，见下面），键盘用户没有
+   * 方向键就再也到不了另外七个报表。原来那版是 <nav> 包一排裸 <button>，
+   * Tab 能逐个走过去，但读屏念出来是「八个用途不明的按钮」，既不知道它们
+   * 是一组，也不知道当前正在看哪一个。
+   */
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      const lastIndex = tabs.length - 1;
+      let nextIndex: number | null = null;
+
+      if (event.key === 'ArrowRight') nextIndex = index === lastIndex ? 0 : index + 1;
+      else if (event.key === 'ArrowLeft') nextIndex = index === 0 ? lastIndex : index - 1;
+      else if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = lastIndex;
+      if (nextIndex === null) return;
+
+      event.preventDefault();
+      setTab(tabs[nextIndex].key);
+      // 这个模式下选中即显示，焦点必须跟着走，否则读屏读到的还是旧标签。
+      const container = event.currentTarget.parentElement;
+      container?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
+    },
+    [tabs],
+  );
+
   return (
     <>
-      <nav className="report-tabs">
-        {tabs.map((tabItem) => (
-          <button
-            key={tabItem.key}
-            className={tab === tabItem.key ? 'active' : ''}
-            onClick={() => setTab(tabItem.key)}
-          >
-            {tabItem.label}
-          </button>
-        ))}
-      </nav>
+      <div className="report-tabs" role="tablist" aria-label={t.reports.tabsLabel}>
+        {tabs.map((tabItem, index) => {
+          const selected = tab === tabItem.key;
+          return (
+            <button
+              key={tabItem.key}
+              type="button"
+              role="tab"
+              id={`report-tab-${tabItem.key}`}
+              aria-selected={selected}
+              aria-controls="report-panel"
+              // roving tabindex：整组标签在 Tab 序列里只占一站，
+              // 组内靠方向键走。
+              tabIndex={selected ? 0 : -1}
+              className={selected ? 'active' : ''}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
+              onClick={() => setTab(tabItem.key)}
+            >
+              {tabItem.label}
+            </button>
+          );
+        })}
+      </div>
 
+      <div id="report-panel" role="tabpanel" aria-labelledby={`report-tab-${tab}`} tabIndex={-1}>
       {tab === 'trial-balance' ? (
         <TrialBalanceTable rows={trialBalance} locale={locale} baseCurrency={baseCurrency} t={t} />
       ) : tab === 'profit-loss' ? (
@@ -133,6 +176,7 @@ export function ReportsView({
           type="vendor"
         />
       )}
+      </div>
     </>
   );
 }
@@ -571,8 +615,8 @@ function StatementTab({
   const selectLabel = isCustomer ? t.customerStatement.selectContact : t.vendorStatement.selectContact;
 
   const [contactId, setContactId] = useState('');
-  const today = new Date().toISOString().slice(0, 10);
-  const yearStart = `${new Date().getFullYear()}-01-01`;
+  const today = todayLocalISO();
+  const yearStart = startOfLocalYear();
   const [from, setFrom] = useState(yearStart);
   const [to, setTo] = useState(today);
   const [data, setData] = useState<CustomerStatement | null>(null);
@@ -591,12 +635,15 @@ function StatementTab({
       const json = await res.json();
       setData(json);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load statement');
+      // 原来的兜底文案是写死的英文。这里连 e.message 也一并换掉：
+      // 上面抛的是 `HTTP 500`，把它直接摆给用户看，中文界面里会突然冒出
+      // 一句英文技术缩写，而且他拿它什么也做不了。
+      setError(t.reports.statementLoadFailed);
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [orgSlug, type, contactId, from, to]);
+  }, [orgSlug, type, contactId, from, to, t]);
 
   return (
     <div className="statement-tab">

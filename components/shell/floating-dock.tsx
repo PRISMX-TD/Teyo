@@ -41,6 +41,7 @@ export function FloatingDock({ orgSlug, i18n }: Props) {
           <Link
             key={item.label}
             href={href}
+            aria-current={isActive ? 'page' : undefined}
             className={isActive ? 'active' : ''}
           >
             {i18n.nav[item.label]}

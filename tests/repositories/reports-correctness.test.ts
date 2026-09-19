@@ -30,7 +30,12 @@ import {
   getProfitLoss,
   getTrialBalance,
 } from '@/server/repositories/reports';
-import { checkBalanceSheet, checkCashFlow, checkTrialBalance } from '@/server/domain/report-invariants';
+import {
+  checkBalanceSheet,
+  checkCashFlow,
+  checkTrialBalance,
+  checkTrialBalanceAgainstBalanceSheet,
+} from '@/server/domain/report-invariants';
 
 let userId: string;
 let orgId: string;
@@ -115,6 +120,110 @@ async function createScratchAccount(
         returning id
       `;
   return account.id as string;
+}
+
+/**
+ * 按 code 取科目，没有就建。
+ *
+ * 与 createScratchAccount 的区别：后者假定这个 code 在本公司里还不存在
+ * （accounts 上有 organization_id + code 的唯一约束），而下面几个用例要用的
+ * `accounts-receivable` 已经被更早的 B4 用例建过了——那个用例没有把 id 存进
+ * 任何变量，而 getCashFlow 是按字面量 code 找它的，所以这里必须复用同一行，
+ * 不能另建一个同名科目（会直接撞唯一约束）。
+ */
+async function ensureAccount(
+  code: string,
+  type: string,
+  isMoney = false,
+  cashFlowCategory?: 'operating' | 'investing' | 'financing',
+): Promise<string> {
+  const existing = await admin`
+    select id from accounts where organization_id = ${orgId} and code = ${code}
+  `;
+  const found = existing.at(0);
+  if (found) return found.id as string;
+  return createScratchAccount(code, type, isMoney, cashFlowCategory);
+}
+
+/**
+ * 插一笔 n 行的配平交易（外币时本位币金额单独给）。
+ *
+ * insertBalancedTransaction 只能出一借一贷，而汇兑差额那笔是三行
+ * （借银行 / 贷应收 / 贷汇兑收益），含税单据同样是三行——正是
+ * server/domain/posting-templates.ts 里「n >= 2 而不是恰好 2」预留的形状。
+ */
+async function insertJournal(args: {
+  occurredOn: string;
+  currency: string;
+  /** 交易表头的原币金额（借方合计，原币）。 */
+  amountMinor: bigint;
+  lines: { accountId: string; direction: 'debit' | 'credit'; baseAmountMinor: bigint }[];
+}): Promise<string> {
+  const debitBase = args.lines
+    .filter((l) => l.direction === 'debit')
+    .reduce((sum, l) => sum + l.baseAmountMinor, 0n);
+  const creditBase = args.lines
+    .filter((l) => l.direction === 'credit')
+    .reduce((sum, l) => sum + l.baseAmountMinor, 0n);
+  if (debitBase !== creditBase) {
+    throw new Error(`fixture is not balanced: debit ${debitBase} vs credit ${creditBase}`);
+  }
+
+  const rate = (Number(debitBase) / Number(args.amountMinor)).toFixed(8);
+  const [txn] = await admin`
+    insert into transactions
+      (organization_id, kind, occurred_on, description, currency,
+       amount_minor, base_amount_minor, exchange_rate, category_id,
+       created_by, client_uuid)
+    values (${orgId}, 'journal', ${args.occurredOn}::date, 'fx fixture', ${args.currency},
+       ${args.amountMinor.toString()}, ${debitBase.toString()}, ${rate}, null,
+       ${userId}, gen_random_uuid())
+    returning id
+  `;
+  const txnId = txn.id as string;
+
+  // 全部分录必须在**同一条 insert 语句**里落库，不能逐行插。
+  // journal_lines_balanced 是 `deferrable initially deferred` 的约束触发器
+  // （见 0001 迁移），在 admin 这个不开显式事务的连接上，每条语句自成一个
+  // 事务——逐行插时第一行提交的那一刻账就是不平的，整条语句被回滚。更糟的是
+  // postgres.js 对这种「提交阶段才报出来的错」不会 reject 掉已经返回
+  // CommandComplete 的那个 Promise：调用方看到的是「插入成功」，而库里
+  // 一行都没有。这个夹具第一版就是这么写的，表现为报表里所有金额都是 0，
+  // 而没有任何一处报错。
+  //
+  // 原币金额直接取本位币金额：触发器要求原币与本位币两组合计各自配平，
+  // 按汇率反推原币会引入舍入残差；而本文件的报表断言全部读
+  // base_amount_minor，原币列不参与任何断言。
+  await admin`
+    insert into journal_lines ${admin(
+      args.lines.map((line) => ({
+        transaction_id: txnId,
+        organization_id: orgId,
+        account_id: line.accountId,
+        direction: line.direction,
+        amount_minor: line.baseAmountMinor.toString(),
+        base_amount_minor: line.baseAmountMinor.toString(),
+      })),
+      'transaction_id',
+      'organization_id',
+      'account_id',
+      'direction',
+      'amount_minor',
+      'base_amount_minor',
+    )}
+  `;
+
+  // 逐行插那一版的教训：插完之后一定要回读一次确认行真的在库里。
+  const [check] = await admin`
+    select count(*) as n from journal_lines where transaction_id = ${txnId}
+  `;
+  if (Number(check.n) !== args.lines.length) {
+    throw new Error(
+      `fixture lost journal lines: expected ${args.lines.length}, found ${check.n}`,
+    );
+  }
+
+  return txnId;
 }
 
 beforeAll(async () => {
@@ -651,5 +760,234 @@ describe('getCashFlow - signs and tie-out (B4 / I8)', () => {
     expect(cf.unclassified).toBe(amountMinor);
     expect(cf.netChange).toBe(amountMinor);
     expect(checkCashFlow(cf).differenceMinor).toBe(0n);
+  });
+});
+
+/* =========================================================================
+   单据进总账之后：四张报表仍然两两自洽
+   ========================================================================= */
+
+describe('单据进总账后的自洽性（外币发票 → 部分收款 → 汇兑差额）', () => {
+  // 2027 年 3 月，文件里没有任何别的用例碰过这个窗口。
+  const FROM = '2027-03-01';
+  const TO = '2027-03-31';
+
+  it('四张报表两两自洽，且 unclassified 保持为 0', async () => {
+    // 场景：一张 USD 1,000.00 的发票，开票日汇率 4.00 → 本位币 RM 4,000.00；
+    // 半个月后收到 USD 400.00，收款日汇率 4.20 → 实收 RM 1,680.00。
+    // 应收按**开票时的汇率**冲减 RM 1,600.00，差额 RM 80.00 记汇兑收益。
+    // 这正是 server/services/account-seed.ts 里 fx-gain 那段注释描述的分录。
+    const arId = await ensureAccount('accounts-receivable', 'asset');
+    const revenueId = await ensureAccount('fx-sales', 'revenue');
+    const fxGainId = await ensureAccount('fx-gain', 'revenue', false, 'operating');
+
+    // 开票：借应收 4,000.00 / 贷收入 4,000.00（USD 1,000 @ 4.00）
+    await insertJournal({
+      occurredOn: '2027-03-01',
+      currency: 'USD',
+      amountMinor: 100000n,
+      lines: [
+        { accountId: arId, direction: 'debit', baseAmountMinor: 400000n },
+        { accountId: revenueId, direction: 'credit', baseAmountMinor: 400000n },
+      ],
+    });
+
+    // 收款：借银行 1,680.00 / 贷应收 1,600.00 / 贷汇兑收益 80.00
+    await insertJournal({
+      occurredOn: '2027-03-15',
+      currency: 'USD',
+      amountMinor: 40000n,
+      lines: [
+        { accountId: cashId, direction: 'debit', baseAmountMinor: 168000n },
+        { accountId: arId, direction: 'credit', baseAmountMinor: 160000n },
+        { accountId: fxGainId, direction: 'credit', baseAmountMinor: 8000n },
+      ],
+    });
+
+    const { trialBalance, profitLoss, balanceSheet, cashFlow, allTimePl } =
+      await withTransaction(userId, async (tx) => {
+        const trial = await getTrialBalance(tx, orgId, TO);
+        // I5 要求「本年利润」是自开业以来的累计净利润（本项目还没有年结），
+        // 所以这里取一个覆盖全部夹具数据的区间，而不是当月。
+        const allTime = await getProfitLoss(tx, orgId, '2026-01-01', '2027-12-31');
+        const bs = await getBalanceSheet(tx, orgId, TO, allTime.netIncome);
+        const pl = await getProfitLoss(tx, orgId, FROM, TO);
+        const cf = await getCashFlow(tx, orgId, FROM, TO);
+        return {
+          trialBalance: trial,
+          profitLoss: pl,
+          balanceSheet: bs,
+          cashFlow: cf,
+          allTimePl: allTime,
+        };
+      });
+
+    // I6：试算平衡表借贷相等
+    expect(checkTrialBalance(trialBalance).differenceMinor).toBe(0n);
+
+    // I5：资产 = 负债 + 权益 + 本年利润
+    expect(
+      checkBalanceSheet({
+        assetTotal: balanceSheet.assetTotal,
+        liabilityTotal: balanceSheet.liabilityTotal,
+        equityTotal: balanceSheet.equityTotal,
+        currentYearEarnings: balanceSheet.currentYearEarnings,
+      }).differenceMinor,
+    ).toBe(0n);
+
+    // I8：期初现金 + 净变动 = 期末现金
+    expect(checkCashFlow(cashFlow).differenceMinor).toBe(0n);
+
+    // I11：同一 asOf 下试算平衡表与资产负债表逐科目相等
+    const crossFoot = checkTrialBalanceAgainstBalanceSheet({
+      trialBalance,
+      balanceSheetRows: [
+        ...balanceSheet.assetRows,
+        ...balanceSheet.liabilityRows,
+        ...balanceSheet.equityRows,
+      ],
+    });
+    expect(crossFoot.mismatchedCodes).toEqual([]);
+    expect(crossFoot.differenceMinor).toBe(0n);
+
+    // 本期的具体数字：
+    // netIncome = 收入 4,000.00 + 汇兑收益 80.00
+    expect(profitLoss.netIncome).toBe(408000n);
+    // arChange = -(400000 - 160000) = -240000
+    const arRow = cashFlow.operating.rows.find((r) => r.label === 'arChange')!;
+    expect(arRow.amountMinor).toBe(-240000n);
+    // 经营活动 = 408000 - 240000 = 168000，恰好等于真实的现金流入。
+    expect(cashFlow.closingCash - cashFlow.openingCash).toBe(168000n);
+    // 关键断言：汇兑收益既在 netIncome 里，它的对方科目又被 arChange 覆盖，
+    // 所以三段分类**完整**解释了这笔现金变动，残差行必须是 0。
+    // 如果 fx 被重复计算（比如再单列一行加回），这里会变成 -8000。
+    expect(cashFlow.unclassified).toBe(0n);
+
+    // 期末应收在资产负债表上：本期 400000 - 160000 = 240000，
+    // 外加 B4 那条用例在 2026-08-01 往同一个科目记的 5000（as-of 是累计）。
+    const arOnBs = balanceSheet.assetRows.find((r) => r.code === 'accounts-receivable')!;
+    expect(arOnBs.totalMinor).toBe(245000n);
+
+    expect(allTimePl.netIncome).toBe(balanceSheet.currentYearEarnings);
+  });
+});
+
+describe('现金流量表 - 税款两侧不再落进 unclassified', () => {
+  const FROM = '2027-04-01';
+  const TO = '2027-04-30';
+
+  it('taxPayableChange / taxReceivableChange 具名出现，残差归零', async () => {
+    // tax-payable（销项税，负债）与 tax-receivable（进项税，资产）都打了
+    // cashFlowCategory = 'operating'，但经营段全部是字面量 code 查询，
+    // 在这次补上两行之前没有任何查询项读它们——含税单据一接进总账，
+    // 它们的现金变动就会整批落进 unclassified。
+    const apId = await ensureAccount('accounts-payable', 'liability', false, 'operating');
+    const taxPayableId = await ensureAccount('tax-payable', 'liability', false, 'operating');
+    const taxReceivableId = await ensureAccount('tax-receivable', 'asset', false, 'operating');
+    const purchasesId = await ensureAccount('fx-purchases', 'expense');
+    const taxSalesId = await ensureAccount('tax-sales', 'revenue');
+
+    // 含 6% 进项税的供应商账单：借进货 900.00 / 借进项税 100.00 / 贷应付 1,000.00
+    await insertJournal({
+      occurredOn: '2027-04-01',
+      currency: 'MYR',
+      amountMinor: 100000n,
+      lines: [
+        { accountId: purchasesId, direction: 'debit', baseAmountMinor: 90000n },
+        { accountId: taxReceivableId, direction: 'debit', baseAmountMinor: 10000n },
+        { accountId: apId, direction: 'credit', baseAmountMinor: 100000n },
+      ],
+    });
+    // 付清这张账单：借应付 1,000.00 / 贷现金 1,000.00
+    await insertJournal({
+      occurredOn: '2027-04-10',
+      currency: 'MYR',
+      amountMinor: 100000n,
+      lines: [
+        { accountId: apId, direction: 'debit', baseAmountMinor: 100000n },
+        { accountId: cashId, direction: 'credit', baseAmountMinor: 100000n },
+      ],
+    });
+    // 含销项税的现金销售：借现金 1,060.00 / 贷收入 1,000.00 / 贷销项税 60.00
+    await insertJournal({
+      occurredOn: '2027-04-15',
+      currency: 'MYR',
+      amountMinor: 106000n,
+      lines: [
+        { accountId: cashId, direction: 'debit', baseAmountMinor: 106000n },
+        { accountId: taxSalesId, direction: 'credit', baseAmountMinor: 100000n },
+        { accountId: taxPayableId, direction: 'credit', baseAmountMinor: 6000n },
+      ],
+    });
+
+    const cf = await withTransaction(userId, (tx) => getCashFlow(tx, orgId, FROM, TO));
+
+    const taxPayableRow = cf.operating.rows.find((r) => r.label === 'taxPayableChange')!;
+    const taxReceivableRow = cf.operating.rows.find((r) => r.label === 'taxReceivableChange')!;
+
+    // 负债科目同 AP：欠着还没缴，现金留在手上 → 正。
+    expect(taxPayableRow.amountMinor).toBe(6000n);
+    // 资产科目同 AR：多付出去还没收回 → 负。
+    expect(taxReceivableRow.amountMinor).toBe(-10000n);
+
+    // 真实现金变动：-100000 + 106000 = +6000
+    expect(cf.closingCash - cf.openingCash).toBe(6000n);
+    // 补上这两行之前，unclassified 会是 -4000（10000 的进项 + 6000 的销项
+    // 没有任何一项调整去解释）。
+    expect(cf.unclassified).toBe(0n);
+    expect(checkCashFlow(cf).differenceMinor).toBe(0n);
+  });
+});
+
+describe('I11 - 试算平衡表 vs 资产负债表的交叉校验', () => {
+  const asOf = '2027-12-31';
+
+  it('两条查询对同一个 asOf 给出逐科目相同的余额', async () => {
+    const { trialBalance, balanceSheet } = await withTransaction(userId, async (tx) => {
+      const trial = await getTrialBalance(tx, orgId, asOf);
+      const pl = await getProfitLoss(tx, orgId, '2026-01-01', asOf);
+      const bs = await getBalanceSheet(tx, orgId, asOf, pl.netIncome);
+      return { trialBalance: trial, balanceSheet: bs };
+    });
+
+    const result = checkTrialBalanceAgainstBalanceSheet({
+      trialBalance,
+      balanceSheetRows: [
+        ...balanceSheet.assetRows,
+        ...balanceSheet.liabilityRows,
+        ...balanceSheet.equityRows,
+      ],
+    });
+
+    expect(result.mismatchedCodes).toEqual([]);
+    expect(result.balanced).toBe(true);
+  });
+
+  it('两张表口径一旦分叉就能被抓到（人为构造一次分叉）', async () => {
+    // 这条用例不动生产代码，只把资产负债表的一行改掉，证明这条不变量真的
+    // 在比较、而不是恒真。
+    const { trialBalance, balanceSheet } = await withTransaction(userId, async (tx) => {
+      const trial = await getTrialBalance(tx, orgId, asOf);
+      const pl = await getProfitLoss(tx, orgId, '2026-01-01', asOf);
+      const bs = await getBalanceSheet(tx, orgId, asOf, pl.netIncome);
+      return { trialBalance: trial, balanceSheet: bs };
+    });
+
+    const tampered = [
+      ...balanceSheet.assetRows.map((r) =>
+        r.code === 'accounts-receivable' ? { ...r, totalMinor: r.totalMinor + 1n } : r,
+      ),
+      ...balanceSheet.liabilityRows,
+      ...balanceSheet.equityRows,
+    ];
+
+    const result = checkTrialBalanceAgainstBalanceSheet({
+      trialBalance,
+      balanceSheetRows: tampered,
+    });
+
+    expect(result.balanced).toBe(false);
+    expect(result.differenceMinor).toBe(1n);
+    expect(result.mismatchedCodes).toEqual(['accounts-receivable']);
   });
 });

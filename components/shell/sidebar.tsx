@@ -87,6 +87,10 @@ export function Sidebar({ orgSlug, i18n }: Props) {
                 <Link
                   key={link.href}
                   href={link.href}
+                  // className 只喂给 CSS，读屏完全看不见它。aria-current
+                  // 才是「你正在这一页」这件事唯一能被辅助技术感知的形式；
+                  // 没有它，18 个链接里哪个是当前页，读屏用户无从判断。
+                  aria-current={isActive ? 'page' : undefined}
                   className={isActive ? 'active' : ''}
                 >
                   {link.label}
@@ -98,8 +102,18 @@ export function Sidebar({ orgSlug, i18n }: Props) {
       </nav>
 
       <div className="sidebar-footer">
-        <button type="button" className="theme-toggle" onClick={toggle}>
-          {theme === 'dark' ? 'Light' : 'Dark'}
+        {/* 原来是 `theme === 'dark' ? 'Light' : 'Dark'`：同一个功能在 /more
+            页面走的是 t.nav.toggleTheme，这里却是两段写死的英文。文案统一
+            到 catalog，当前状态交给 aria-pressed 表达（「深色模式开着吗」
+            正是一个双态开关，不是两个不同的按钮）。 */}
+        <button
+          type="button"
+          className="theme-toggle"
+          aria-pressed={theme === 'dark'}
+          onClick={toggle}
+        >
+          <span>{i18n.nav.toggleTheme}</span>
+          <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
         </button>
         <Link href="/account">{i18n.nav.account}</Link>
         <Link href="/">{i18n.nav.switchCompany}</Link>

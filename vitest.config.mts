@@ -23,6 +23,17 @@ export default defineConfig({
     // 4 个进程 × 14 条连接留有余量。
     maxWorkers: 4,
     minWorkers: 1,
+    // 默认的 5s/10s 是按「测试跑在本机」定的。这套测试连的是远端 Supabase
+    // （vercel.json 把函数固定在 sin1，数据库在 ap-southeast-1），一次往返
+    // 动辄几百毫秒，而 beforeAll 里往往要建公司 + 灌 34 个科目 + 13 个分类。
+    // 用默认值时 tests/repositories/overview.test.ts 的 beforeAll 与
+    // dashboard.test.ts 里造数据最多的那条会间歇性超时——失败的文件每轮
+    // 都不一样，看起来像数据污染，实际只是网络慢。
+    //
+    // 放宽超时不会掩盖真正的死锁：真卡住的用例仍然会在 30s/60s 上失败，
+    // 只是不再把「比平时慢了 200ms」也算成失败。
+    testTimeout: 30_000,
+    hookTimeout: 60_000,
   },
   resolve: {
     alias: { '@': rootDir },

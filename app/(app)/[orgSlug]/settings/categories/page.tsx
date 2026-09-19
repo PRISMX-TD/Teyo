@@ -44,7 +44,7 @@ export default async function CategoriesSettingsPage({
   return (
     <>
       <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
-        &larr; {locale === 'zh' ? '设置' : 'Settings'}
+        &larr; {t.nav.settings}
       </Link>
       <h1>{t.settings.categories}</h1>
       <NamedList

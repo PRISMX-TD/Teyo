@@ -5,6 +5,7 @@ import Link from 'next/link';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
+import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
 import type { ProjectRow } from '@/server/repositories/projects';
 import { updateProjectAction, setProjectStatusAction } from '@/server/actions/projects';
 import { ProjectProfitability } from '@/components/projects/project-profitability';
@@ -20,10 +21,19 @@ type Props = {
   locale: Locale;
   projects: ProjectRow[];
   profitabilityMap: Record<string, ProjectProfit>;
+  /** 公司本位币。预算原来一律按 'USD' 显示、按两位小数解析。 */
+  baseCurrency: string;
 };
 
-export function ProjectList({ orgSlug, locale, projects: initialProjects, profitabilityMap }: Props) {
+export function ProjectList({
+  orgSlug,
+  locale,
+  projects: initialProjects,
+  profitabilityMap,
+  baseCurrency,
+}: Props) {
   const t = getMessages(locale);
+  const exponent = currencyExponent(baseCurrency);
   const [projects, setProjects] = useState(initialProjects);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -53,7 +63,9 @@ export function ProjectList({ orgSlug, locale, projects: initialProjects, profit
     setEditing(item.id);
     setEditName(item.name);
     setEditDescription(item.description ?? '');
-    setEditBudget(item.budgetMinor ? String(Number(item.budgetMinor) / 100) : '');
+    // 原来是 `String(Number(item.budgetMinor) / 100)`：既走了浮点，又把
+    // 小数位写死成 2。日元公司的 1,500,000 会被显示成 15000.00。
+    setEditBudget(item.budgetMinor ? formatMinorToDecimal(item.budgetMinor, exponent) : '');
     setEditStartDate(item.startDate ?? '');
     setEditEndDate(item.endDate ?? '');
   }
@@ -65,7 +77,11 @@ export function ProjectList({ orgSlug, locale, projects: initialProjects, profit
       await updateProjectAction(orgSlug, id, {
         name: editName.trim(),
         description: editDescription.trim(),
-        budgetMinor: editBudget ? String(Math.round(parseFloat(editBudget) * 100)) : undefined,
+        // 传十进制字符串，由服务端按本位币的小数位解析（见
+        // server/actions/projects.ts 的 budgetToMinor）。前端不再自己
+        // 算最小货币单位——原来那句 Math.round(parseFloat(x) * 100) 对
+        // 零小数币种会放大 100 倍，而且是浮点。
+        budget: editBudget || undefined,
         startDate: editStartDate || undefined,
         endDate: editEndDate || undefined,
       });
@@ -76,7 +92,9 @@ export function ProjectList({ orgSlug, locale, projects: initialProjects, profit
                 ...p,
                 name: editName.trim(),
                 description: editDescription.trim() || null,
-                budgetMinor: editBudget ? BigInt(Math.round(parseFloat(editBudget) * 100)) : null,
+                // 本地乐观更新要和服务端算出来的是同一个数，所以这里也走
+                // parseDecimalToMinor，而不是另写一套换算。
+                budgetMinor: editBudget ? parseDecimalToMinor(editBudget, exponent) : null,
                 startDate: editStartDate || null,
                 endDate: editEndDate || null,
               }
@@ -179,14 +197,14 @@ export function ProjectList({ orgSlug, locale, projects: initialProjects, profit
               {/* 第二层：项目信息 badge */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
                 {project.budgetMinor ? (
-                  <span className="badge badge-info">{t.projects.budget}: {formatMoney(project.budgetMinor, 'USD')}</span>
+                  <span className="badge badge-info">{t.projects.budget}: {formatMoney(project.budgetMinor, baseCurrency, locale)}</span>
                 ) : null}
                 {project.startDate ? <span className="badge badge-info">{project.startDate}</span> : null}
                 {project.endDate ? <span className="badge badge-info">→ {project.endDate}</span> : null}
               </div>
               {/* 第三层：操作按钮组 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-1)' }}>
-                <button onClick={() => startEdit(project)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>Edit</button>
+                <button onClick={() => startEdit(project)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>{t.common.edit}</button>
                 <button onClick={() => setExpanded(expanded === project.id ? null : project.id)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
                   {expanded === project.id ? '−' : '+'}
                 </button>
@@ -208,6 +226,7 @@ export function ProjectList({ orgSlug, locale, projects: initialProjects, profit
                 <ProjectProfitability
                   profitability={profit}
                   locale={locale}
+                  baseCurrency={baseCurrency}
                 />
               </div>
             ) : null}

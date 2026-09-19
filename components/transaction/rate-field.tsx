@@ -106,10 +106,16 @@ export function RateField({
               means the server takes the currency !== baseCurrency cache-lookup
               branch itself and stamps rate_source='auto'. Submitting this value
               as `exchangeRate` would make resolveRate treat it as a manual entry
-              -- the same bug that made rate_source='manual' unconditional. */}
-          <p id="exchangeRate" className="rate-field__value" aria-live="polite">
+              -- the same bug that made rate_source='manual' unconditional.
+
+              元素是 <output> 而不是 <p>：上面那个 <label for="exchangeRate">
+              只能关联 labelable 元素，指到 <p> 上时关联直接失效——读屏会先
+              念一个没有主人的「汇率」，再念一串没有名字的数字。<output> 是
+              labelable 的，同时自带 role="status" + aria-live="polite"，所以
+              原来手写的 aria-live 也可以去掉。它没有 name，依然不会被提交。 */}
+          <output id="exchangeRate" className="rate-field__value">
             {rate || '…'}
-          </p>
+          </output>
           <button type="button" className="btn-small" onClick={() => setSource('manual')}>
             {t.transaction.useOtherRate}
           </button>

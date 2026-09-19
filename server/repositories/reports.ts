@@ -311,6 +311,30 @@ export type CashFlowResult = {
  * "不平" 提示），不如显式算出这个残差并把它计入 netChange、单独命名展示：
  * unclassified = (closingCash - openingCash) - (operatingTotal + investingTotal + financingTotal)。
  * 这样 tie-out 恒成立，但缺口不会被隐藏，而是被诚实地摆在一行上。
+ *
+ * 汇兑损益（fx-gain / fx-loss）为什么不单列一行、也不会被重复计算：
+ *
+ * 这两个是损益科目，已经**完整地**包含在 netIncome 里了（getProfitLoss 按
+ * a.type in ('revenue','expense') 聚合，不挑 code）。给它们再加一行加回，
+ * 就会把同一笔金额算两次。
+ *
+ * 那它们的对方科目呢？一张 1,000 USD 的发票按开票日汇率 4.0 记进应收
+ * （Dr AR 4,000 / Cr sales 4,000）；收款日汇率 4.2，实收 4,200
+ * （Dr Bank 4,200 / Cr AR 4,000 / Cr fx-gain 200）。在覆盖两笔的期间里：
+ *   netIncome = 4,000(sales) + 200(fx-gain) = 4,200
+ *   arChange  = -(4,000 - 4,000) = 0
+ *   operatingTotal = 4,200，而真实现金变动也是 4,200 —— 对上了。
+ * 只有收款落在本期时（发票在上期）：
+ *   netIncome = 200，arChange = -(0 - 4,000) = +4,000，合计 4,200 —— 同样对上。
+ * 换成先重估再收款（Dr AR 200 / Cr fx-gain 200，随后 Cr AR 4,200）结论不变。
+ *
+ * 一般地：净利润等于全部损益科目净额的相反数，而每一笔分录都配平，所以
+ * 「净利润 + 各项非现金/营运资金调整」缺的那部分恰好是**没有被任何一段
+ * 覆盖的非资金科目**的净额——汇兑损益的对方科目永远是应收/应付或资金账户，
+ * 前者由 arChange/apChange 覆盖，后者本身就是现金。两边都不落在缺口里，
+ * 因此 fx 不会让 unclassified 变成非零，也不会被算两次。
+ * tests/repositories/reports-correctness.test.ts 里那条外币发票 → 部分收款
+ * → 汇兑差额的用例把这段推理钉住了。
  */
 export async function getCashFlow(
   tx: Tx,
@@ -413,6 +437,21 @@ export async function getCashFlow(
   // 预付费用变动
   const prepaidChange = -(await netFlow('prepaid-expenses'));
 
+  // 税款两侧。种子科目里 tax-payable 与（0021 补的）tax-receivable 都打了
+  // cashFlowCategory = 'operating' 的标签，但**没有任何查询项读它们**：
+  // netFlowByCategory 只被 'investing' 调用过一次，经营段全部是字面量 code。
+  // 于是这两个科目的现金变动一直整批落进 unclassified 残差行——单据接进
+  // 总账之后，含税发票/账单会让它们第一次有真实余额，那条残差行会突然
+  // 冒出一个谁也解释不了的数字。
+  //
+  // 符号规则按科目类型，不按名字里有没有 tax：
+  // - tax-payable 是负债（销项税，欠税务局的），与 AP 同侧：欠着还没缴，
+  //   现金留在手上，取反后为正；
+  // - tax-receivable 是资产（进项税，可以抵扣/退回的），与 AR 同侧：
+  //   多付出去的钱还没收回来，取反后为负。
+  const taxPayableChange = -(await netFlow('tax-payable'));
+  const taxReceivableChange = -(await netFlow('tax-receivable'));
+
   const operatingTotal = netIncome
     + depreciation
     + amortization
@@ -420,7 +459,9 @@ export async function getCashFlow(
     + apChange
     + invChange
     + deferredRevChange
-    + prepaidChange;
+    + prepaidChange
+    + taxPayableChange
+    + taxReceivableChange;
 
   const operating: CashFlowSection = {
     label: 'Operating',
@@ -433,6 +474,8 @@ export async function getCashFlow(
       { label: 'invChange', amountMinor: invChange },
       { label: 'deferredRevChange', amountMinor: deferredRevChange },
       { label: 'prepaidChange', amountMinor: prepaidChange },
+      { label: 'taxPayableChange', amountMinor: taxPayableChange },
+      { label: 'taxReceivableChange', amountMinor: taxReceivableChange },
     ],
   };
 

@@ -2,35 +2,16 @@
 
 import { redirect } from 'next/navigation';
 import { headers } from 'next/headers';
-import { signInSchema, signUpSchema } from '@/lib/schemas';
+import {
+  firstIssueMessage,
+  newPasswordSchema,
+  resetRequestSchema,
+  signInSchema,
+  signUpSchema,
+} from '@/lib/schemas';
 import type { Locale } from '@/lib/i18n';
 import { createServerClient } from '@/lib/supabase/server';
-import { sql } from '@/server/db/client';
-
-/**
- * 往 app_users 写业务资料。用户可能通过邀请链接注册，
- * 所以这个函数必须幂等，且不能用空名字覆盖已有名字。
- */
-export async function ensureAppUser(
-  userId: string,
-  email: string,
-  displayName: string,
-  locale: Locale,
-): Promise<void> {
-  const fallback = email.split('@')[0] ?? 'user';
-  const name = displayName.trim().length > 0 ? displayName.trim() : fallback;
-
-  await sql`
-    insert into app_users (id, email, display_name, locale)
-    values (${userId}, ${email}, ${name}, ${locale})
-    on conflict (id) do update
-      set email = excluded.email,
-          display_name = case
-            when ${displayName.trim()} = '' then app_users.display_name
-            else excluded.display_name
-          end
-  `;
-}
+import { ensureAppUser } from '@/server/auth/ensure-app-user';
 
 /**
  * Server Action 的返回值。
@@ -47,7 +28,13 @@ export async function signUp(input: {
   displayName: string;
   locale: Locale;
 }): Promise<AuthResult> {
-  const parsed = signUpSchema.parse(input);
+  // safeParse 而不是 parse：这个模块的约定是把错误**返回**给表单
+  // （见上面 AuthResult 的注释），而 .parse() 抛出的 ZodError 会在生产构建
+  // 下被 Next.js 换成脱敏摘要，用户看到的是白屏而不是「密码至少 8 位」。
+  const result = signUpSchema.safeParse(input);
+  if (!result.success) return { error: firstIssueMessage(result.error) };
+  const parsed = result.data;
+
   const supabase = await createServerClient();
   const origin = (await headers()).get('origin') ?? '';
 
@@ -76,7 +63,10 @@ export async function signIn(input: {
   email: string;
   password: string;
 }): Promise<AuthResult> {
-  const parsed = signInSchema.parse(input);
+  const result = signInSchema.safeParse(input);
+  if (!result.success) return { error: firstIssueMessage(result.error) };
+  const parsed = result.data;
+
   const supabase = await createServerClient();
 
   const { data, error } = await supabase.auth.signInWithPassword({
@@ -105,18 +95,48 @@ export async function signOut(): Promise<void> {
   redirect('/login');
 }
 
-export async function requestPasswordReset(email: string): Promise<void> {
+/**
+ * 发找回密码的邮件。
+ *
+ * 之前这里连「这串东西长得像不像邮箱」都不验，直接把任意字符串交给
+ * Supabase。signInSchema / signUpSchema 的 .email() 在这条路径上一次都不跑，
+ * 因为这个函数根本没用 schema。
+ *
+ * 返回 AuthResult 而不是抛错：这是个表单动作，抛出去用户看到的是错误页。
+ * 注意返回值里永远不区分「这个邮箱不存在」和「已经发出去了」——那个区别
+ * 会把这个端点变成一台账号枚举机。只有「格式都不对」这一种才回错，
+ * 因为它完全不涉及「这个邮箱在不在库里」。
+ */
+export async function requestPasswordReset(email: string): Promise<AuthResult> {
+  const parsed = resetRequestSchema.safeParse(email);
+  if (!parsed.success) {
+    return { error: 'That does not look like an email address.' };
+  }
+
   const supabase = await createServerClient();
   const origin = (await headers()).get('origin') ?? '';
 
-  await supabase.auth.resetPasswordForEmail(email.trim().toLowerCase(), {
+  await supabase.auth.resetPasswordForEmail(parsed.data, {
     redirectTo: `${origin}/reset-password`,
   });
 }
 
+/**
+ * 改密码。
+ *
+ * 长度校验必须在这里做一遍。signUpSchema 的 min(8) 只管注册表单，这条路径
+ * （/reset-password 与 /account 的改密码框）一个字都不经过它，之前是把
+ * 任意字符串直接交给 Supabase——包括空串。表单上的 minLength={8} 是 HTML
+ * 属性，绕过表单直接调 Server Action 时它不存在。
+ */
 export async function updatePassword(newPassword: string): Promise<AuthResult> {
+  const parsed = newPasswordSchema.safeParse(newPassword);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? 'That password cannot be used.' };
+  }
+
   const supabase = await createServerClient();
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  const { error } = await supabase.auth.updateUser({ password: parsed.data });
   if (error) return { error: error.message };
   redirect('/');
 }

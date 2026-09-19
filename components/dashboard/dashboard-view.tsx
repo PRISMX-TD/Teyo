@@ -1,5 +1,15 @@
-'use client';
-
+/**
+ * 仪表盘的展示层。刻意**没有** 'use client'。
+ *
+ * 原来它标着 'use client'，但整个文件里没有一个 useState / useEffect /
+ * 事件处理器 / 浏览器 API——只有 <Link> 和几段内联 SVG。那条指令的代价是
+ * 实打实的：整棵子树（含 first-run-checklist、permissions 的 can()、
+ * 以及 formatMoney 拉进来的 Intl 用法）会被打进客户端 bundle 并在浏览器
+ * 里重新 hydrate 一遍，换来的交互能力是零。
+ *
+ * 另外它收的 props 里带 bigint（DashboardKpis 的各项金额）。作为服务端
+ * 组件，这些 bigint 就地渲染成字符串，根本不需要跨 RSC 边界序列化。
+ */
 import React from 'react';
 import Link from 'next/link';
 import type { Locale, Messages } from '@/lib/i18n';
@@ -186,7 +196,12 @@ function MonthlyTrendsChart({
           const y = padTop + plotH - (val / maxVal) * plotH;
           return (
             <g key={i}>
-              <line x1={padLeft} y1={y} x2={chartW - padRight} y2={y} style={{stroke:'var(--rule)',strokeWidth:1}} />
+              {/* --rule 是 DESIGN.md 里那套从未被实现的设计系统的变量名，
+                  globals.css 里根本没有定义它。未定义的 var() 会让整条
+                  声明在计算时失效，stroke 落回继承值 none——这几条 Y 轴
+                  网格线从写下这一行的那天起就是看不见的。用实际存在的
+                  边框色。 */}
+              <line x1={padLeft} y1={y} x2={chartW - padRight} y2={y} style={{stroke:'var(--border-primary)',strokeWidth:1}} />
               <text x={padLeft - 6} y={y + 4} textAnchor="end" style={{fontSize:10,fill:'var(--text-tertiary)'}}>
                 {i === 0 ? '0' : (Number(val) / 100).toFixed(0)}
               </text>

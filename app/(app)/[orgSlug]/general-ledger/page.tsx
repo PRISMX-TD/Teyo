@@ -1,6 +1,6 @@
 import { GeneralLedgerView } from '@/components/reports/general-ledger-view';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listAllAccounts } from '@/server/repositories/accounts';
@@ -19,8 +19,9 @@ export default async function GeneralLedgerPage({
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const defaultFrom = `${new Date().getFullYear()}-01-01`;
+  // 按公司时区，不是服务端 UTC（见 server/auth/guard.ts 的 todayInOrg）。
+  const today = todayInOrg(context);
+  const defaultFrom = `${today.slice(0, 4)}-01-01`;
   const from = sp.from ?? defaultFrom;
   const to = sp.to ?? today;
   const accountId = sp.account;

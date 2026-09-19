@@ -1,5 +1,12 @@
 import type { Tx } from '@/server/db/transaction';
 
+export class ReconciliationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'ReconciliationError';
+  }
+}
+
 export type ReconciliationRow = {
   id: string;
   organizationId: string;
@@ -143,28 +150,88 @@ export async function addReconciliationItem(
   return { id: inserted.id as string };
 }
 
+/**
+ * 勾掉（或取消勾掉）对账清单上的一行。
+ *
+ * organizationId 这个参数是补上去的，而它的缺席不是「设计上靠 RLS」——
+ * 同一个文件里 getReconciliation / listReconciliations 都老老实实带了公司
+ * 维度，只有这两个写入函数漏了，调用方手里明明握着 context.organizationId
+ * 也没往下传。漏掉的后果：只凭一个 id 就能改别人公司的对账行。
+ *
+ * 为什么 RLS 兜不住这件事——它兜得住「不是任何一家公司的成员」，兜不住
+ * 「是 A 公司的成员，但把 B 公司的 id 传了进来」。这个应用里谁都能再建
+ * 一家公司，所以「同时属于两家公司」是常态而不是边角情况。
+ *
+ * reconciliation_items 表上没有 organization_id 列（见 0008 迁移），公司维度
+ * 只存在于父表 bank_reconciliations 上，所以这里必须 join 上去过滤，不能
+ * 简单地在 where 里加一个列。
+ *
+ * count === 0 要报错而不是默默返回：静默的「零行更新」会让界面显示成功，
+ * 用户以为勾上了，下次打开又没勾——比报错难查得多。
+ */
 export async function updateReconciliationItem(
   tx: Tx,
+  organizationId: string,
   id: string,
   cleared: boolean,
   adjustment: bigint,
 ): Promise<void> {
-  await tx`
-    update reconciliation_items
+  const result = await tx`
+    update reconciliation_items ri
     set is_cleared = ${cleared}, adjustment_minor = ${adjustment.toString()}
-    where id = ${id}
+    from bank_reconciliations br
+    where ri.id = ${id}
+      and br.id = ri.reconciliation_id
+      and br.organization_id = ${organizationId}
   `;
+  if (result.count === 0) {
+    throw new ReconciliationError('That reconciliation line was not found in this company.');
+  }
 }
 
+/** 收尾一次对账。organization_id 的理由同 updateReconciliationItem。 */
 export async function completeReconciliation(
   tx: Tx,
+  organizationId: string,
   id: string,
 ): Promise<void> {
-  await tx`
+  const result = await tx`
     update bank_reconciliations
     set reconciled_at = now()
-    where id = ${id}
+    where id = ${id} and organization_id = ${organizationId}
   `;
+  if (result.count === 0) {
+    throw new ReconciliationError('That reconciliation was not found in this company.');
+  }
+}
+
+/**
+ * 从一批交易 id 里挑出确实属于本公司、且未作废的那些。
+ *
+ * 存在的理由：reconcile 会把客户端传来的每个 id 直接当 transaction_id 插进
+ * reconciliation_items，而这张表的外键只指向 transactions(id)，没有公司维度
+ * （0008 迁移）。也就是说，只要 id 真实存在，别家公司的交易就能被挂进本公司
+ * 的一次对账里——之后它会出现在对账清单上、影响清帐差额，而 RLS 对
+ * 「成员把外公司 id 传进来」这一种是无感的。
+ *
+ * 返回命中的集合而不是逐个查：一次往返，且调用方可以用「数量对不上」直接
+ * 判死，不必关心是哪一个不对（对用户来说「清单里有不属于这家公司的记录」
+ * 就是同一件事）。
+ */
+export async function filterOwnTransactionIds(
+  tx: Tx,
+  organizationId: string,
+  ids: string[],
+): Promise<Set<string>> {
+  if (ids.length === 0) return new Set();
+
+  const rows = await tx`
+    select id from transactions
+    where organization_id = ${organizationId}
+      and voided_at is null
+      and id = any(${ids}::uuid[])
+  `;
+  return new Set(rows.map((row) => row.id as string));
 }
 
 /** 查找未对账的交易：该资金账户下未被任何 reconciliation_items 引用的交易。 */

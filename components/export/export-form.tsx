@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { exportReport } from '@/server/actions/export';
+import { todayLocalISO } from '@/lib/date';
 
 type Props = { orgSlug: string; locale: Locale };
 
@@ -39,7 +40,7 @@ export function ExportForm({ orgSlug, locale }: Props) {
     }
   }
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayLocalISO();
   const monthStart = `${today.slice(0, 7)}-01`;
 
   return (

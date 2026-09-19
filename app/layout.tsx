@@ -18,10 +18,21 @@ export const metadata: Metadata = {
   ),
 };
 
+/**
+ * themeColor 与 --accent 对齐。
+ *
+ * 这四个值以前是四套互不相干的品牌色：这里是 #0f1117/#f8f9fb（页面底色），
+ * app/manifest.ts 与 app/icon.tsx 是 #0f7a5f（绿），globals.css 的 --accent
+ * 是蓝。用户装完 PWA 看到一个绿色图标，点开是蓝色界面，浏览器地址栏又是
+ * 第三种深色——三处各自都"没错"，合起来不像同一个产品。
+ *
+ * 统一取强调色而不是底色：themeColor 染的是浏览器工具栏与任务切换器里的
+ * 那一条，它在视觉上属于"这个应用的颜色"，不是"这一页的背景"。
+ */
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: dark)', color: '#0f1117' },
-    { media: '(prefers-color-scheme: light)', color: '#f8f9fb' },
+    { media: '(prefers-color-scheme: dark)', color: '#3b82f6' },
+    { media: '(prefers-color-scheme: light)', color: '#2563eb' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -48,24 +59,31 @@ const jetbrainsMono = JetBrains_Mono({
  * root layout 包裹每一个页面，所以这里抛错会让整站白屏——包括登录页，
  * 用户连重试的入口都没有。语言只影响文案，读不到就退回 en。
  */
-async function resolveLocale(): Promise<Locale> {
+async function resolveShell(): Promise<{ locale: Locale; signedIn: boolean }> {
   try {
     const userId = await getCurrentUserId();
-    if (!userId) return 'en';
-    return (await getUserLocale(userId)) as Locale;
+    if (!userId) return { locale: 'en', signedIn: false };
+    return { locale: (await getUserLocale(userId)) as Locale, signedIn: true };
   } catch {
-    return 'en';
+    // 读不出来就当未登录：OfflineBanner 拿到 signedIn=false 只是不去补发
+    // 队列（见那个组件的注释），代价是多等一次页面加载；反过来把未登录
+    // 当成已登录，代价是一整轮注定失败的提交。
+    return { locale: 'en', signedIn: false };
   }
 }
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
-  const locale = await resolveLocale();
+  const { locale, signedIn } = await resolveShell();
 
   return (
-    <html lang={locale} className={`${inter.variable} ${jetbrainsMono.variable}`} suppressHydrationWarning>
+    // 不再需要 suppressHydrationWarning：主题现在由 ThemeScript 里的同步
+    // <script> 在 hydration 之前就写好 data-theme，服务端与客户端的首帧一致。
+    // 它原来存在的理由，正是当初把"亮色用户首屏闪一下暗色"这个症状盖住的
+    // 那个东西——留着只会让下一处不一致同样悄悄过去。
+    <html lang={locale} className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body>
         <ThemeScript />
-        <OfflineBanner locale={locale} />
+        <OfflineBanner locale={locale} signedIn={signedIn} />
         {children}
       </body>
     </html>

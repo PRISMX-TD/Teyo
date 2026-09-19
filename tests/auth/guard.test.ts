@@ -10,6 +10,7 @@ function context(role: OrgContext['role']): OrgContext {
     role,
     baseCurrency: 'MYR',
     lockedUntil: null,
+    timezone: 'Asia/Kuala_Lumpur',
   };
 }
 

@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import { uploadAttachment, deleteAttachment, getAttachmentSignedUrl } from '@/server/actions/attachments';
-import type { Messages } from '@/lib/i18n';
+import { interpolate, type Messages } from '@/lib/i18n';
 
 type Attachment = {
   id: string;
@@ -33,6 +33,7 @@ export function AttachmentPanel({
   const [error, setError] = useState<string | null>(null);
   const [previewId, setPreviewId] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const previewedItem = items.find((item) => item.id === previewId) ?? null;
 
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
@@ -65,7 +66,7 @@ export function AttachmentPanel({
       setPreviewUrl(url);
       setPreviewId(attachmentId);
     } catch {
-      setError('Could not load preview.');
+      setError(t.transaction.previewFailed);
     }
   }
 
@@ -92,19 +93,31 @@ export function AttachmentPanel({
             <li key={item.id}>
               <span className="attachment-name">{item.fileName}</span>
               <span className="attachment-size">{fmtSize(item.sizeBytes)}</span>
+              {/* \u8fd9\u4e24\u4e2a\u6309\u94ae\u7684\u53ef\u89c1\u5185\u5bb9\u53ea\u6709 \u2715 / \u25b6 / \u00d7 \u4e09\u4e2a\u7b26\u53f7\uff0c\u8bfb\u5c4f\u5ff5\u51fa\u6765
+                  \u5c31\u662f\u300c\u6309\u94ae\u300d\u300c\u6309\u94ae\u300d\u2014\u2014\u4e00\u884c\u91cc\u6709\u4e24\u4e2a\u540c\u540d\u6309\u94ae\uff0c\u5176\u4e2d\u4e00\u4e2a\u4f1a
+                  \u6c38\u4e45\u5220\u6389\u51ed\u8bc1\u3002aria-label \u5e26\u4e0a\u6587\u4ef6\u540d\uff0c\u624d\u5206\u5f97\u6e05\u5220\u7684\u662f\u54ea\u5f20\u3002
+                  \u7b26\u53f7\u672c\u8eab aria-hidden\uff0c\u5426\u5219\u8bfb\u5c4f\u4f1a\u628a\u6807\u7b7e\u548c\u7b26\u53f7\u5ff5\u4e24\u904d\u3002 */}
               <button
                 type="button"
                 className="attachment-preview-btn"
+                aria-expanded={previewId === item.id}
+                aria-label={interpolate(
+                  previewId === item.id
+                    ? t.transaction.previewClose
+                    : t.transaction.previewOpen,
+                  { name: item.fileName },
+                )}
                 onClick={() => handlePreview(item.id)}
               >
-                {previewId === item.id ? '\u2715' : '\u25b6'}
+                <span aria-hidden="true">{previewId === item.id ? '\u2715' : '\u25b6'}</span>
               </button>
               <button
                 type="button"
                 className="attachment-delete-btn"
+                aria-label={interpolate(t.transaction.deleteAttachment, { name: item.fileName })}
                 onClick={() => handleDelete(item.id)}
               >
-                &times;
+                <span aria-hidden="true">&times;</span>
               </button>
             </li>
           ))}
@@ -115,7 +128,15 @@ export function AttachmentPanel({
 
       {previewUrl ? (
         <div className="attachment-preview">
-          <img src={previewUrl} alt="" />
+          {/* alt="" 是「这张图纯装饰，跳过它」的意思。凭证图片恰恰相反——
+              它是这笔账的证据，读屏用户至少要知道自己打开的是哪一张。
+              图片内容本身我们读不出来，所以退而给出文件名。 */}
+          <img
+            src={previewUrl}
+            alt={interpolate(t.transaction.receiptImageAlt, {
+              name: previewedItem?.fileName ?? '',
+            })}
+          />
         </div>
       ) : null}
 

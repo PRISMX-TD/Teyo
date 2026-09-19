@@ -7,6 +7,11 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint app components lib server tests middleware.ts",
+    "typecheck": "tsc --noEmit",
+    "migrate": "node scripts/migrate.mjs up",
+    "migrate:status": "node scripts/migrate.mjs status",
+    "migrate:verify": "node scripts/migrate.mjs verify",
+    "cleanup:test-data": "node scripts/cleanup-test-data.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },

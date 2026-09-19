@@ -13,7 +13,7 @@ export default async function AccountPage() {
   return (
     <main className="account-page">
       <Link href="/" style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
-        ← {locale === 'zh' ? '返回' : 'Back'}
+        ← {t.common.back}
       </Link>
       <h1>{t.account.title}</h1>
 

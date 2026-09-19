@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { parseOrThrow, recurringEditSchema } from '@/lib/schemas';
 import { AuthError, requirePermission, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { currencyExponent, MoneyError, parseDecimalToMinor } from '@/server/domain/money';
@@ -8,6 +9,7 @@ import { postJournal } from '@/server/posting/post-journal';
 import {
   getDueRecurring,
   insertRecurring,
+  normaliseRecurringAmount,
   updateRecurring,
   setRecurringActive,
   computeNextDueDate,
@@ -58,10 +60,18 @@ export async function createRecurring(
 ): Promise<{ id: string }> {
   const context = await requirePermission(orgSlug, 'transaction:create');
 
-  // 验证 amount 是正的小数。小数位数由币种决定，不是永远两位——
-  // 硬写 2 会让「JPY 1200」这种零小数位币种的合法金额被判成非法，
-  // 也会放行一个 JPY 永远不该有的小数部分。
-  parseDecimalToMinor(input.amount, currencyExponent(input.currency));
+  // 验证 amount 是正的小数，并收敛成这个币种的规范写法。小数位数由币种决定，
+  // 不是永远两位——硬写 2 会让「JPY 1200」这种零小数位币种的合法金额被判成
+  // 非法，也会放行一个 JPY 永远不该有的小数部分。
+  //
+  // 「大于零」这条以前只有 parseDecimalToMinor 的「非负」兜着，也就是 0 能进
+  // 库；而 recurring_transactions.amount 是 text 列，库里没有任何约束接着拦。
+  // 理由与规范化的理由都写在 normaliseRecurringAmount 上面。
+  //
+  // 在开事务前先验一次，是为了让用户当场看到错在哪，而不是等到一次注定回滚
+  // 的写入之后。insertRecurring 里那一次不是重复——它守的是「写这一列的所有
+  // 入口」，与这里守的「这个表单」不是同一件事。
+  const amount = normaliseRecurringAmount(input.amount, input.currency);
   assertValidInterval(input.interval);
 
   const result = await withTransaction(context.userId, async (tx) => {
@@ -69,7 +79,7 @@ export async function createRecurring(
       organizationId: context.organizationId,
       kind: input.kind,
       description: input.description?.trim() || null,
-      amount: input.amount,
+      amount,
       currency: input.currency,
       debitAccountId: input.debitAccountId,
       creditAccountId: input.creditAccountId,
@@ -90,7 +100,7 @@ export async function createRecurring(
       after: {
         kind: input.kind,
         description: input.description,
-        amount: input.amount,
+        amount,
         frequency: input.frequency,
       },
     });
@@ -140,9 +150,23 @@ export async function editRecurring(
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'transaction:edit:any');
 
-  if (fields.amount !== undefined && fields.currency !== undefined) {
-    parseDecimalToMinor(fields.amount, currencyExponent(fields.currency));
-  } else if (fields.amount !== undefined || fields.currency !== undefined) {
+  // 整个 payload 先过一遍 `.strict()` 的白名单 schema。
+  //
+  // 之前这里是 `{ ...fields }` 原样展开给 updateRecurring，而那个函数把任意
+  // key 驼峰转下划线当列名用。RecurringEditFields 是类型不是校验，运行时
+  // 不存在，所以「攻击者能写哪些列」实际上等于「recurring_transactions 有
+  // 哪些列」。最狠的一个是 next_due_date：改到很早的日期，下一次补记就按
+  // 每期一笔生成几十上百笔分录，每笔一个新 clientUuid（幂等拦不住）、
+  // 借贷完全配平（配平触发器也拦不住），账面上凭空多出一整年的房租。
+  //
+  // schema 里没有 nextDueDate 这个字段，`.strict()` 又让「多给一个 key」直接
+  // 报错而不是被悄悄丢掉——用户如果真的传错了字段名，他会知道。
+  const parsed = parseOrThrow(recurringEditSchema, fields, (m) => new LedgerError(m));
+
+  if (parsed.amount !== undefined && parsed.currency !== undefined) {
+    // 这一步同时验「是正数」与「小数位对得上币种」，并把值收敛成规范写法。
+    parsed.amount = normaliseRecurringAmount(parsed.amount, parsed.currency);
+  } else if (parsed.amount !== undefined || parsed.currency !== undefined) {
     // 类型已经排除了这种调用，能走到这里说明入参不是 TypeScript 写出来的
     // ——Server Action 收的是网络上的任意 payload。
     throw new LedgerError(
@@ -150,14 +174,18 @@ export async function editRecurring(
     );
   }
 
-  if (fields.interval !== undefined) {
-    assertValidInterval(fields.interval);
+  if (parsed.interval !== undefined) {
+    assertValidInterval(parsed.interval);
   }
 
   await withTransaction(context.userId, async (tx) => {
     await updateRecurring(tx, context.organizationId, id, {
-      ...fields,
-      description: fields.description?.trim() ?? undefined,
+      ...parsed,
+      // 空备注落库为 null，与 createRecurring 的 `|| null` 一致。
+      // 留着空串会让列表页把一条没有备注的规则显示成一个空白行，
+      // 而 generateDueRecurring 的 `rule.description?.trim() || rule.kind`
+      // 只在 null/'' 两种下才退回 kind——两处对「没填」的理解必须一样。
+      description: parsed.description === undefined ? undefined : parsed.description || null,
     });
   });
 

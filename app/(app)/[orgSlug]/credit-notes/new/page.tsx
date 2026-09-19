@@ -57,6 +57,9 @@ export default async function NewCreditNotePage({
         contacts={contacts}
         invoices={invoices}
         currencies={[...SUPPORTED_CURRENCIES]}
+        // 本位币：既作为币种缺省值，也是汇率栏判断「这是不是一笔外币单据」
+        // 的依据——本币时 RateField 整个不渲染。
+        baseCurrency={context.baseCurrency}
       />
     </>
   );

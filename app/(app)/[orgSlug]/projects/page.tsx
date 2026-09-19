@@ -56,6 +56,7 @@ export default async function ProjectsListPage({
         locale={locale}
         projects={projects}
         profitabilityMap={profitabilityMap}
+        baseCurrency={context.baseCurrency}
       />
     </>
   );

@@ -289,6 +289,7 @@ describe('postDepreciationAction - is_posted is the real idempotency guard', () 
       role: 'owner',
       baseCurrency: 'MYR',
       lockedUntil: null,
+      timezone: 'Asia/Kuala_Lumpur',
     };
 
     let lockTaken!: () => void;

@@ -8,7 +8,17 @@ import { listMoneyAccounts } from '@/server/repositories/accounts';
 import { listCategories } from '@/server/repositories/categories';
 import { listMembershipsByOrg } from '@/server/repositories/memberships';
 import { getUserLocale } from '@/server/repositories/organizations';
+import { transactionFilterSchema } from '@/lib/schemas';
 import { listTransactions, type TransactionFilters as TFilters } from '@/server/repositories/transactions';
+
+/** searchParams 的值可能是 string[]（重复参数），统一只取第一个。 */
+function first(value: string | string[] | undefined): string | undefined {
+  const single = Array.isArray(value) ? value[0] : value;
+  // 空串（?categoryId= ）在 zod 里会是一个格式错误的 uuid，而它的语义其实
+  // 是「这一项没填」——先归一成 undefined，不然清空一个筛选框就会把整组
+  // 筛选判成非法。
+  return single === '' ? undefined : single;
+}
 
 export default async function TransactionsListPage({
   params,
@@ -23,22 +33,51 @@ export default async function TransactionsListPage({
   const t = getMessages(locale);
 
   const raw = await searchParams;
-  const filters: TFilters = {
-    from: typeof raw.from === 'string' ? raw.from : undefined,
-    to: typeof raw.to === 'string' ? raw.to : undefined,
-    kind: typeof raw.kind === 'string' ? (raw.kind as 'income' | 'expense' | 'transfer' | 'journal') : undefined,
-    categoryId: typeof raw.categoryId === 'string' ? raw.categoryId : undefined,
-    moneyAccountId: typeof raw.moneyAccountId === 'string' ? raw.moneyAccountId : undefined,
-    createdBy: typeof raw.createdBy === 'string' ? raw.createdBy : undefined,
-    minAmount: typeof raw.minAmount === 'string' ? raw.minAmount : undefined,
-    maxAmount: typeof raw.maxAmount === 'string' ? raw.maxAmount : undefined,
-    keyword: typeof raw.keyword === 'string' ? raw.keyword : undefined,
-    includeVoided: raw.includeVoided === 'true',
-  };
+
+  /**
+   * 筛选条件过 transactionFilterSchema。
+   *
+   * 这个 schema 一直在 lib/schemas.ts 里定义着、也有测试，但生产路径上
+   * 一条都没执行过——这一页原来只做 `typeof x === 'string'` 判断，然后把
+   * 地址栏里的任何东西原样送进 SQL 参数。参数是绑定的（postgres.js 模板
+   * 标签），所以不是注入；但 `?categoryId=not-a-uuid` 会让数据库抛一个
+   * 22P02 类型错误，用户看到的是整页 500，而不是「这个筛选不对」。
+   *
+   * 用 safeParse 而不是 parse：一个手敲坏的链接不该把整页打挂。失败时
+   * 退回「不筛选」并在页面上说明，列表照常显示——这比一个错误页更接近
+   * 用户当时想要的东西（他想看这家公司的流水）。
+   */
+  const parsedFilters = transactionFilterSchema.safeParse({
+    from: first(raw.from),
+    to: first(raw.to),
+    kind: first(raw.kind),
+    categoryId: first(raw.categoryId),
+    moneyAccountId: first(raw.moneyAccountId),
+    createdBy: first(raw.createdBy),
+    minAmount: first(raw.minAmount),
+    maxAmount: first(raw.maxAmount),
+    keyword: first(raw.keyword),
+    includeVoided: first(raw.includeVoided) === 'true',
+    page: first(raw.page) ?? 1,
+  });
+
+  const filters: TFilters = parsedFilters.success
+    ? {
+        from: parsedFilters.data.from,
+        to: parsedFilters.data.to,
+        kind: parsedFilters.data.kind,
+        categoryId: parsedFilters.data.categoryId,
+        moneyAccountId: parsedFilters.data.moneyAccountId,
+        createdBy: parsedFilters.data.createdBy,
+        minAmount: parsedFilters.data.minAmount,
+        maxAmount: parsedFilters.data.maxAmount,
+        keyword: parsedFilters.data.keyword,
+        includeVoided: parsedFilters.data.includeVoided,
+      }
+    : { includeVoided: false };
 
   const PAGE_SIZE = 50;
-  const pageParam = Number(raw.page ?? '1');
-  const page = Number.isFinite(pageParam) && pageParam >= 1 ? Math.floor(pageParam) : 1;
+  const page = parsedFilters.success ? parsedFilters.data.page : 1;
   const offset = (page - 1) * PAGE_SIZE;
 
   // 保留除 page 以外的全部查询参数，翻页时筛选条件不丢。

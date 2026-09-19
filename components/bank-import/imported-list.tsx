@@ -149,7 +149,7 @@ export function ImportedList({
             <th>{i18n.transaction.description}</th>
             <th className="numeric">{i18n.transaction.amount}</th>
             <th>{i18n.invoices.status}</th>
-            <th>Actions</th>
+            <th>{i18n.common.actions}</th>
           </tr>
         </thead>
         <tbody>
@@ -174,7 +174,7 @@ export function ImportedList({
                           type="text"
                           value={searchQuery}
                           onChange={(e) => handleSearch(e.target.value)}
-                          placeholder="Search transactions..."
+                          placeholder={i18n.bankImport.searchPlaceholder}
                           autoFocus
                         />
                         {searching && <span>{i18n.common.loading}</span>}
