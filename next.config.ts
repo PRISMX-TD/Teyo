@@ -56,6 +56,17 @@ const ENFORCED_CSP = [
   "base-uri 'self'",
   "form-action 'self'",
   "object-src 'none'",
+  // upgrade-insecure-requests 必须放在**强制**的那条里。
+  //
+  // 它原来写在下面的 Report-Only 里，而浏览器对 report-only 策略里的这条
+  // 指令是直接忽略的（Chrome 在控制台明说："The Content Security Policy
+  // directive 'upgrade-insecure-requests' is ignored when delivered in a
+  // report-only policy."）。也就是说它一天都没有生效过——而且它不像
+  // script-src 那样有「写错就把应用打白」的风险：它只是把页面里残留的
+  // http:// 子资源请求改写成 https://，没有任何东西会因此被挡下来。
+  //
+  // 这是把应用真的跑起来、看控制台才发现的。
+  'upgrade-insecure-requests',
 ].join('; ');
 
 /**
@@ -98,7 +109,8 @@ function reportOnlyCsp(): string {
     "base-uri 'self'",
     "form-action 'self'",
     "object-src 'none'",
-    'upgrade-insecure-requests',
+    // upgrade-insecure-requests 不在这里——见 ENFORCED_CSP 上的注释：
+    // 浏览器会忽略 report-only 策略里的这条指令。
   ].join('; ');
 }
 
