@@ -4,5 +4,11 @@
       "regions": ["sin1"],
       "maxDuration": 30
     }
-  }
+  },
+  "crons": [
+    {
+      "path": "/api/cron/exchange-rates",
+      "schedule": "30 16 * * *"
+    }
+  ]
 }

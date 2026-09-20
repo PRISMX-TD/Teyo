@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { createJournal } from '@/server/actions/transactions';
+import { todayLocalISO } from '@/lib/date';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null; type: string };
 
@@ -27,7 +28,7 @@ export function JournalForm({ orgSlug, baseCurrency, locale, accounts }: Props) 
   const t = getMessages(locale);
   const router = useRouter();
 
-  const [occurredOn, setOccurredOn] = useState(() => new Date().toISOString().slice(0, 10));
+  const [occurredOn, setOccurredOn] = useState(() => todayLocalISO());
   const [amount, setAmount] = useState('');
   const [debitAccountId, setDebitAccountId] = useState('');
   const [creditAccountId, setCreditAccountId] = useState('');

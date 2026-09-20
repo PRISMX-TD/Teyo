@@ -1,7 +1,15 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from '@/server/db/client';
 import { getUserLocale, listUserOrganizations } from '@/server/repositories/organizations';
 import { createTestOrg, createTestUser, joinOrg, resetTestData } from '@/tests/helpers/test-db';
+
+/**
+ * 邮箱带随机后缀。auth.users 的邮箱有唯一约束，写死的话一次被中断的跑
+ * （afterAll 没执行）就会让这个文件此后永远撞唯一约束——而报错只说
+ * "duplicate key"，看不出是残留数据。
+ */
+const RUN = randomUUID().slice(0, 8);
 
 let bossId: string;
 let staffId: string;
@@ -9,9 +17,9 @@ let strangerId: string;
 
 beforeAll(async () => {
   await resetTestData();
-  bossId = await createTestUser('boss-list@example.com', 'Boss');
-  staffId = await createTestUser('staff-orgs@example.com', 'Staff');
-  strangerId = await createTestUser('stranger@example.com', 'Stranger');
+  bossId = await createTestUser(`test-boss-list-${RUN}@example.com`, 'Boss');
+  staffId = await createTestUser(`test-staff-orgs-${RUN}@example.com`, 'Staff');
+  strangerId = await createTestUser(`test-stranger-${RUN}@example.com`, 'Stranger');
 
   const alpha = await createTestOrg(bossId, 'Alpha Trading', 'alpha-trading');
   const beta = await createTestOrg(bossId, 'Beta Cafe', 'beta-cafe');

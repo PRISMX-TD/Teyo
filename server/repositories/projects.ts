@@ -121,10 +121,35 @@ export type ProjectProfitability = {
 };
 
 /**
- * 汇总项目关联交易的收入与费用。
+ * 汇总挂在某个项目下的收入与费用。
  *
- * 收入：所有 journal_lines 中 account 类型为 'revenue' 且 transaction.project_id 匹配的 base_amount_minor 总和。
- * 费用：所有 journal_lines 中 account 类型为 'expense' 且 transaction.project_id 匹配的 base_amount_minor 总和。
+ * 口径与 server/repositories/reports.ts 的 getProfitLoss 逐条对齐——两张页面
+ * 同时展示同一批交易，口径差一条就会出现「项目盈亏加起来不等于损益表」这种
+ * 没人能查的问题：
+ *
+ *   - 金额取 base_amount_minor（本位币）。外币交易的 amount_minor 是原币，
+ *     把它们相加等于把不同的钱当成同一种钱加。
+ *   - 排除作废交易（t.voided_at is null）。**这一条原来漏了**：一笔作废的
+ *     收入仍然算在项目收入里，而它在损益表里已经不见了。作废是软删除，
+ *     transactions 行还在、journal_lines 行也还在，只有这个 where 条件能把
+ *     它们挡住。
+ *   - 日期闭区间 [from, to]，与 getProfitLoss 的 `>= from and <= to` 相同。
+ *   - 收入取「贷 - 借」、费用取「借 - 贷」，与 getProfitLoss 对同一科目类型的
+ *     处理一致。原来只 sum(base_amount_minor)，不分借贷方向——于是一笔
+ *     「借销售收入 / 贷应收」的销售退回（贷项通知单的分录形状，见
+ *     posting-templates.ts 的 credit-note）会被当成**又一笔收入**加上去，
+ *     退货越多，项目看起来赚得越多。
+ *
+ * 两条查询合并成一条：原来收入与费用各查一次，同一组 join 跑两遍，而它们
+ * 唯一的差别是 a.type。
+ *
+ * ⚠️ 这个函数今天算得出数，但永远是 0：**没有任何地方给 transactions 写
+ * project_id**。0009 加了这一列，server/actions/transactions.ts 的入参类型里
+ * 没有 projectId，lib/schemas.ts 里也没有，全仓 `grep project_id` 只命中本
+ * 文件。也就是说项目盈亏分析是一个实现了一半的功能：查询这一侧是对的（现在
+ * 更对了），挂载那一侧根本不存在。已在交付报告中列明需要在 createTransaction /
+ * updateTransaction 的入参与 lib/schemas.ts 里补 projectId——那两个文件不在
+ * 本次改动范围内。
  */
 export async function getProjectProfitability(
   tx: Tx,
@@ -134,42 +159,46 @@ export async function getProjectProfitability(
   to?: string,
 ): Promise<ProjectProfitability> {
   const projectRows = await tx`
-    select id, name from projects
+    select name from projects
     where id = ${projectId} and organization_id = ${organizationId}
   `;
-  const project = projectRows[0];
-  const projectName = project ? (project.name as string) : '';
+  const project = projectRows.at(0);
+  // 原来查不到就把名字当成空字符串接着往下算，返回一组零。那等于对
+  // 「这个项目不属于本公司」和「这个项目一笔账都没有」给出同一个答案，
+  // 而前者是调用方传错了 id，后者是正常状态。
+  if (!project) throw new Error('Project not found.');
 
-  const incomeRows = await tx`
-    select coalesce(sum(jl.base_amount_minor), 0) as total
+  const rows = await tx`
+    select
+      a.type,
+      coalesce(sum(case when jl.direction = 'debit' then jl.base_amount_minor else 0 end), 0) as debit,
+      coalesce(sum(case when jl.direction = 'credit' then jl.base_amount_minor else 0 end), 0) as credit
     from journal_lines jl
     join transactions t on t.id = jl.transaction_id
     join accounts a on a.id = jl.account_id
     where jl.organization_id = ${organizationId}
       and t.project_id = ${projectId}
-      and a.type = 'revenue'
+      and t.voided_at is null
+      and (a.type = 'revenue' or a.type = 'expense')
       and (${from ?? null}::date is null or t.occurred_on >= ${from ?? null}::date)
       and (${to ?? null}::date is null or t.occurred_on <= ${to ?? null}::date)
+    group by a.type
   `;
 
-  const expenseRows = await tx`
-    select coalesce(sum(jl.base_amount_minor), 0) as total
-    from journal_lines jl
-    join transactions t on t.id = jl.transaction_id
-    join accounts a on a.id = jl.account_id
-    where jl.organization_id = ${organizationId}
-      and t.project_id = ${projectId}
-      and a.type = 'expense'
-      and (${from ?? null}::date is null or t.occurred_on >= ${from ?? null}::date)
-      and (${to ?? null}::date is null or t.occurred_on <= ${to ?? null}::date)
-  `;
+  let totalIncome = 0n;
+  let totalExpense = 0n;
 
-  const totalIncome = BigInt(incomeRows[0].total as string);
-  const totalExpense = BigInt(expenseRows[0].total as string);
+  for (const row of rows) {
+    const debit = BigInt(row.debit as string);
+    const credit = BigInt(row.credit as string);
+    // 收入正常在贷方，费用正常在借方——与 getProfitLoss 同一句。
+    if (row.type === 'revenue') totalIncome = credit - debit;
+    else totalExpense = debit - credit;
+  }
 
   return {
     projectId,
-    projectName,
+    projectName: project.name as string,
     totalIncomeMinor: totalIncome,
     totalExpenseMinor: totalExpense,
     netProfitMinor: totalIncome - totalExpense,

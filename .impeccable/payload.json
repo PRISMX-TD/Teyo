@@ -1,0 +1,22 @@
+{
+  "title": "Choose the visual world",
+  "question": "The roll assigned Financial Command Center. Keep it, take an alternate, or re-roll.",
+  "options": [
+    {
+      "id": "financial-command-center",
+      "label": "Financial Command Center",
+      "kicker": "THE ROLL",
+      "lineage": "Modern trading desk · Swiss-modern precision · Dark-first command surfaces",
+      "body": "The interface treats numbers as architecture. Dark matte command surfaces with crisp white data, modern grotesk headings, and precise color signals (green for income, coral-red for expense, amber for pending). The dashboard is a data-first command view where every number earns its pixel. The left rail is a disciplined navigation column with icon+label groupings. Forms are high-contrast, touch-first, single-column — designed for standing at a counter. Dark mode native, light as alternate."
+    },
+    {
+      "id": "challenger-cassette-futurism",
+      "label": "Cassette Futurism",
+      "lineage": "1970s audio deck fascia · Brushed carbon, amber LED status, chrome-edge data",
+      "body": "FUSED ALTERNATE. Every function gets its own labeled switch. Dark brushed carbon surfaces replace aluminum, amber LED ladders become status indicators for reconciliation and sync progress. Chrome-edge data cards house key metrics. The tactile switch discipline maps to the accounting need for clear, confident controls — every action is deliberate. Segmented controls replace radio buttons, VU-meter sparklines replace bar charts. The discipline: nothing unlabeled, no hidden state."
+    }
+  ],
+  "reroll": true,
+  "canon": true,
+  "steer": true
+}

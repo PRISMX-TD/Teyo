@@ -8,7 +8,25 @@ export class LedgerError extends Error {
   }
 }
 
-export type TransactionKind = 'income' | 'expense' | 'transfer' | 'journal';
+/**
+ * 与数据库的 transaction_kind 枚举逐项对应。
+ *
+ * 'closing' 是年结分录（0023 迁移加的值）。它必须与 'journal' 分开，
+ * 因为损益表要靠它把年结排除在外——年结恰好把当年所有收入费用科目冲平，
+ * 混进去的话那一年的损益表会变成全零。
+ */
+export type TransactionKind = 'income' | 'expense' | 'transfer' | 'journal' | 'closing';
+
+/**
+ * 用户能直接创建的交易类型。
+ *
+ * 'closing' 不在此列：年结分录只由 server/actions/year_end.ts 产生，没有
+ * 任何表单能填出一笔它。把这件事写成类型而不是靠约定，是因为一旦某个
+ * switch 忘了处理 'closing'，TypeScript 只会在**那一处**报错，而正确的
+ * 处理方式往往是「这里根本不该收到它」——用 TransactionKind 去接用户输入，
+ * 就会被迫为一种不可能发生的情况写一个分支，而那个分支写什么都是错的。
+ */
+export type UserEntryKind = Exclude<TransactionKind, 'closing'>;
 export type Direction = 'debit' | 'credit';
 
 export type DraftJournalLine = {

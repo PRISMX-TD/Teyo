@@ -5,6 +5,7 @@ import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { currencyExponent } from '@/server/domain/money';
 import { createFixedAsset } from '@/server/actions/fixed_assets';
+import { todayLocalISO } from '@/lib/date';
 
 type AccountOption = {
   id: string;
@@ -34,7 +35,7 @@ export function AssetForm({
 }: Props) {
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [purchaseDate, setPurchaseDate] = useState(new Date().toISOString().slice(0, 10));
+  const [purchaseDate, setPurchaseDate] = useState(todayLocalISO());
   const [cost, setCost] = useState('');
   const [originalCurrency, setOriginalCurrency] = useState(baseCurrency);
   const [exchangeRate, setExchangeRate] = useState('1.00000000');
@@ -127,7 +128,12 @@ export function AssetForm({
   return (
     <div className="transaction-form">
       <div className="form-field">
-        <label>{t.fixedAssets.title ?? 'Asset Name'}</label>
+        {/* 原来是 `t.fixedAssets.title ?? 'Asset Name'`：title 在 Messages
+            里是必填的 string，`??` 那一支永远到不了——真正生效的是
+            t.fixedAssets.title，也就是「固定资产」这个**页面标题**被当成
+            了「资产名称」这个**字段标签**。改用 t.settings.name（「名称」），
+            和下面 placeholder 用的是同一个键。 */}
+        <label>{t.settings.name}</label>
         <input
           value={name}
           onChange={(e) => setName(e.target.value)}
@@ -154,7 +160,7 @@ export function AssetForm({
 
       <div className="inline-edit-row">
         <div className="form-field">
-          <label>{locale === 'zh' ? '购入币种' : 'Purchase Currency'}</label>
+          <label>{t.fixedAssets.purchaseCurrency}</label>
           <select
             value={originalCurrency}
             onChange={(e) => {
@@ -166,7 +172,7 @@ export function AssetForm({
             {currencies.map((c) => (
               <option key={c} value={c}>
                 {c}
-                {c === baseCurrency ? locale === 'zh' ? '（基准）' : ' (base)' : ''}
+                {c === baseCurrency ? ` (${t.fixedAssets.baseCurrencyTag})` : ''}
               </option>
             ))}
           </select>
@@ -240,8 +246,8 @@ export function AssetForm({
         <div className="form-field">
           <label>{t.fixedAssets.method}</label>
           <select value={method} onChange={(e) => setMethod(e.target.value as 'straight_line' | 'declining_balance')}>
-            <option value="straight_line">Straight Line</option>
-            <option value="declining_balance">Declining Balance</option>
+            <option value="straight_line">{t.fixedAssets.straightLine}</option>
+            <option value="declining_balance">{t.fixedAssets.decliningBalance}</option>
           </select>
         </div>
       </div>

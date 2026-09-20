@@ -28,12 +28,13 @@ export default async function InventorySettingsPage({
   return (
     <>
       <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
-        &larr; {locale === 'zh' ? '设置' : 'Settings'}
+        &larr; {t.nav.settings}
       </Link>
       <h1>{t.inventory.title}</h1>
       <InventoryList
         orgSlug={orgSlug}
         locale={locale}
+        baseCurrency={context.baseCurrency}
         items={inventoryItems}
         accounts={accounts.map((a) => ({
           id: a.id,

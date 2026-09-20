@@ -29,6 +29,15 @@ type Props = {
   apAging: ApAgingRow[];
   contacts: ContactRow[];
   orgSlug: string;
+  /**
+   * 损益表与现金流量表实际使用的期间（财年起始日 .. 今天）。
+   *
+   * 由服务端按 organizations.fiscal_year_start_month 算好传进来，客户端
+   * 不再自己 startOfLocalYear()——那是日历年，而这个产品的财年可以从任何
+   * 一个月开始。两边各算各的话，屏幕上会出现「标题说 1 月起、数字是
+   * 7 月起」这种没人看得出来的错位。
+   */
+  period: { from: string; to: string };
 };
 
 function toOption(row: { nameEn: string | null; nameZh: string | null }) {
@@ -74,6 +83,7 @@ export function ReportsView({
   apAging,
   contacts,
   orgSlug,
+  period,
 }: Props) {
   const [tab, setTab] = useState<Tab>('trial-balance');
 
@@ -88,28 +98,70 @@ export function ReportsView({
     { key: 'vendor-statement', label: t.vendorStatement.title },
   ];
 
+  /**
+   * 方向键在标签之间移动（WAI-ARIA tabs 模式）。
+   *
+   * 改成 role="tablist" 之后这一步是必须的，不是加分项：tablist 里只有
+   * 选中的那个标签留在 Tab 序列里（tabIndex -1/0，见下面），键盘用户没有
+   * 方向键就再也到不了另外七个报表。原来那版是 <nav> 包一排裸 <button>，
+   * Tab 能逐个走过去，但读屏念出来是「八个用途不明的按钮」，既不知道它们
+   * 是一组，也不知道当前正在看哪一个。
+   */
+  const handleTabKeyDown = useCallback(
+    (event: React.KeyboardEvent<HTMLButtonElement>, index: number) => {
+      const lastIndex = tabs.length - 1;
+      let nextIndex: number | null = null;
+
+      if (event.key === 'ArrowRight') nextIndex = index === lastIndex ? 0 : index + 1;
+      else if (event.key === 'ArrowLeft') nextIndex = index === 0 ? lastIndex : index - 1;
+      else if (event.key === 'Home') nextIndex = 0;
+      else if (event.key === 'End') nextIndex = lastIndex;
+      if (nextIndex === null) return;
+
+      event.preventDefault();
+      setTab(tabs[nextIndex].key);
+      // 这个模式下选中即显示，焦点必须跟着走，否则读屏读到的还是旧标签。
+      const container = event.currentTarget.parentElement;
+      container?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus();
+    },
+    [tabs],
+  );
+
   return (
     <>
-      <nav className="report-tabs">
-        {tabs.map((tabItem) => (
-          <button
-            key={tabItem.key}
-            className={tab === tabItem.key ? 'active' : ''}
-            onClick={() => setTab(tabItem.key)}
-          >
-            {tabItem.label}
-          </button>
-        ))}
-      </nav>
+      <div className="report-tabs" role="tablist" aria-label={t.reports.tabsLabel}>
+        {tabs.map((tabItem, index) => {
+          const selected = tab === tabItem.key;
+          return (
+            <button
+              key={tabItem.key}
+              type="button"
+              role="tab"
+              id={`report-tab-${tabItem.key}`}
+              aria-selected={selected}
+              aria-controls="report-panel"
+              // roving tabindex：整组标签在 Tab 序列里只占一站，
+              // 组内靠方向键走。
+              tabIndex={selected ? 0 : -1}
+              className={selected ? 'active' : ''}
+              onKeyDown={(event) => handleTabKeyDown(event, index)}
+              onClick={() => setTab(tabItem.key)}
+            >
+              {tabItem.label}
+            </button>
+          );
+        })}
+      </div>
 
+      <div id="report-panel" role="tabpanel" aria-labelledby={`report-tab-${tab}`} tabIndex={-1}>
       {tab === 'trial-balance' ? (
         <TrialBalanceTable rows={trialBalance} locale={locale} baseCurrency={baseCurrency} t={t} />
       ) : tab === 'profit-loss' ? (
-        <ProfitLossTable data={profitLoss} locale={locale} baseCurrency={baseCurrency} t={t} />
+        <ProfitLossTable data={profitLoss} locale={locale} baseCurrency={baseCurrency} t={t} period={period} />
       ) : tab === 'balance-sheet' ? (
         <BalanceSheetTable data={balanceSheet} locale={locale} baseCurrency={baseCurrency} t={t} />
       ) : tab === 'cash-flow' ? (
-        <CashFlowTable data={cashFlow} locale={locale} baseCurrency={baseCurrency} t={t} />
+        <CashFlowTable data={cashFlow} locale={locale} baseCurrency={baseCurrency} t={t} period={period} />
       ) : tab === 'ar-aging' ? (
         <AgingTable rows={arAging} locale={locale} baseCurrency={baseCurrency} t={t} type="ar" />
       ) : tab === 'ap-aging' ? (
@@ -122,6 +174,7 @@ export function ReportsView({
           baseCurrency={baseCurrency}
           t={t}
           type="customer"
+          period={period}
         />
       ) : (
         <StatementTab
@@ -131,8 +184,10 @@ export function ReportsView({
           baseCurrency={baseCurrency}
           t={t}
           type="vendor"
+          period={period}
         />
       )}
+      </div>
     </>
   );
 }
@@ -203,11 +258,13 @@ function ProfitLossTable({
   locale,
   baseCurrency,
   t,
+  period,
 }: {
   data: ProfitLossResult;
   locale: Locale;
   baseCurrency: string;
   t: Messages;
+  period: { from: string; to: string };
 }) {
   const hasRevenue = data.revenueRows.length > 0;
   const hasExpense = data.expenseRows.length > 0;
@@ -218,6 +275,14 @@ function ProfitLossTable({
       <thead>
         <tr>
           <th colSpan={2}>{t.reports.profitLoss}</th>
+        </tr>
+        {/* 期间必须写在表上。财年可以从任何一个月开始，而「本年度」这三个
+            字在 7 月起的公司里指的不是 1 月到今天——不写出来，用户没有任何
+            办法判断眼前这张表算的是哪一段。 */}
+        <tr>
+          <th colSpan={2} className="report-period">
+            {interpolate(t.reports.periodRange, { from: period.from, to: period.to })}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -275,11 +340,13 @@ function CashFlowTable({
   locale,
   baseCurrency,
   t,
+  period,
 }: {
   data: CashFlowResult;
   locale: Locale;
   baseCurrency: string;
   t: Messages;
+  period: { from: string; to: string };
 }) {
   const sectionLabels: Record<string, string> = {
     Operating: t.reports.operating,
@@ -310,6 +377,12 @@ function CashFlowTable({
       <thead>
         <tr>
           <th colSpan={2}>{t.reports.cashFlow}</th>
+        </tr>
+        {/* 与损益表同一个理由：这张表也是期间表，期间由财年决定。 */}
+        <tr>
+          <th colSpan={2} className="report-period">
+            {interpolate(t.reports.periodRange, { from: period.from, to: period.to })}
+          </th>
         </tr>
       </thead>
       <tbody>
@@ -558,6 +631,7 @@ function StatementTab({
   baseCurrency,
   t,
   type,
+  period,
 }: {
   contacts: ContactRow[];
   orgSlug: string;
@@ -565,16 +639,18 @@ function StatementTab({
   baseCurrency: string;
   t: Messages;
   type: 'customer' | 'vendor';
+  period: { from: string; to: string };
 }) {
   const isCustomer = type === 'customer';
   const title = isCustomer ? t.customerStatement.title : t.vendorStatement.title;
   const selectLabel = isCustomer ? t.customerStatement.selectContact : t.vendorStatement.selectContact;
 
   const [contactId, setContactId] = useState('');
-  const today = new Date().toISOString().slice(0, 10);
-  const yearStart = `${new Date().getFullYear()}-01-01`;
-  const [from, setFrom] = useState(yearStart);
-  const [to, setTo] = useState(today);
+  // 默认区间跟着财年走，不再是 startOfLocalYear()（日历年 1 月 1 日）。
+  // 同一页上损益表按财年算、对账单按日历年算的话，两张表对同一个客户给出
+  // 的期间不同，而屏幕上没有任何东西说明为什么。
+  const [from, setFrom] = useState(period.from);
+  const [to, setTo] = useState(period.to);
   const [data, setData] = useState<CustomerStatement | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -591,12 +667,15 @@ function StatementTab({
       const json = await res.json();
       setData(json);
     } catch (e) {
-      setError(e instanceof Error ? e.message : 'Failed to load statement');
+      // 原来的兜底文案是写死的英文。这里连 e.message 也一并换掉：
+      // 上面抛的是 `HTTP 500`，把它直接摆给用户看，中文界面里会突然冒出
+      // 一句英文技术缩写，而且他拿它什么也做不了。
+      setError(t.reports.statementLoadFailed);
       setData(null);
     } finally {
       setLoading(false);
     }
-  }, [orgSlug, type, contactId, from, to]);
+  }, [orgSlug, type, contactId, from, to, t]);
 
   return (
     <div className="statement-tab">

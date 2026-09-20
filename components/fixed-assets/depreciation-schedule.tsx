@@ -32,7 +32,7 @@ export function DepreciationSchedule({ orgSlug, baseCurrency, asset, schedules, 
   }
 
   function methodLabel(method: string): string {
-    return method === 'straight_line' ? 'Straight Line' : 'Declining Balance';
+    return method === 'straight_line' ? t.fixedAssets.straightLine : t.fixedAssets.decliningBalance;
   }
 
   const pending = posting !== null;

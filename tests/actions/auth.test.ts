@@ -2,7 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { sql } from '@/server/db/client';
 import { admin } from '@/tests/helpers/db';
-import { ensureAppUser } from '@/server/actions/auth';
+import { ensureAppUser } from '@/server/auth/ensure-app-user';
 
 let authUserId: string;
 let otherUserId: string;

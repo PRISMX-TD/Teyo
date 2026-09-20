@@ -4,6 +4,7 @@ import { withoutUserContext } from '@/server/db/transaction';
 import { RATE_SCALE } from '@/server/domain/exchange-rate';
 import { findRate, upsertRates } from '@/server/repositories/exchange-rates';
 import {
+  AUTO_RATE_CURRENCIES,
   fetchRatesFromFrankfurter,
   syncRatesForDate,
 } from '@/server/services/exchange-rate-sync';
@@ -14,6 +15,57 @@ function fakeFetch(payload: unknown, ok = true): typeof fetch {
       status: ok ? 200 : 500,
       headers: { 'content-type': 'application/json' },
     })) as unknown as typeof fetch;
+}
+
+/**
+ * 一个会照着 symbols= 参数**如实作答**的假 Frankfurter。
+ *
+ * 这些用例原来用的是手写的固定 payload（只有 SGD 与 USD 两个键），测的是
+ * 「响应怎么映射成 rate 行」。fetchRatesFromFrankfurter 后来加了一条完整性
+ * 断言——要了什么就必须回什么——之后那些固定 payload 就成了「提供方漏回了
+ * 九个币种」，于是全部报错。
+ *
+ * 那条断言本身是对的，而且正是为了抓真问题：Frankfurter 对不认识的 symbol
+ * **不报错**，它返回 HTTP 200 并把那几个键悄悄省掉（已实测）。VND 与 TWD
+ * 就是这样从来没被同步过，而同步任务每天都报成功。
+ *
+ * 所以要改的是假实现而不是断言：让它像真实提供方一样按请求作答，再单独用
+ * omit 参数去构造「提供方漏回一个币种」这一种情况。
+ */
+function fakeFrankfurter(options: {
+  /** 覆盖某几个币种的汇率，其余用一个固定值。 */
+  rates?: Record<string, number>;
+  /** 提供方回的日期（周末会回最近一个工作日）。缺省等于请求日期。 */
+  date?: string;
+  /** 故意不回这几个币种——用来测完整性断言。 */
+  omit?: readonly string[];
+  /** 记录每次请求的 URL，供断言 symbols 用。 */
+  onRequest?: (url: string) => void;
+} = {}): typeof fetch {
+  return (async (url: string) => {
+    options.onRequest?.(String(url));
+
+    const parsed = new URL(String(url));
+    const requested = (parsed.searchParams.get('symbols') ?? '').split(',').filter(Boolean);
+    const requestedDate = parsed.pathname.split('/').pop() ?? '';
+    const omit = new Set(options.omit ?? []);
+
+    const rates: Record<string, number> = {};
+    for (const code of requested) {
+      if (omit.has(code)) continue;
+      rates[code] = options.rates?.[code] ?? 0.5;
+    }
+
+    return new Response(
+      JSON.stringify({
+        amount: 1,
+        base: parsed.searchParams.get('base'),
+        date: options.date ?? requestedDate,
+        rates,
+      }),
+      { status: 200, headers: { 'content-type': 'application/json' } },
+    );
+  }) as unknown as typeof fetch;
 }
 
 const MYR_SGD = {
@@ -42,7 +94,7 @@ describe('fetchRatesFromFrankfurter', () => {
     const rows = await fetchRatesFromFrankfurter(
       'MYR',
       '2026-08-03',
-      fakeFetch({ amount: 1, base: 'MYR', date: '2026-08-03', rates: { SGD: 0.3125, USD: 0.2119 } }),
+      fakeFrankfurter({ rates: { SGD: 0.3125, USD: 0.2119 } }),
     );
 
     expect(rows).toEqual(
@@ -63,25 +115,58 @@ describe('fetchRatesFromFrankfurter', () => {
     const rows = await fetchRatesFromFrankfurter(
       'MYR',
       '2026-08-08',
-      fakeFetch({ amount: 1, base: 'MYR', date: '2026-08-07', rates: { SGD: 0.3125 } }),
+      fakeFrankfurter({ date: '2026-08-07' }),
     );
 
-    expect(rows.map((r) => r.rateDate).sort()).toEqual(['2026-08-07', '2026-08-08']);
+    // 每个币种都会出两行（提供方回的营业日 + 请求的那一天），所以这里断言
+    // 的是**日期的集合**，而不是行的列表——假实现现在如实回答 symbols= 里
+    // 要的全部币种，行数随币种数量变化，写死行数只会在加减币种时无故变红。
+    expect([...new Set(rows.map((r) => r.rateDate))].sort()).toEqual([
+      '2026-08-07',
+      '2026-08-08',
+    ]);
+    // 两个日期下的币种集合必须一样——周末补记那一天要能查到同一批汇率。
+    const byDate = (date: string) =>
+      rows.filter((r) => r.rateDate === date).map((r) => r.quoteCurrency).sort();
+    expect(byDate('2026-08-08')).toEqual(byDate('2026-08-07'));
   });
 
   it('does not request the base currency as its own quote', async () => {
     let requested = '';
-    const spy = (async (url: string) => {
-      requested = String(url);
-      return new Response(JSON.stringify({ amount: 1, base: 'MYR', date: '2026-08-03', rates: {} }), {
-        status: 200,
-        headers: { 'content-type': 'application/json' },
-      });
-    }) as unknown as typeof fetch;
+    await fetchRatesFromFrankfurter(
+      'MYR',
+      '2026-08-03',
+      fakeFrankfurter({ onRequest: (url) => { requested = url; } }),
+    );
 
-    await fetchRatesFromFrankfurter('MYR', '2026-08-03', spy);
     const symbols = new URL(requested).searchParams.get('symbols') ?? '';
     expect(symbols.split(',')).not.toContain('MYR');
+  });
+
+  it('only requests currencies the provider actually covers', async () => {
+    // VND 与 TWD 是欧洲央行不发布的币种。它们此前一直混在 symbols= 里，
+    // 而 Frankfurter 对不认识的 symbol 不报错——返回 200 并悄悄省掉。
+    // 于是这两个币种的汇率从来没被写进库，而同步任务每天都报成功。
+    let requested = '';
+    await fetchRatesFromFrankfurter(
+      'MYR',
+      '2026-08-03',
+      fakeFrankfurter({ onRequest: (url) => { requested = url; } }),
+    );
+
+    const symbols = (new URL(requested).searchParams.get('symbols') ?? '').split(',');
+    expect(symbols).not.toContain('VND');
+    expect(symbols).not.toContain('TWD');
+    expect(AUTO_RATE_CURRENCIES).not.toContain('VND');
+    expect(AUTO_RATE_CURRENCIES).not.toContain('TWD');
+  });
+
+  it('throws when the provider silently omits a currency we asked for', async () => {
+    // 这是上面那个真实缺陷的可执行形式：少回一个币种不是小事——从那天起，
+    // 用那个币种记账的人会一直撞「查不到汇率」，而同步照常报成功。
+    await expect(
+      fetchRatesFromFrankfurter('MYR', '2026-08-03', fakeFrankfurter({ omit: ['JPY'] })),
+    ).rejects.toThrow(/did not return rates for JPY/i);
   });
 
   it('throws when the API responds with an error status', async () => {
@@ -183,12 +268,10 @@ describe('upsertRates and findRate', () => {
 
 describe('syncRatesForDate', () => {
   it('stores rates for every base currency', async () => {
-    const result = await syncRatesForDate(
-      '2026-08-03',
-      fakeFetch({ amount: 1, base: 'MYR', date: '2026-08-03', rates: { SGD: 0.3125, USD: 0.2119 } }),
-    );
+    const result = await syncRatesForDate('2026-08-03', fakeFrankfurter());
 
     expect(result.inserted).toBeGreaterThan(0);
+    expect(result.failures).toEqual([]);
     const [{ count }] = await admin`
       select count(*)::int as count from exchange_rates where rate_date = '2026-08-03'
     `;
@@ -203,17 +286,19 @@ describe('syncRatesForDate', () => {
 
   it('still reports success when only some base currencies fail', async () => {
     let call = 0;
-    const flaky = (async () => {
+    const honest = fakeFrankfurter();
+    const flaky = (async (url: string) => {
       call += 1;
-      // 第一个币种失败，其余成功：整次同步不应中断。
+      // 第一个 base 失败，其余成功：整次同步不应中断。
       if (call === 1) return new Response('nope', { status: 500 });
-      return new Response(
-        JSON.stringify({ amount: 1, base: 'X', date: '2026-08-03', rates: { SGD: 0.3125 } }),
-        { status: 200, headers: { 'content-type': 'application/json' } },
-      );
+      return honest(url as unknown as RequestInfo);
     }) as unknown as typeof fetch;
 
     const result = await syncRatesForDate('2026-08-03', flaky);
     expect(result.inserted).toBeGreaterThan(0);
+    // 但坏掉的那个必须出现在返回值里——只回一个 inserted 数字的话，
+    // 「部分失败」与「全部成功」在监控上长得一模一样。
+    expect(result.failures).toHaveLength(1);
+    expect(result.failures[0]).toMatch(/^MYR: /);
   });
 });

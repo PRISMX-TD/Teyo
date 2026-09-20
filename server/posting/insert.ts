@@ -25,6 +25,8 @@ export type NewTransactionRow = {
   scaledRate: bigint;
   rateSource: RateSource;
   categoryId: string | null;
+  /** 交易归属的项目（可为 null）。见 TransactionHeadUpdate.projectId 的注释。 */
+  projectId: string | null;
   createdBy: string;
   clientUuid: string;
 };
@@ -38,11 +40,13 @@ export async function insertTransaction(
   tx: Tx,
   row: NewTransactionRow,
 ): Promise<{ id: string }> {
+  await assertProjectBelongsToOrg(tx, row.organizationId, row.projectId);
+
   const inserted = await tx`
     insert into transactions (
       organization_id, kind, occurred_on, description, currency,
       amount_minor, base_amount_minor, exchange_rate, rate_source,
-      category_id, created_by, client_uuid
+      category_id, project_id, created_by, client_uuid
     )
     values (
       ${row.organizationId},
@@ -55,6 +59,7 @@ export async function insertTransaction(
       ${formatScaledRate(row.scaledRate)},
       ${row.rateSource},
       ${row.categoryId},
+      ${row.projectId},
       ${row.createdBy},
       ${row.clientUuid}
     )
@@ -62,6 +67,36 @@ export async function insertTransaction(
   `;
 
   return { id: inserted[0].id as string };
+}
+
+/**
+ * 断言 project_id 属于本公司。
+ *
+ * 与下面 assertAccountsBelongToOrg 是同一类洞、同一个理由：
+ * `transactions.project_id -> projects(id)` 这条外键只保证那一行在 projects
+ * 表里存在，**不检查它属于哪家公司**，而 RLS 不对外键校验生效。把别家公司的
+ * 项目 id 挂到本公司的交易上，外键会照样放行。
+ *
+ * 放在写入路径里而不是让调用方各自记得先查：projectId 是从表单来的，
+ * 而「表单上的下拉只列出本公司的项目」是一句约定，不是结构性保证。
+ *
+ * 项目已归档（is_active = false）仍然允许挂：归档只影响它出不出现在选择器
+ * 里，不该让一笔补录到旧项目上的交易记不进去。
+ */
+async function assertProjectBelongsToOrg(
+  tx: Tx,
+  organizationId: string,
+  projectId: string | null,
+): Promise<void> {
+  if (projectId === null) return;
+
+  const rows = await tx`
+    select 1 from projects
+    where id = ${projectId} and organization_id = ${organizationId}
+  `;
+  if (rows.length === 0) {
+    throw new LedgerError(`Project not found in this company: ${projectId}`);
+  }
 }
 
 /** 科目 id -> 科目代码，取自归属校验那一次查询。 */

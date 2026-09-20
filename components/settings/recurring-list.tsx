@@ -4,9 +4,10 @@ import { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import type { TransactionKind } from '@/server/domain/ledger';
+import type { UserEntryKind } from '@/server/domain/ledger';
 import type { RecurringEditFields, RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
+import { todayLocalISO } from '@/lib/date';
 
 type MoneyAccountOption = {
   id: string;
@@ -50,7 +51,8 @@ type RecurringEntry = {
 type RecurringFrequency = RecurringTransactionRow['frequency'];
 
 type CreatePayload = {
-  kind: TransactionKind;
+  // 定期规则只能是用户能直接创建的四种之一——'closing' 只由年结产生。
+  kind: UserEntryKind;
   description: string;
   amount: string;
   currency: string;
@@ -123,7 +125,7 @@ export function RecurringList({
 }: Props) {
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState({
-    kind: 'expense' as TransactionKind,
+    kind: 'expense' as UserEntryKind,
     description: '',
     amount: '',
     currency: moneyAccounts[0]?.id ? '' : 'USD',
@@ -132,7 +134,7 @@ export function RecurringList({
     categoryId: '',
     frequency: 'monthly' as RecurringFrequency,
     interval: 1,
-    startDate: new Date().toISOString().slice(0, 10),
+    startDate: todayLocalISO(),
     endDate: '',
   });
   const [submitting, setSubmitting] = useState(false);
@@ -170,7 +172,7 @@ export function RecurringList({
         categoryId: '',
         frequency: 'monthly',
         interval: 1,
-        startDate: new Date().toISOString().slice(0, 10),
+        startDate: todayLocalISO(),
         endDate: '',
       });
     } finally {
@@ -181,7 +183,7 @@ export function RecurringList({
   const handleGenerate = useCallback(async () => {
     // 数的是到期的规则条数，不是将要生成的分录笔数——补记会让后者更大。
     // 文案已经改成明说自己数的是规则，并提醒逾期规则会一期一笔。
-    const today = new Date().toISOString().slice(0, 10);
+    const today = todayLocalISO();
     const dueRules = entries.filter((e) => isDue(e, today)).length;
     if (dueRules === 0) return;
     if (!window.confirm(interpolate(t.recurring.generateConfirm, { n: dueRules }))) return;
@@ -211,10 +213,10 @@ export function RecurringList({
           onClick={handleGenerate}
           disabled={
             generating ||
-            !entries.some((e) => isDue(e, new Date().toISOString().slice(0, 10)))
+            !entries.some((e) => isDue(e, todayLocalISO()))
           }
         >
-          {generating ? t.common.loading : 'Run due now'}
+          {generating ? t.common.loading : t.recurring.runDue}
         </button>
       </div>
 
@@ -289,7 +291,7 @@ export function RecurringList({
             {t.transaction.kind}
             <select
               value={form.kind}
-              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as TransactionKind }))}
+              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as UserEntryKind }))}
             >
               <option value="income">{t.transaction.income}</option>
               <option value="expense">{t.transaction.expense}</option>

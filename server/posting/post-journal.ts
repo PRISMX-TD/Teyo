@@ -7,7 +7,8 @@ import {
   type DraftJournalLine,
   type TransactionKind,
 } from '@/server/domain/ledger';
-import { templateFor, type PostingEvent } from '@/server/domain/posting-templates';
+import { kindFor, templateFor, type PostingEvent } from '@/server/domain/posting-templates';
+import { sumMinor } from '@/server/domain/money';
 import { parseRateToScaled, type RateSource } from '@/server/domain/exchange-rate';
 import { resolveRate, type ManualRateEntry } from '@/server/posting/rate';
 import { recordAudit } from '@/server/repositories/audit-logs';
@@ -38,6 +39,14 @@ type PostingCore = {
    */
   manualRateEntry: ManualRateEntry;
   categoryId: string | null;
+  /**
+   * 交易归属的项目，可选。省略等同于 null（不挂项目）。
+   *
+   * 写成可选而不是必填：定期规则、折旧、单据过账这些入口都没有项目这个
+   * 概念，强制它们显式传 null 只是噪音。归属校验在 insertTransaction 里，
+   * 不依赖调用方是否传了值。
+   */
+  projectId?: string | null;
 };
 
 export type PostJournalInput = PostingCore & {
@@ -107,13 +116,9 @@ export async function postJournal(
     manualRateEntry: input.manualRateEntry,
   });
 
-  const kind = input.event.type;
+  const kind = kindFor(input.event);
   const categoryId = categoryForKind(kind, input.categoryId);
-
-  // 取自分录行而非另算一遍：表头金额与分录必须同源，否则两者可能不一致，
-  // 而数据库的平衡触发器只看分录、看不到表头。templateFor 的四种模板都把
-  // 借方放在第一行，所以 lines[0] 就是这笔交易的本位币金额。
-  const baseAmountMinor = lines[0].baseAmountMinor;
+  const baseAmountMinor = headerBaseAmount(lines);
 
   // 7. 写交易表头。
   const { id: transactionId } = await insertTransaction(tx, {
@@ -127,6 +132,7 @@ export async function postJournal(
     scaledRate,
     rateSource,
     categoryId,
+    projectId: input.projectId ?? null,
     createdBy: ctx.userId,
     clientUuid: input.clientUuid,
   });
@@ -152,6 +158,7 @@ export async function postJournal(
       baseAmountMinor: baseAmountMinor.toString(),
       rateSource,
       categoryId,
+      projectId: input.projectId ?? null,
       sourceType: input.sourceType ?? null,
       sourceId: input.sourceId ?? null,
       lines: auditLines(lines, accountCodes),
@@ -170,6 +177,7 @@ export type ExistingTransactionRow = {
   amountMinor: bigint;
   baseAmountMinor: bigint;
   categoryId: string | null;
+  projectId: string | null;
   /** 库里存的十进制字符串（numeric(20,8)），由 parseRateToScaled 转回定标整数。 */
   exchangeRate: string;
   rateSource: RateSource;
@@ -257,10 +265,9 @@ export async function repostJournal(
       : undefined,
   });
 
-  const kind = input.event.type;
+  const kind = kindFor(input.event);
   const categoryId = categoryForKind(kind, input.categoryId);
-  // 与创建路径同理：表头金额取自分录，数据库的平衡触发器看不到表头。
-  const baseAmountMinor = lines[0].baseAmountMinor;
+  const baseAmountMinor = headerBaseAmount(lines);
 
   // 7. 改表头。
   await updateTransactionHead(tx, ctx.organizationId, input.transactionId, {
@@ -272,6 +279,7 @@ export async function repostJournal(
     scaledRate,
     rateSource,
     categoryId,
+    projectId: input.projectId ?? null,
   });
 
   // 8. 分录整体重建，而不是原地改。
@@ -302,6 +310,7 @@ export async function repostJournal(
       baseAmountMinor: existing.baseAmountMinor.toString(),
       rateSource: existing.rateSource,
       categoryId: existing.categoryId,
+      projectId: existing.projectId,
       // 改科目是编辑里最常见的一种，而只记表头的话它完全看不出来：把一笔
       // 支出从「水电」改挂到「交通」，before 与 after 的每一个表头字段都
       // 一模一样。after 一直带着分录与科目代码，before 补齐才对称。
@@ -315,6 +324,7 @@ export async function repostJournal(
       baseAmountMinor: baseAmountMinor.toString(),
       rateSource,
       categoryId,
+      projectId: input.projectId ?? null,
       lines: auditLines(lines, accountCodes),
     },
   });
@@ -369,6 +379,28 @@ async function buildValidatedLines(
 }
 
 /**
+ * 交易表头的本位币金额：借方那一侧的合计。
+ *
+ * 取自分录行而非另算一遍——表头金额与分录必须同源，否则两者可能不一致，
+ * 而数据库的配平触发器只看分录、看不到表头，它会放行。
+ *
+ * 这里原来写的是 lines[0].baseAmountMinor，理由是「templateFor 的四种模板
+ * 都把借方放在第一行」。那个理由只对一借一贷的模板成立。单据事件接进来
+ * 之后不再成立：一张含税账单是「借费用（净额）/ 借进项税（税额）/ 贷应付
+ * （总额）」，lines[0] 是净额，用它当表头金额会让表头比这张账单的实际总额
+ * 少一个税额——而分录本身完全配平，触发器、assertBalanced、行级不变量
+ * 四道校验没有任何一道会发现。
+ *
+ * 借方合计对两行模板给出的结果与 lines[0] 逐字相同（两行模板的借方只有
+ * 一行），所以既有四条路径的行为一个字节都没变。
+ */
+function headerBaseAmount(lines: DraftJournalLine[]): bigint {
+  return sumMinor(
+    lines.filter((line) => line.direction === 'debit').map((line) => line.baseAmountMinor),
+  );
+}
+
+/**
  * 转账与手工凭证不挂分类，与 transactions_category_matches_kind 约束一致
  * （见 0014 迁移）；收支两种事件必须带分类。
  *
@@ -386,7 +418,10 @@ async function buildValidatedLines(
  * 用户都该读到同一句话。
  */
 function categoryForKind(kind: TransactionKind, categoryId: string | null): string | null {
-  if (kind === 'transfer' || kind === 'journal') return null;
+  // 'closing' 与 transfer/journal 同属「不带分类」那一支（0024 把它并进了
+  // transactions_category_matches_kind）。年结结转的是一整批科目的余额，
+  // 「这笔属于哪个分类」这个问题本身不成立。
+  if (kind === 'transfer' || kind === 'journal' || kind === 'closing') return null;
 
   if (categoryId === null) {
     throw new LedgerError('Income and expense records need a category.');

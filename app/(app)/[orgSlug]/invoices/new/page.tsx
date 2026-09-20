@@ -44,6 +44,10 @@ export default async function NewInvoicePage({
         locale={locale}
         contacts={contacts}
         currencies={[...SUPPORTED_CURRENCIES]}
+        // 本位币必须从这里传下去。表单原来硬写 useState('USD')，服务端那条
+        // 「省略 currency 即取本位币」的缺省路径因此永远走不到——一家本位币
+        // 为 MYR 的公司开出来的每一张发票都被记成美元。
+        baseCurrency={context.baseCurrency}
       />
     </>
   );

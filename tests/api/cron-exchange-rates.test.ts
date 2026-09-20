@@ -12,7 +12,10 @@ const original = process.env.CRON_SECRET;
 
 beforeEach(() => {
   syncRatesForDate.mockReset();
-  syncRatesForDate.mockResolvedValue({ inserted: 3 });
+  // 路由会读 result.failures 并据此算出 status，所以假实现必须给全这两个
+  // 字段——只给 inserted 时 result.failures.length 会抛，整条路径落到那个
+  // 兜底的 502 上，而 502 本该只留给「同步真的失败了」。
+  syncRatesForDate.mockResolvedValue({ inserted: 3, failures: [] });
   process.env.CRON_SECRET = 'test-secret';
 });
 

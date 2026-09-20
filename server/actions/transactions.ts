@@ -1,9 +1,15 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import {
+  createTransactionSchema,
+  parseOrThrow,
+  updateTransactionSchema,
+  voidTransactionSchema,
+} from '@/lib/schemas';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission } from '@/server/auth/guard';
-import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
+import { LedgerError, type TransactionKind, type UserEntryKind } from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import type { PostingEvent } from '@/server/domain/posting-templates';
 import { assertPeriodOpen } from '@/server/domain/period-lock';
@@ -20,13 +26,15 @@ import {
 import { postJournal, repostJournal } from '@/server/posting/post-journal';
 
 export type CreateTransactionInput = {
-  kind: TransactionKind;
+  kind: UserEntryKind;
   occurredOn: string;
   amount: string;
   currency: string;
   moneyAccountId: string;
   counterAccountId?: string;
   categoryId?: string;
+  /** 交易归属的项目，可选。见 lib/schemas.ts 里 projectId 的注释。 */
+  projectId?: string;
   description?: string;
   exchangeRate?: string;
   clientUuid: string;
@@ -42,7 +50,7 @@ async function resolveCounterAccountId(
   tx: Tx,
   organizationId: string,
   input: {
-    kind: TransactionKind;
+    kind: UserEntryKind;
     moneyAccountId: string;
     counterAccountId?: string;
     categoryId?: string;
@@ -92,7 +100,7 @@ async function resolveCounterAccountId(
  * 唯一定义）。掉个个儿的分录照样配平，看板上的总额也一分不差。
  */
 function toPostingEvent(
-  kind: TransactionKind,
+  kind: UserEntryKind,
   moneyAccountId: string,
   counterAccountId: string,
   amountMinor: bigint,
@@ -128,39 +136,54 @@ export async function createTransaction(
 ): Promise<{ id: string; deduplicated: boolean }> {
   const context = await requirePermission(orgSlug, 'transaction:create');
 
+  // 入参校验在最前面，早于期间锁定与任何数据库往返。
+  //
+  // CreateTransactionInput 是 TypeScript 类型，运行时不存在——Server Action
+  // 收到的是网络上的任意 JSON，形状由调用方说了算。下面这一路的每一步都
+  // 默认入参「至少是那个形状」：resolveCounterAccountId 只在 kind 上分支，
+  // 不管 transfer 有没有同时带着 categoryId；parseDecimalToMinor 只认小数串，
+  // 拿到 undefined 会抛一句提到变量名的报错。createTransactionSchema 把这些
+  // 前提一次性验完，且给的是完整句子而不是 zod 默认文案（见 parseOrThrow）。
+  const parsed = parseOrThrow(createTransactionSchema, input, (m) => new LedgerError(m));
+
   // 期间锁定在进事务前先判，省掉一次注定要回滚的写入。
-  assertPeriodOpen(input.occurredOn, context.lockedUntil, context.role);
+  assertPeriodOpen(parsed.occurredOn, context.lockedUntil, context.role);
 
   const result = await withTransaction(context.userId, async (tx) => {
     // 幂等短路留在解析入参之前，而不是全部交给 postJournal 的第 2 步：
     // 离线队列重放的是几分钟前就已入账成功的那一笔，若期间分类被停用或
     // 删除，先解析入参会让这次重放报错——用户看到的是一条明明成功过的
     // 记录突然失败。postJournal 里的那次查询仍在，是结构性兜底。
-    const existing = await findTransactionByClientUuid(tx, context.organizationId, input.clientUuid);
+    const existing = await findTransactionByClientUuid(
+      tx,
+      context.organizationId,
+      parsed.clientUuid,
+    );
     if (existing) {
       return { id: existing.id, deduplicated: true };
     }
 
-    const moneyAccount = await getMoneyAccount(tx, context.organizationId, input.moneyAccountId);
+    const moneyAccount = await getMoneyAccount(tx, context.organizationId, parsed.moneyAccountId);
     const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, {
-      kind: input.kind,
+      kind: parsed.kind,
       moneyAccountId: moneyAccount.id,
-      counterAccountId: input.counterAccountId,
-      categoryId: input.categoryId,
+      counterAccountId: parsed.counterAccountId,
+      categoryId: parsed.categoryId,
     });
 
-    const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(input.currency));
+    const amountMinor = parseDecimalToMinor(parsed.amount, currencyExponent(parsed.currency));
 
     const posted = await postJournal(tx, context, {
-      event: toPostingEvent(input.kind, moneyAccount.id, counterAccountId, amountMinor),
-      occurredOn: input.occurredOn,
-      description: input.description ?? '',
-      currency: input.currency,
-      manualRate: input.exchangeRate,
+      event: toPostingEvent(parsed.kind, moneyAccount.id, counterAccountId, amountMinor),
+      occurredOn: parsed.occurredOn,
+      description: parsed.description,
+      currency: parsed.currency,
+      manualRate: parsed.exchangeRate,
       // 交易表单上就有 RateField，查不到缓存汇率时让用户当场填一个。
       manualRateEntry: 'available',
-      categoryId: input.categoryId ?? null,
-      clientUuid: input.clientUuid,
+      categoryId: parsed.categoryId ?? null,
+      projectId: parsed.projectId ?? null,
+      clientUuid: parsed.clientUuid,
     });
 
     return { id: posted.transactionId, deduplicated: posted.deduplicated };
@@ -260,6 +283,8 @@ export type UpdateTransactionInput = {
   moneyAccountId: string;
   counterAccountId?: string;
   categoryId?: string;
+  /** 交易归属的项目，可选。见 lib/schemas.ts 里 projectId 的注释。 */
+  projectId?: string;
   description?: string;
   exchangeRate?: string;
 };
@@ -299,26 +324,59 @@ export async function updateTransaction(
     // 让用户作废重录更清晰，也让审计留下两条独立记录。
     const kind = existing.kind;
 
-    const moneyAccount = await getMoneyAccount(tx, context.organizationId, input.moneyAccountId);
+    // journal 在这里先单独挡下来。updateTransactionSchema 的 kind 是
+    // income/expense/transfer 三选一，把 'journal' 喂进去只会得到一句
+    // 「Invalid enum value」——而用户真正需要知道的是「这类记录不能编辑」。
+    // 界面上本来就不渲染 journal 的编辑表单（见 app/(app)/[orgSlug]/
+    // transactions/[id]/page.tsx），所以走到这里的只可能是直接调 Action 的人。
+    if (kind === 'journal') {
+      throw new LedgerError('Journal entries do not use categories.');
+    }
+
+    // 年结分录同理，而且理由更硬：它是一整个财年损益的结转，改动它等于
+    // 悄悄改写已经定案的年度利润。要撤销只能走
+    // server/actions/year_end.ts 的 undoFiscalYearCloseAction——那条路径会
+    // 连同 fiscal_year_closings 的登记一起撤掉，两边不会各说各的。
+    if (kind === 'closing') {
+      throw new LedgerError(
+        'Year-end closing entries cannot be edited. Undo the year-end close instead.',
+      );
+    }
+
+    // 校验放在读出 existing 之后，原因只有一个：kind 由库里那一行说了算，
+    // 不由客户端说了算，而「收支必须有分类、转账必须有对方账户」这组规则
+    // 恰恰要按 kind 分支。先读后验，验的才是这笔账真实的形状。
+    //
+    // 注意这个顺序也决定了错误的优先级：不存在 / 已作废 / 无权编辑这三条
+    // 依然排在字段校验前面——它们说的是「这件事你做不了」，比「这个字段
+    // 填错了」更该先说。
+    const parsed = parseOrThrow(
+      updateTransactionSchema,
+      { ...input, id, kind },
+      (m) => new LedgerError(m),
+    );
+
+    const moneyAccount = await getMoneyAccount(tx, context.organizationId, parsed.moneyAccountId);
     const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, {
       kind,
       moneyAccountId: moneyAccount.id,
-      counterAccountId: input.counterAccountId,
-      categoryId: input.categoryId,
+      counterAccountId: parsed.counterAccountId,
+      categoryId: parsed.categoryId,
     });
 
-    const amountMinor = parseDecimalToMinor(input.amount, currencyExponent(input.currency));
+    const amountMinor = parseDecimalToMinor(parsed.amount, currencyExponent(parsed.currency));
 
     await repostJournal(tx, context, {
       transactionId: id,
       event: toPostingEvent(kind, moneyAccount.id, counterAccountId, amountMinor),
-      occurredOn: input.occurredOn,
-      description: input.description ?? '',
-      currency: input.currency,
-      manualRate: input.exchangeRate,
+      occurredOn: parsed.occurredOn,
+      description: parsed.description,
+      currency: parsed.currency,
+      manualRate: parsed.exchangeRate,
       // 编辑走的是同一张表单，RateField 同样在。
       manualRateEntry: 'available',
-      categoryId: input.categoryId ?? null,
+      categoryId: parsed.categoryId ?? null,
+      projectId: parsed.projectId ?? null,
       existing: {
         occurredOn: existing.occurredOn,
         description: existing.description,
@@ -326,6 +384,7 @@ export async function updateTransaction(
         amountMinor: existing.amountMinor,
         baseAmountMinor: existing.baseAmountMinor,
         categoryId: existing.categoryId,
+        projectId: existing.projectId,
         exchangeRate: existing.exchangeRate,
         rateSource: existing.rateSource,
       },
@@ -346,12 +405,16 @@ export async function voidTransaction(
   id: string,
   reason: string,
 ): Promise<void> {
-  const cleanReason = reason.trim();
-  if (cleanReason === '') {
-    throw new LedgerError('Voiding a record needs a reason.');
-  }
-
   const context = await requirePermission(orgSlug, 'transaction:read');
+
+  // 原来这里只有一句 reason.trim() === ''，id 则是一路裸传到 SQL。
+  // voidTransactionSchema 把两件事一起管住：理由非空且不超过 300 字
+  // （void_reason 列的长度），id 必须是 uuid。
+  const { reason: cleanReason } = parseOrThrow(
+    voidTransactionSchema,
+    { id, reason },
+    (m) => new LedgerError(m),
+  );
 
   await withTransaction(context.userId, async (tx) => {
     const existing = await getTransactionDetail(tx, context.organizationId, id);

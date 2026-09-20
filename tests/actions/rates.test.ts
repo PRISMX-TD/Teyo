@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from '@/server/db/client';
 import {
@@ -6,6 +7,13 @@ import {
   resetTestData,
   seedRate,
 } from '@/tests/helpers/test-db';
+
+/**
+ * 邮箱带随机后缀。auth.users 的邮箱有唯一约束，写死的话一次被中断的跑
+ * （afterAll 没执行）就会让这个文件此后永远撞唯一约束——而报错只说
+ * "duplicate key"，看不出是残留数据。
+ */
+const RUN = randomUUID().slice(0, 8);
 
 let currentUserId: string | null = null;
 
@@ -24,7 +32,7 @@ let orgSlug: string;
 
 beforeAll(async () => {
   await resetTestData();
-  ownerId = await createTestUser('owner-rate@example.com', 'Owner');
+  ownerId = await createTestUser(`test-owner-rate-${RUN}@example.com`, 'Owner');
   const org = await createTestOrgWithSeed(ownerId, 'Rate Co', 'rate-co', 'MYR');
   orgSlug = org.slug;
   currentUserId = ownerId;
@@ -55,7 +63,7 @@ describe('lookupRate', () => {
   });
 
   it('requires membership of the organization', async () => {
-    const strangerId = await createTestUser('stranger-rate@example.com', 'Stranger');
+    const strangerId = await createTestUser(`test-stranger-rate-${RUN}@example.com`, 'Stranger');
     currentUserId = strangerId;
     await expect(lookupRate(orgSlug, 'SGD', '2025-03-15')).rejects.toThrow();
     currentUserId = ownerId;

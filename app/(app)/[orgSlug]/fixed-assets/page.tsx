@@ -37,7 +37,7 @@ export default async function FixedAssetsPage({
         <h1>{t.fixedAssets.title}</h1>
         <div className="page-header-actions">
           <Link href={`/${orgSlug}/fixed-assets/new`} className="primary-button">
-            {locale === 'zh' ? '新增固定资产' : 'New Asset'}
+            {t.fixedAssets.newTitle}
           </Link>
         </div>
       </div>

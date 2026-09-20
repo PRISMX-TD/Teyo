@@ -3,6 +3,25 @@ import { formatScaledRate } from '@/server/domain/exchange-rate';
 
 export type DepreciationMethod = 'straight_line' | 'declining_balance';
 
+/**
+ * 关于多币种：0011 迁移给 fixed_assets 加了 original_currency /
+ * original_cost_minor / purchase_exchange_rate 三列，而折旧自始至终只用
+ * cost_minor（本位币）。**这是有意的，也是对的**，不是「忘了接进去」。
+ *
+ * 固定资产是非货币性项目：按购入日的汇率折算一次，之后不再按新汇率重估。
+ * createFixedAsset 里那次 convertToBaseMinor 就是那唯一一次折算，落进
+ * cost_minor；排程、每一期分录、资产负债表上的账面净值全部照它走。
+ *
+ * 如果反过来做——每期折旧时按当期汇率重算原值——会发生的事是：汇率一动，
+ * 这台资产的历史成本就跟着动，累计折旧与账面原值分属两个不同的汇率口径，
+ * 资产负债表上的净值再也无法由「原值 - 累计折旧」还原。而汇率变动产生的
+ * 损益本来就不该出现在一台机器上，它属于汇兑损益（fx-gain / fx-loss，
+ * 0021 迁移新加），只对货币性项目（应收、应付、外币存款）成立。
+ *
+ * 所以那三列确实只是留痕：它们回答「当初花了多少日元、按什么汇率记的账」，
+ * 不参与任何计算。今天没有页面读它们，这一段注释是它们存在的理由。
+ */
+
 export type FixedAssetRow = {
   id: string;
   organizationId: string;
@@ -246,11 +265,81 @@ export async function disposeFixedAsset(
   `;
 }
 
+/** 重算一次排程的结果。 */
+export type ScheduleRegeneration = {
+  /** 重算之后这条资产完整的排程，含被冻结的已过账期间。 */
+  periods: DepreciationPeriod[];
+  /** 已过账、因而一个字节都没改的期间（YYYY-MM-DD，升序）。 */
+  keptPostedPeriods: string[];
+};
+
+/**
+ * 从购入日起数第 i 个月的期间键（每期固定落在当月 1 号）。
+ */
+function periodKey(startYear: number, startMonth: number, offset: number): string {
+  const month = startMonth + offset;
+  const year = startYear + Math.floor((month - 1) / 12);
+  const calendarMonth = ((month - 1) % 12) + 1;
+  return `${String(year).padStart(4, '0')}-${String(calendarMonth).padStart(2, '0')}-01`;
+}
+
+/**
+ * 重算折旧排程。**已过账的期间一个字节都不改。**
+ *
+ * 这个函数原来是本项目里最危险的一处写入。它的 upsert 写的是
+ * `do update set depreciation_minor = ..., is_posted = false`，而
+ * updateFixedAssetAction 在 cost / salvage / life / method / purchaseDate
+ * 任一变动时都会重新调用它。于是：一期折旧过账之后，用户去改一下账面原值，
+ * 那一期的 is_posted 被重置回 false、金额被覆盖，而 transaction_id 原样留着
+ * ——分录还在账上。随后 loadDepreciationPosting 里的 `if (schedule.is_posted)`
+ * 顺利通过，同一期折旧记第二笔。两笔各自一借一贷，配平触发器、assertBalanced、
+ * 行级不变量、账户归属校验四道校验没有任何一道会发现：它们核对的是「这一笔
+ * 内部自洽吗」，没有任何一道知道「这一期是不是已经记过了」。
+ *
+ * 选的是三种方案里的第一种——重算时跳过已过账期间，把改动只落在之后的期间上：
+ *
+ *   (a) 跳过已过账期间，剩余期间按剩余账面净值重摊。← 本函数
+ *   (b) 要求先对已过账期间生成反向分录冲销，再重算。
+ *   (c) 直接拒绝修改已开始折旧的资产的关键参数。
+ *
+ * 选 (a) 的理由有三条，都不是「实现起来最省事」：
+ *
+ * 1. 它就是会计上对「会计估计变更」的标准处理：已入账的历史不因为参数修正
+ *    而改写，变更自变更日起未来适用（prospective）。把一台机器的年限从 5 年
+ *    改成 4 年，不意味着过去两年的折旧记错了。
+ * 2. (b) 要求用户理解「冲销」，并且会在账上留下一对互相抵消的分录；真正需要
+ *    冲销的是「当初录错了原值」那一种，而那种情况用户应该作废资产重建，不是
+ *    改参数。把冲销塞进「改一下数字」这个动作里，代价是每个改过参数的用户
+ *    都会在总账里多出两笔他没打算记的分录。
+ * 3. (c) 会让资产一旦过了第一期就再也改不了名字以外的任何东西——而
+ *    updateFixedAssetAction 的 needsRegen 判断把 cost / salvage / life /
+ *    method / rate / purchaseDate 全列进去了，等于把整张编辑表单锁死。
+ *
+ * 「剩余期间按剩余账面净值重摊」不是可选项而是 (a) 的必要组成部分。若只是
+ * 跳过已过账期间、剩下的照新参数从头算，全生命周期的折旧合计就不再等于
+ * 成本减残值：1200 摊 4 期、过了 2 期（各 300）之后把原值改成 2400，剩下
+ * 两期若各记 600，合计 300+300+600+600 = 1800，这台资产永远折不完，而
+ * 账面上处处配平。按剩余净值重摊则是 (2400-600)/2 = 900，合计正好 2400。
+ *
+ * 两道防线，不是一道：
+ *   - 应用侧：已过账期间原样取用库里那个数参与滚动计算，不进 upsert 的值列表；
+ *   - 数据库侧：upsert 的 DO UPDATE 带 `where is_posted = false`。这一条防的是
+ *     「读出已过账集合」与「写回」之间的并发窗口——READ COMMITTED 下另一个
+ *     标签页可以在这中间把某一期过账掉。ON CONFLICT DO UPDATE 会对冲突行加锁
+ *     并按提交后的最新版本求值 WHERE，所以那一期会被静默跳过而不是被覆盖。
+ *     少了这一条，第一道防线读到的就是一份过期的快照。
+ *
+ * 同时修掉的第二个静默缺陷：缩短年限。原来的写法只 upsert 新算出来的那些期间，
+ * 从不删除任何行。把 24 个月改成 12 个月之后，13-24 期仍然躺在表里、is_posted
+ * 仍然是 false，排程页照样把它们列出来，用户照样点得动「过账」——一台早已折完
+ * 的资产可以继续折下去。这里补上一句删除，但只删未过账的：已过账的期间即使
+ * 落在新年限之外也必须留着，它对应的分录在账上。
+ */
 export async function generateDepreciationSchedule(
   tx: Tx,
   organizationId: string,
   assetId: string,
-): Promise<DepreciationPeriod[]> {
+): Promise<ScheduleRegeneration> {
   const assetRows = await tx`
     select cost_minor, salvage_value_minor, useful_life_months, method, declining_rate_bps, purchase_date
     from fixed_assets
@@ -270,40 +359,85 @@ export async function generateDepreciationSchedule(
   const startYear = Number(yearStr);
   const startMonth = Number(monthStr);
 
+  // 已过账的期间及其金额。取的是库里那个数，不是重算出来的数——「已入账的
+  // 历史不改写」这句话必须落在参与滚动计算的那个值上，否则后面几期的起点
+  // 就是一个从未真正入过账的账面净值。
+  const postedRows = await tx`
+    select period, depreciation_minor
+    from depreciation_schedules
+    where fixed_asset_id = ${assetId} and is_posted = true
+  `;
+  const postedByPeriod = new Map<string, bigint>(
+    postedRows.map((row) => [
+      formatDateOnly(row.period as Date | string),
+      BigInt(row.depreciation_minor as string),
+    ]),
+  );
+
+  const periodKeys: string[] = [];
+  for (let i = 0; i < lifeMonths; i++) {
+    periodKeys.push(periodKey(startYear, startMonth, i));
+  }
+
+  // 滚动计算要覆盖的是「新排程的期间」并上「已过账的期间」，不只是前者。
+  //
+  // 改购入日或缩短年限会让某些已过账的期间整个掉出新的期间列表。只按新列表
+  // 算的话，那几期入账过的折旧就不在 accumulated 里了，剩余期间会从完整的
+  // 原值重新摊起——已经记过的折旧被记第二遍，只是换了个期间名字。并上去之后
+  // 它们照样冻结、照样参与滚动，掉出范围的只是「不再有新的未过账行」。
+  // 'YYYY-MM-DD' 按字典序排就是按时间序排。
+  const allPeriods = [...new Set([...periodKeys, ...postedByPeriod.keys()])].sort();
+
+  // unpostedAhead[i] = 含本期在内、从第 i 期起还剩几期没过账。
+  // 直线法与余额递减法切换判断都按「还剩几期要摊」来分母，而不是「还剩几个月」
+  // ——已过账的那几期不再参与摊销，把它们数进分母会让剩下的每一期都摊少，
+  // 最后一期再一次性补齐，形成一个谁也解释不了的尾巴。
+  const unpostedAhead = new Array<number>(allPeriods.length).fill(0);
+  let ahead = 0;
+  for (let i = allPeriods.length - 1; i >= 0; i--) {
+    if (!postedByPeriod.has(allPeriods[i])) ahead += 1;
+    unpostedAhead[i] = ahead;
+  }
+
   const periods: DepreciationPeriod[] = [];
   let bookValue = cost;
   let accumulated = 0n;
 
-  for (let i = 0; i < lifeMonths; i++) {
-    const remainingMonths = lifeMonths - i;
+  for (let i = 0; i < allPeriods.length; i++) {
+    const period = allPeriods[i];
+    const posted = postedByPeriod.get(period);
     let depreciation: bigint;
 
-    if (method === 'straight_line') {
-      const depreciable = cost - salvage > 0n ? cost - salvage : 0n;
-      const totalSoFar = periods.reduce((sum, p) => sum + p.depreciation, 0n);
-      if (i === lifeMonths - 1) {
-        depreciation = depreciable - totalSoFar;
-      } else {
-        depreciation = depreciable / BigInt(lifeMonths);
-      }
+    if (posted !== undefined) {
+      // 已过账：原样取用，不重算。
+      depreciation = posted;
     } else {
-      depreciation = (bookValue * BigInt(decliningRateBps)) / BigInt(10000 * 12);
-      const remainingBook = bookValue - depreciation;
-      const slPerMonth = remainingMonths <= 1
-        ? (bookValue - salvage > 0n ? bookValue - salvage : 0n)
-        : (bookValue - salvage) / BigInt(remainingMonths - 1);
+      // 两种方法都从「当前账面净值」出发，而不是从原值出发。这正是 (a) 方案
+      // 成立的地方：前面几期无论是按什么参数入账的，剩下要摊的就是此刻还剩
+      // 的这些钱。n 是含本期在内还剩几期要摊；n === 1 时把剩余全部摊完，
+      // 整条排程的合计因此恒等于 cost - salvage，不需要在最后一期另写一句
+      // 「补差额」。
+      const n = unpostedAhead[i];
+      const depreciable = bookValue > salvage ? bookValue - salvage : 0n;
+      const straightLine = n <= 1 ? depreciable : depreciable / BigInt(n);
 
-      if (slPerMonth > 0n && depreciation < slPerMonth) {
-        const depreciable = bookValue - salvage > 0n ? bookValue - salvage : 0n;
-        if (i === lifeMonths - 1) {
-          depreciation = depreciable;
-        } else {
-          depreciation = depreciable / BigInt(remainingMonths);
-        }
-      }
+      if (method === 'straight_line') {
+        depreciation = straightLine;
+      } else {
+        // 余额递减法：年率 decliningRateBps 摊到每个月。
+        depreciation = (bookValue * BigInt(decliningRateBps)) / BigInt(10000 * 12);
 
-      if (bookValue - depreciation < salvage) {
-        depreciation = bookValue - salvage > 0n ? bookValue - salvage : 0n;
+        // 教科书上的「切换到直线法」：递减额一旦低于按剩余期数算的直线额，
+        // 之后各期改用直线额，否则残值永远摊不到。
+        //
+        // 原来这里的分母是 remainingMonths - 1 而不是 remainingMonths，于是
+        // 直线额被算大一期份，切换点整整提前一期，倒数第二期会把几乎全部
+        // 剩余净值一次摊光。折旧总额仍然等于成本减残值，每一期仍然配平——
+        // 错的只是分布，这正是没有任何一道校验看得见的那类错误。
+        if (depreciation < straightLine) depreciation = straightLine;
+
+        // 不能跌破残值。
+        if (depreciation > depreciable) depreciation = depreciable;
       }
     }
 
@@ -313,23 +447,18 @@ export async function generateDepreciationSchedule(
     bookValue = bookValue - depreciation;
     if (bookValue < salvage) bookValue = salvage;
 
-    const month = startMonth + i;
-    const year = startYear + Math.floor((month - 1) / 12);
-    const calendarMonth = ((month - 1) % 12) + 1;
-    const period = `${String(year).padStart(4, '0')}-${String(calendarMonth).padStart(2, '0')}-01`;
-
-    periods.push({
-      period,
-      depreciation,
-      accumulated,
-      bookValue,
-    });
+    periods.push({ period, depreciation, accumulated, bookValue });
   }
 
-  if (periods.length > 0) {
+  // 只写未过账的那些期间。已过账的期间连同它的 accumulated/book_value 一起
+  // 保持原样：那两个数是它入账当时的口径，改写它们等于事后修订一份已经发出去
+  // 的报表。
+  const writable = periods.filter((p) => !postedByPeriod.has(p.period));
+
+  if (writable.length > 0) {
     await tx`
       insert into depreciation_schedules ${tx(
-        periods.map((p) => ({
+        writable.map((p) => ({
           fixed_asset_id: assetId,
           period: p.period,
           depreciation_minor: p.depreciation.toString(),
@@ -348,12 +477,37 @@ export async function generateDepreciationSchedule(
       do update set
         depreciation_minor = excluded.depreciation_minor,
         accumulated_minor = excluded.accumulated_minor,
-        book_value_minor = excluded.book_value_minor,
-        is_posted = false
+        book_value_minor = excluded.book_value_minor
+      where depreciation_schedules.is_posted = false
     `;
   }
 
-  return periods;
+  // 年限缩短（或购入日前移）之后落在新排程之外、且还没过账的期间要作废掉，
+  // 否则它们仍然躺在表里、is_posted 仍然是 false、排程页照样列出来，用户照样
+  // 点得动「过账」——一台早已折完的资产可以继续折下去。原来的写法只 upsert
+  // 新算出来的那些期间，从不处理多出来的那些。
+  //
+  // 作废的方式是把金额清零，不是 delete。两个理由：
+  //   1. loadDepreciationPosting 的第四条校验是「金额必须为正」，清零之后这些
+  //      行就过不了账了，而这正是要达到的效果——不需要它们消失，只需要它们
+  //      不再是一条可以入账的排程。
+  //   2. depreciation_schedules 在 RLS 上不打算有 delete 策略（软删除是这批表
+  //      的统一做法，见 server/domain/permissions.ts 的 TABLE_ACCESS）。没有
+  //      delete 策略时，一条 DELETE 不会报错，只会匹配零行——静默无效正是
+  //      本次要根除的那类故障。UPDATE 策略是有的，且与本 action 要求的
+  //      account:manage 同为 owner/admin，锁得住也写得进。
+  await tx`
+    update depreciation_schedules
+    set depreciation_minor = 0, accumulated_minor = 0, book_value_minor = 0
+    where fixed_asset_id = ${assetId}
+      and is_posted = false
+      and period <> all(${periodKeys}::date[])
+  `;
+
+  return {
+    periods,
+    keptPostedPeriods: [...postedByPeriod.keys()].sort(),
+  };
 }
 
 export async function getDepreciationSchedules(

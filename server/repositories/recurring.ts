@@ -1,10 +1,39 @@
 import type { Tx } from '@/server/db/transaction';
-import { LedgerError, type TransactionKind } from '@/server/domain/ledger';
+import { LedgerError, type UserEntryKind } from '@/server/domain/ledger';
+import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
+
+/**
+ * 把金额收敛成这个币种的规范十进制串，顺便验它是正数。
+ *
+ * 为什么这个函数必须存在：recurring_transactions.amount 是 `text not null`
+ * （0008 迁移），全库唯一一处把金额存成文本的地方。这条列没有 `> 0` 约束，
+ * 没有小数位约束，SQL 里连 sum() 都做不了——数据库在这一列上什么都不替你
+ * 把关，所有校验只能由应用自己扛。这是历史包袱，不是设计；改列类型要动迁移，
+ * 不在本次改动范围内，所以这里把闸门做足。
+ *
+ * 三件事一起做完：
+ *   1. 按币种的小数位解析。硬写 2 会让「JPY 1200」这种零小数币种的合法金额
+ *      在别处被判成非法，也会放行一个 JPY 永远不该有的小数部分。
+ *   2. 拒绝 0 与负数。库里拦不住 '-1200.00'，而一条负金额的规则每期都会生成
+ *      一笔方向相反的分录——借贷照样配平，配平触发器一声不吭。
+ *   3. 回写规范形式。text 列会原样收下 '1,200.00'、'1200.0000'、' 1200 '，
+ *      而读出来的那一侧（catchUpRule）用 parseDecimalToMinor 再解析一次：
+ *      前两种它接受，第三种它也接受，但同一笔钱在库里存着三种写法，任何
+ *      按字符串比对或导出的地方都会看出差别。存进去之前先统一成一种。
+ */
+export function normaliseRecurringAmount(amount: string, currency: string): string {
+  const exponent = currencyExponent(currency);
+  const minor = parseDecimalToMinor(amount, exponent);
+  if (minor <= 0n) {
+    throw new LedgerError('Transaction amount must be greater than zero.');
+  }
+  return formatMinorToDecimal(minor, exponent);
+}
 
 export type RecurringTransactionRow = {
   id: string;
   organizationId: string;
-  kind: TransactionKind;
+  kind: UserEntryKind;
   description: string | null;
   amount: string;
   currency: string;
@@ -32,7 +61,7 @@ function mapRecurring(row: Record<string, unknown>): RecurringTransactionRow {
   return {
     id: row.id as string,
     organizationId: row.organization_id as string,
-    kind: row.kind as TransactionKind,
+    kind: row.kind as UserEntryKind,
     description: (row.description as string | null) ?? null,
     amount: row.amount as string,
     currency: row.currency as string,
@@ -69,7 +98,7 @@ export async function insertRecurring(
   tx: Tx,
   row: {
     organizationId: string;
-    kind: TransactionKind;
+    kind: UserEntryKind;
     description: string | null;
     amount: string;
     currency: string;
@@ -88,6 +117,10 @@ export async function insertRecurring(
   // '2026-05-15::date' 而不是日期：postgres.js 先 describe 得知该列是 date，
   // 随后按 date 序列化这个字符串，直接抛 Invalid time value。结果是任何带
   // 结束日期的定期规则根本建不出来——而结束日期正是补记逻辑最需要的那一列。
+  // 金额在这里过一遍规范化：这是写入 amount 这列的两个入口之一，
+  // 而那一列的类型是 text，数据库不会替我们挡任何东西。
+  const amount = normaliseRecurringAmount(row.amount, row.currency);
+
   const [inserted] = await tx`
     insert into recurring_transactions (
       organization_id, kind, description, amount, currency,
@@ -95,7 +128,7 @@ export async function insertRecurring(
       frequency, "interval", start_date, end_date, next_due_date
     ) values (
       ${row.organizationId}, ${row.kind}, ${row.description},
-      ${row.amount}, ${row.currency},
+      ${amount}, ${row.currency},
       ${row.debitAccountId}, ${row.creditAccountId}, ${row.categoryId},
       ${row.frequency}, ${row.interval},
       ${row.startDate}::date, ${row.endDate}::date,
@@ -106,6 +139,34 @@ export async function insertRecurring(
   return { id: inserted.id as string };
 }
 
+/**
+ * 更新一条定期规则。
+ *
+ * 列名是**写死的白名单**，不再由入参的 key 推导。之前这里是
+ *
+ *   for (const [key, value] of Object.entries(fields)) {
+ *     const column = key.replace(/([A-Z])/g, '_$1').toLowerCase();
+ *     patch[column] = value;
+ *   }
+ *
+ * 也就是「客户端给什么 key，就写哪一列」。上游 editRecurring 又把整个网络
+ * payload 原样 `...fields` 展开进来，而 RecurringEditFields 只是 TypeScript
+ * 类型，运行时一点约束力都没有。于是：
+ *
+ *   { nextDueDate: '2020-01-01' } —— 到期日推回六年前，下一次补记一口气生成
+ *     几十上百笔分录。每期一个新 clientUuid，幂等拦不住；借贷完全配平，
+ *     数据库的配平触发器也拦不住。
+ *   { isActive: true } / { organizationId: '...' } —— 直接改归属与状态。
+ *   { createdAt: 'x' } —— 拿 Postgres 的类型错误当探针试列名。
+ *
+ * 换成白名单之后，「哪些列可以被这个函数写」就只由这一段代码说了算，
+ * 与入参长什么样无关。写法照抄同目录 tax.ts / bills.ts。
+ *
+ * nextDueDate 留在白名单里是有意的：它是补记游标，catchUpRule 每跑完一条
+ * 规则都要推进它。挡住用户改它的地方在上一层——editRecurring 的
+ * recurringEditSchema 是 `.strict()` 的，且根本没有这个字段。两层各管一件事：
+ * 这一层管「有哪些列存在」，那一层管「用户能碰哪几个」。
+ */
 export async function updateRecurring(
   tx: Tx,
   orgId: string,
@@ -126,10 +187,28 @@ export async function updateRecurring(
 ): Promise<void> {
   const patch: Record<string, unknown> = {};
 
-  for (const [key, value] of Object.entries(fields)) {
-    if (value === undefined) continue;
-    const column = key.replace(/([A-Z])/g, '_$1').toLowerCase();
-    patch[column] = value;
+  if (fields.description !== undefined) patch.description = fields.description;
+  if (fields.currency !== undefined) patch.currency = fields.currency;
+  if (fields.debitAccountId !== undefined) patch.debit_account_id = fields.debitAccountId;
+  if (fields.creditAccountId !== undefined) patch.credit_account_id = fields.creditAccountId;
+  if (fields.categoryId !== undefined) patch.category_id = fields.categoryId;
+  if (fields.frequency !== undefined) patch.frequency = fields.frequency;
+  if (fields.interval !== undefined) patch.interval = fields.interval;
+  if (fields.startDate !== undefined) patch.start_date = fields.startDate;
+  if (fields.endDate !== undefined) patch.end_date = fields.endDate;
+  if (fields.nextDueDate !== undefined) patch.next_due_date = fields.nextDueDate;
+
+  if (fields.amount !== undefined) {
+    // 金额与币种绑死。只给 amount 时拿不到该按几位小数解析——库里那一列是
+    // text，读回来的旧币种也不能拿来当依据（同一次调用可能正在改币种）。
+    // 上游 editRecurring 已经拦过一道，这里是最后一道：这个函数是写 amount
+    // 列的唯一另一个入口。
+    if (fields.currency === undefined) {
+      throw new LedgerError(
+        'Change the amount and the currency together, so the number of decimals can be checked.',
+      );
+    }
+    patch.amount = normaliseRecurringAmount(fields.amount, fields.currency);
   }
 
   const columns = Object.keys(patch);

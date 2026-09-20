@@ -62,11 +62,55 @@
   --text-tertiary: #9ca3af;
   --text-placeholder: #b0b7c3;
 
-  --accent-subtle: rgba(59,130,246,0.06);
-  --accent-border: rgba(59,130,246,0.3);
-  --green-subtle: rgba(34,197,94,0.06);
-  --red-subtle: rgba(239,68,68,0.05);
-  --amber-subtle: rgba(245,158,11,0.08);
+  /* ── 语义色：亮色模式必须自己定义，不能继承暗色值 ──
+     这个块原来只覆写了 *-subtle（背景），却没有覆写 --green / --red /
+     --amber / --accent 本身（前景）。于是亮色用户拿到的是为 #0b0e14 深底
+     调过的那几个亮色，直接画在白纸上：
+
+       --green  #22c55e  vs #ffffff = 2.28:1   ← .money-in（收入金额）
+       --amber  #f59e0b  vs #ffffff = 2.15:1   ← .badge-warning（待处理）
+       --accent #3b82f6  vs #ffffff = 3.68:1   ← 链接、当前导航项
+       #fff     on #3b82f6          = 3.68:1   ← 所有主按钮上的白字
+       --red    #ef4444  vs #ffffff = 3.76:1   ← .money-out（支出金额）
+
+     WCAG AA 正文要求 4.5:1。金额和状态恰好是这个界面上最关键的信息，
+     偏偏是全场最看不清的几处——阳光下的手机屏幕上，money-in 的绿几乎
+     和白底融在一起，用户分不清哪一行是收入。
+
+     下面的值取自 DESIGN.md 的亮色组（那份文档整体是未实施的提案，这里
+     只借这几个色值，不动其余设计系统）。所有比值是对着本仓库实际用到的
+     三种底色实测的，不是抄来的：
+
+                  #ffffff   #f6f7f9   #f1f3f6
+                  (卡片/表格) (页面底)  (次级面)
+       --green    6.54      6.10      5.88    #1a6b3c
+       --red      5.44      5.07      4.89    #c0392b
+       --amber    5.27      4.92      4.74    #96601a
+       --accent   5.17      4.82      4.65    #2563eb
+
+     amber 没有直接用 DESIGN.md 的 #a0681e：它在白底上是 4.67 过线，但在
+     --bg-primary(#f6f7f9) 上只有 4.36、在 --bg-tertiary 上 4.20，两处都
+     不到 4.5。而 .uncertain-banner .badge 的背景是 transparent——它正好
+     画在页面底色上。调深到 #96601a 让三种底色全部过线。
+
+     --accent 换成 #2563eb 还顺手修了另一件事：主按钮是白字配 accent 底
+     （.primary-button / .kind-option:checked / .report-tabs button.active），
+     原来白字在 #3b82f6 上只有 3.68:1，按钮文字同样不达标。5.17:1 过线。
+
+     徽章背景（*-subtle）的 rgba 也跟着换成新色的分量，否则 badge 的底色
+     还是旧色相的一层淡雾，和前景不是同一个颜色家族。前景画在这些淡底上
+     实测：green 5.98、red 5.05、amber 4.77、accent 4.77，均过 AA。 */
+  --accent: #2563eb;
+  --accent-hover: #1d4ed8;
+  --green: #1a6b3c;
+  --red: #c0392b;
+  --amber: #96601a;
+
+  --accent-subtle: rgba(37,99,235,0.06);
+  --accent-border: rgba(37,99,235,0.3);
+  --green-subtle: rgba(26,107,60,0.06);
+  --red-subtle: rgba(192,57,43,0.05);
+  --amber-subtle: rgba(150,96,26,0.08);
 
   --shadow-sm: 0 1px 3px rgba(0,0,0,0.06);
   --shadow-md: 0 4px 16px rgba(0,0,0,0.08);
@@ -130,6 +174,37 @@ a:hover { text-decoration: underline; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
 
 .visually-hidden { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; border: 0; }
+
+/* 跳转链接（app/(app)/[orgSlug]/layout.tsx 的第一个可聚焦元素）。
+   桌面侧栏有 18 个链接，键盘用户每换一页都要重新 Tab 穿过整张导航。
+
+   不能用 .visually-hidden 那套（clip-path + 1px）来藏它：那样藏起来的
+   元素在获得焦点时也还是 1px 大，屏幕上什么都看不到——视力正常的键盘
+   用户按了 Tab 却不知道自己站在哪里。所以这里用 translateY 把它整个
+   移出视口，获得焦点时再滑回来：尺寸一直是真的，只是位置在屏幕外。
+
+   transform 的过渡在 prefers-reduced-motion 下会被文件末尾那条全局规则
+   压成 0.01ms，位置本身不受影响——链接照样会出现，只是不滑。 */
+.skip-link {
+  position: fixed; top: 0; left: var(--space-4); z-index: 100;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm); font-weight: 550;
+  color: #fff; background: var(--accent);
+  border: 1px solid var(--accent); border-bottom-left-radius: var(--radius-sm); border-bottom-right-radius: var(--radius-sm);
+  transform: translateY(-110%);
+  transition: transform var(--dur-fast) var(--ease);
+}
+.skip-link:focus-visible { transform: translateY(0); text-decoration: none; outline-offset: -4px; }
+/* <main tabIndex={-1}> 接到焦点后不画焦点框：焦点是跳转链接送过去的，
+   用户知道自己在哪；给整块正文套一圈 2px 蓝边只会让人以为点错了。 */
+.app-main:focus-visible { outline: none; }
+
+/* 双语并排渲染时按 <html lang> 挑一份显示。
+   只有 app/error.tsx 用——那一页查不到用户 locale（原因写在该文件里），
+   于是两种语言都渲染进 HTML，由这两条规则挑。:lang() 读的是 <html lang>，
+   root layout 在服务端就写好了，所以不查库、不跑 JS、也不会闪烁。 */
+:root:lang(zh) .lang-only-en { display: none; }
+:root:lang(en) .lang-only-zh { display: none; }
 .text-muted { color: var(--text-secondary); }
 .hint, .field-hint { display: block; font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--space-1); }
 
@@ -179,7 +254,23 @@ td.numeric, th.numeric,
   transition: all var(--dur-fast) var(--ease);
 }
 .sidebar-nav a:hover { background: var(--bg-hover); color: var(--text-primary); text-decoration: none; }
-.sidebar-nav a.active { background: var(--accent-subtle); color: var(--accent); font-weight: 550; }
+/* 当前页。选择器挂在 aria-current 上而不是 .active：让高亮依赖那个属性，
+   就不可能出现「改了 class 却忘了写 aria-current」的半成品——那正是这里
+   原来的状态（全站 aria-current 用量为 0，当前页对读屏用户完全不存在）。
+   .active 保留为并列选择器，因为 CSS 里别处还按它做过渡。
+
+   除了颜色还加了一条左侧竖条：--accent 和 --text-secondary 之间是色相
+   差异，红绿色觉障碍用户（约 8% 男性）在一列文字里挑不出哪一行是蓝的。
+   竖条 + 字重是两个不依赖颜色的信号。 */
+.sidebar-nav a.active,
+.sidebar-nav a[aria-current='page'] {
+  position: relative;
+  background: var(--accent-subtle); color: var(--accent); font-weight: 600;
+}
+.sidebar-nav a[aria-current='page']::before {
+  content: ''; position: absolute; left: 0; top: 15%; bottom: 15%;
+  width: 3px; border-radius: 0 2px 2px 0; background: var(--accent);
+}
 
 .sidebar-group { display: flex; flex-direction: column; gap: 1px; }
 .sidebar-group + .sidebar-group { margin-top: var(--space-3); padding-top: var(--space-3); border-top: 1px solid var(--border-primary); }
@@ -219,8 +310,18 @@ td.numeric, th.numeric,
 }
 .theme-toggle:hover { color: var(--text-secondary); border-color: var(--border-secondary); }
 
-/* Org Switcher */
-.org-switcher-form { display: flex; gap: var(--space-2); margin-bottom: var(--space-5); }
+/* Org Switcher
+
+   选择器原来是 .org-switcher-form，而 components/shell/org-switcher.tsx
+   渲染的是 <div className="org-switcher">——没有任何元素带 -form 后缀，
+   这条规则从来没命中过。后果不是「少了点样式」：margin-bottom 也在这条
+   里，所以公司切换器一直紧贴着下面的 <h1>，两者之间没有任何间距。
+   （多公司账号才看得见这个组件：orgs.length <= 1 时它返回 null，
+   大多数账号只有一家公司，所以这个 bug 一直没人撞上。）
+
+   同时删掉了 .org-switcher button：这个组件里只有一个 <select>，
+   没有按钮——它是上一版「选完再点提交」的表单留下的。 */
+.org-switcher { display: flex; gap: var(--space-2); margin-bottom: var(--space-5); }
 .org-switcher select {
   flex: 1; min-width: 0; min-height: 38px;
   padding: var(--space-1) var(--space-3); padding-right: var(--space-8);
@@ -228,13 +329,6 @@ td.numeric, th.numeric,
   background: var(--bg-elevated); border: 1px solid var(--border-primary);
   border-radius: var(--radius-sm);
 }
-.org-switcher button {
-  min-height: 38px; padding: var(--space-1) var(--space-3);
-  font-size: var(--text-xs); color: var(--text-secondary);
-  background: transparent; border: 1px solid var(--border-primary);
-  border-radius: var(--radius-sm); cursor: pointer;
-}
-.org-switcher button:hover:not(:disabled) { color: var(--text-primary); border-color: var(--border-secondary); }
 
 /* Main Content */
 .app-main { flex: 1; min-width: 0; padding: var(--space-8); max-width: var(--content-max); }
@@ -381,6 +475,10 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 
 .form-error, .form-success { font-size: var(--text-sm); margin-top: var(--space-4); padding: var(--space-3) var(--space-4); border: 1px solid; border-radius: var(--radius-sm); }
 .form-error { color: var(--red); background: var(--red-subtle); border-color: rgba(239,68,68,0.2); }
+/* 贴在某一个输入框下面的单行错误（aria-describedby 指过来的那一条）。
+   和 .form-error 分开：那一个是整张表单的横幅，带底色和边框；挂在字段
+   下面时那个方块会把标签和输入框的关系割断，看上去像另起了一段。 */
+.field-error { display: block; margin-top: var(--space-1); font-size: var(--text-xs); color: var(--red); }
 .form-success { color: var(--green); background: var(--green-subtle); border-color: rgba(34,197,94,0.2); }
 
 .empty-state { padding: var(--space-12) var(--space-6); text-align: center; color: var(--text-tertiary); font-size: var(--text-sm); }
@@ -411,18 +509,9 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .uncertain-banner-title { font-weight: 600; font-size: var(--text-sm); }
 .uncertain-banner .badge { color: var(--amber); border-color: rgba(245,158,11,0.3); background: transparent; }
 
-.dashboard-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--space-4); }
-
-.kpi-card {
-  background: var(--bg-secondary);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius-md);
-  padding: var(--space-5);
-}
-.kpi-card h3 { font-size: var(--text-xs); font-weight: 500; color: var(--text-tertiary); margin: 0 0 var(--space-2); }
-.kpi-value { font-family: var(--font-mono); font-size: var(--text-2xl); font-weight: 600; letter-spacing: -0.02em; line-height: 1.15; font-variant-numeric: tabular-nums; color: var(--text-primary); }
-.kpi-value.money-in { color: var(--green); }
-.kpi-value.money-out { color: var(--red); }
+/* .dashboard-kpis / .kpi-card / .kpi-value 已删除：仪表盘现在用的是下面
+   .dashboard-questions / .question-card 这一套（「这个月赚了多少」式的问题
+   卡片），KPI 卡是它的上一版。全仓 grep 这三个类名，除本文件外零命中。 */
 
 .dashboard-questions { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: var(--space-4); }
 .question-card { display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-5); background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: var(--radius-md); }
@@ -440,10 +529,6 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 
 @media (max-width: 767px) {
   .dashboard-grid { grid-template-columns: 1fr; }
-  .dashboard-kpis { grid-template-columns: 1fr 1fr; }
-}
-@media (max-width: 480px) {
-  .dashboard-kpis { grid-template-columns: 1fr; }
 }
 
 /* Chart */
@@ -545,18 +630,31 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 }
 .rate-field__row .btn-small { flex: 0 0 auto; }
 
-.void-dialog {
-  position: fixed; inset: 0; margin: auto;
-  max-width: 400px; padding: var(--space-6);
+/* 全站模态对话框（components/shell/modal-dialog.tsx，走 showModal()）。
+
+   替换掉原来的 .void-dialog：那一套是配 `<dialog open>` 用的，所以它得
+   自己写 `position: fixed; inset: 0; margin: auto` 来居中——非模态
+   dialog 不进 top layer，只能靠定位硬摆。showModal() 打开的对话框浏览器
+   会自己居中，这些声明全部不需要了。
+
+   ::backdrop 这次是真的会渲染：非模态 dialog 根本不生成 backdrop 伪元素，
+   原来那两条遮罩规则从写下那天起就是死的。 */
+.app-dialog {
+  max-width: 400px; width: calc(100vw - 2 * var(--space-4));
+  padding: var(--space-6);
   background: var(--bg-secondary); border: 1px solid var(--border-primary);
   border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
   color: var(--text-primary);
 }
-.void-dialog::backdrop { background: rgba(11,14,20,0.75); }
-[data-theme='light'] .void-dialog::backdrop { background: rgba(17,24,39,0.4); }
-.void-dialog p { margin-bottom: var(--space-4); font-size: var(--text-sm); }
-.void-dialog input { width: 100%; margin-bottom: var(--space-4); }
-.void-dialog-actions { display: flex; gap: var(--space-3); justify-content: flex-end; }
+.app-dialog::backdrop { background: rgba(11,14,20,0.75); }
+[data-theme='light'] .app-dialog::backdrop { background: rgba(17,24,39,0.4); }
+.app-dialog-title { margin: 0 0 var(--space-4); font-size: var(--text-base); font-weight: 600; }
+.app-dialog label { margin-bottom: var(--space-1); }
+.app-dialog input, .app-dialog select, .app-dialog textarea { width: 100%; }
+.app-dialog > * + label { margin-top: var(--space-4); }
+.app-dialog-actions { display: flex; gap: var(--space-3); justify-content: flex-end; margin-top: var(--space-5); }
+/* 库存出入库那个框字段多，400px 挤得慌。 */
+.app-dialog--wide { max-width: 520px; max-height: 80vh; overflow-y: auto; }
 
 /* not-sure's direction question: same visual language as .kind-option (an
    accessible radio group styled as a segmented control), but its own class
@@ -712,18 +810,9 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .record-detail dd.amount { font-family: var(--font-mono); font-size: var(--text-lg); font-weight: 600; font-variant-numeric: tabular-nums; }
 .record-detail.voided dd.amount { opacity: 0.4; text-decoration: line-through; }
 
-/* ==========================================================================
-   Recent Log
-   ========================================================================== */
-
-.recent-log { margin-top: var(--space-8); }
-.recent-log ul { list-style: none; background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: var(--radius-md); overflow: hidden; }
-.recent-log li { border-top: 1px solid var(--border-primary); }
-.recent-log li:first-child { border-top: none; }
-.recent-log a { display: grid; grid-template-columns: 6.5rem 1fr auto; align-items: baseline; gap: var(--space-4); padding: var(--space-3) var(--space-4); color: var(--text-primary); font-size: var(--text-sm); transition: background var(--dur-fast); }
-.recent-log a:hover { background: var(--bg-hover); text-decoration: none; }
-.recent-log .log-date { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-tertiary); }
-.recent-log .log-desc { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Recent Log 一节（.recent-log / .log-date / .log-desc，含 520px 断点下的
+   两条）已删除：最近流水现在由 .transaction-table 渲染，这套自定义 grid
+   列表是它的上一版。全仓 grep 这三个类名，除本文件外零命中。 */
 
 /* ==========================================================================
    Settings
@@ -793,6 +882,16 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .add-form select, .add-form textarea,
 .invite-form input:not([type='checkbox']):not([type='radio']),
 .invite-form select { width: 100%; min-width: 0; }
+
+/* 刚生成的邀请链接。产品不发邮件，链接由邀请人自己转给对方——所以这一块
+   必须显眼、可全选、可一键复制，而且要说清楚它只出现这一次（库里只存
+   token 的哈希，关掉就再也拿不回来）。 */
+.invite-link { margin-top: var(--space-4); padding: var(--space-3); border: 1px solid var(--border-primary); border-radius: var(--radius-md); background: var(--bg-elevated); }
+.invite-link-title { margin: 0 0 var(--space-1); font-weight: 600; }
+.invite-link-hint { margin: 0 0 var(--space-3); font-size: var(--text-sm); color: var(--text-secondary); }
+.invite-link-row { display: flex; gap: var(--space-2); align-items: center; flex-wrap: wrap; }
+.invite-link-row input { flex: 1 1 18rem; min-width: 0; font-family: var(--font-mono); font-size: var(--text-xs); }
+.invite-link-once { margin: var(--space-2) 0 0; font-size: var(--text-xs); color: var(--text-tertiary); }
 .add-form > h3, .invite-form > h3 {
   grid-column: 1 / -1;
   font-size: var(--text-sm); font-weight: 600; color: var(--text-primary);
@@ -1013,13 +1112,9 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 .contact-phone { font-size: var(--text-xs); color: var(--text-tertiary); }
 .contact-details { display: flex; flex-direction: column; gap: var(--space-1); flex: 1 1 auto; min-width: 0; }
 
-/* ==========================================================================
-   Modal
-   ========================================================================== */
-
-.modal-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.5); display: flex; align-items: center; justify-content: center; z-index: 50; }
-.modal-content { background: var(--bg-secondary); border: 1px solid var(--border-primary); border-radius: var(--radius-lg); padding: var(--space-6); max-width: 480px; width: calc(100% - var(--space-8)); max-height: 80vh; overflow-y: auto; box-shadow: var(--shadow-lg); }
-.modal-content h2 { margin-bottom: var(--space-5); }
+/* Modal 一节（.modal-overlay / .modal-content）已删除：唯一用它的
+   components/settings/inventory-list.tsx 那个 <div role="dialog"> 换成了
+   共用的 ModalDialog（走 showModal()，样式见上面的 .app-dialog）。 */
 
 /* ==========================================================================
    Payment Form Utilities
@@ -1041,7 +1136,20 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
    Offline
    ========================================================================== */
 
-.offline-banner { position: sticky; top: 0; z-index: 20; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); font-weight: 500; text-align: center; color: var(--amber); background: var(--amber-subtle); border-bottom: 1px solid rgba(245,158,11,0.2); }
+.offline-banner { position: sticky; top: 0; z-index: 20; padding: var(--space-2) var(--space-4); font-size: var(--text-sm); font-weight: 500; color: var(--amber); background: var(--amber-subtle); border-bottom: 1px solid rgba(245,158,11,0.2); }
+.offline-banner-line { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--space-2); text-align: center; }
+.offline-banner-line:empty { display: none; }
+
+/* 未能自动同步的记录。它们还在本机（见 lib/offline-queue.ts），所以这里
+   要摆出足够用户认出「这是哪一笔」的信息，而不是只报一个数字。 */
+.offline-failed { margin-top: var(--space-2); padding-top: var(--space-2); border-top: 1px solid rgba(245,158,11,0.25); text-align: left; }
+.offline-failed-title { margin: 0 0 var(--space-2); font-weight: 600; }
+.offline-failed-list { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: var(--space-2); }
+.offline-failed-item { display: flex; flex-wrap: wrap; align-items: baseline; gap: var(--space-1) var(--space-2); font-weight: 400; }
+.offline-failed-detail { flex: 1 1 auto; min-width: 0; }
+.offline-failed-date, .offline-failed-amount { font-family: var(--font-mono); font-variant-numeric: tabular-nums; }
+.offline-failed-reason { flex: 1 1 100%; font-size: var(--text-xs); color: var(--text-secondary); }
+.offline-failed-actions { display: flex; gap: var(--space-1); flex: 0 0 auto; }
 
 /* ==========================================================================
    Page Header
@@ -1081,19 +1189,9 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
   .sidebar { display: none; }
 
   .app-main { padding: var(--space-5) var(--space-4); }
-  /* 移动端顶栏：恢复 org switcher 和品牌 */
-  .mobile-top-bar {
-    display: flex; align-items: center; justify-content: space-between;
-    gap: var(--space-3); padding: var(--space-3) var(--space-4);
-    background: var(--bg-secondary);
-    border-bottom: 1px solid var(--border-primary);
-    position: sticky; top: 0; z-index: 15;
-  }
-  .mobile-top-bar-brand {
-    font-size: var(--text-lg); font-weight: 700;
-    letter-spacing: -0.015em; color: var(--text-primary);
-  }
-  .mobile-top-bar .org-switcher-form { margin-bottom: 0; }
+  /* .mobile-top-bar / .mobile-top-bar-brand 已删除：移动端导航是
+     .floating-dock（见下），没有任何组件渲染过这个顶栏。全仓 grep
+     mobile-top-bar，除本文件外零命中。 */
 
   .transaction-table, .audit-table { border: none; background: none; }
   .transaction-table thead, .audit-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
@@ -1110,7 +1208,6 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
   .filter-actions button { flex: 1 1 120px; }
 
   .app-main h1 { font-size: var(--text-xl); }
-  .kpi-value { font-size: var(--text-xl); }
 
   /* Accessibility floor: below 16px iOS auto-zooms the viewport on input focus.
      This breaks the flagship transaction entry flow where amount is the most important field.
@@ -1136,8 +1233,6 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 }
 
 @media (max-width: 520px) {
-  .recent-log a { grid-template-columns: 1fr auto; row-gap: var(--space-1); }
-  .recent-log .log-date { grid-column: 1/-1; }
   .record-detail dl { grid-template-columns: 1fr; }
   .record-detail dt { border-right: none; padding-bottom: var(--space-1); }
   .record-detail dd { border-top: none; padding-top: var(--space-1); }
@@ -1182,7 +1277,21 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
        裁切成省略号比让文字互相打架要体面。 */
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .floating-dock a.active { color: var(--accent); font-weight: 600; }
+  /* dock 上的当前页原来只有 color 一个区别（--accent 蓝 vs
+     --text-secondary 灰）。在 10px 的 --text-2xs 上，这点色差对色觉障碍
+     用户等于没有；把 dock 截图转灰度后四个格子完全一样。
+
+     加一条顶部指示条 + 字重。位置放在顶部而不是底部：底部有
+     safe-area-inset 的内边距，iPhone 上那条杠会被推到 home indicator
+     附近，离文字太远，看不出是在指哪一格。
+
+     和侧栏一样挂在 aria-current 上，样式与语义绑死。 */
+  .floating-dock a.active,
+  .floating-dock a[aria-current='page'] { position: relative; color: var(--accent); font-weight: 600; }
+  .floating-dock a[aria-current='page']::before {
+    content: ''; position: absolute; top: 0; left: 25%; right: 25%;
+    height: 2px; border-radius: 0 0 2px 2px; background: var(--accent);
+  }
   .floating-dock .topbar-cta {
     color: #fff; background: var(--accent);
     font-size: var(--text-lg); font-weight: 600;
@@ -1214,6 +1323,242 @@ td.numeric { font-weight: 520; font-size: var(--text-base); }
 }
 @keyframes pulse { 0%, 100% { opacity: 0.3; } 50% { opacity: 0.5; } }
 @media (prefers-reduced-motion: reduce) { .loading-skeleton { animation: none; opacity: 0.3; } }
+
+/* ==========================================================================
+   Documents (invoices / bills / payments / credit notes / purchase orders)
+
+   这一段全部以 doc- 开头，都是本轮新增的类，没有改动上面任何一条既有规则。
+   ========================================================================== */
+
+/* 表格行尾那一组操作按钮。窄屏能换行而不是把表格撑出横向滚动条。 */
+.doc-actions { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
+
+/* 提示行里那一小截红字（收付款表单的「核销超额」）。不用 .form-error：
+   那是一个带底色和内边距的块级告示条，塞进 .field-hint 这一行里会把
+   一句补充说明撑成一个警告框。这里只换颜色，不改布局——而且红色不是
+   唯一的信号：同一件事另外由 aria-invalid 说给读屏器听。 */
+.doc-inline-error { color: var(--red); }
+/* <a class="btn-small"> 会继承链接的下划线与颜色，按钮却不会——
+   这一组里按钮和链接并排，看起来必须是一类东西。 */
+.doc-actions a.btn-small {
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-primary); background: var(--bg-elevated);
+  border: 1px solid var(--border-input); border-radius: var(--radius-sm);
+  text-decoration: none;
+}
+.doc-actions a.btn-small:hover { background: var(--bg-hover); text-decoration: none; }
+
+/* 作废对话框。与 .void-dialog 分开，因为这一个是用 showModal() 打开的真·模态
+   （见 components/invoices/document-void-dialog.tsx 里为什么不照抄那一个）：
+   它进 top layer，::backdrop 真的会渲染，所以这里的 backdrop 规则是有用的。 */
+.doc-dialog {
+  max-width: 460px; width: calc(100vw - 2 * var(--space-4));
+  padding: var(--space-6);
+  background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg); box-shadow: var(--shadow-lg);
+  color: var(--text-primary);
+}
+.doc-dialog::backdrop { background: rgba(11,14,20,0.75); }
+[data-theme='light'] .doc-dialog::backdrop { background: rgba(17,24,39,0.4); }
+.doc-dialog__title { margin: 0 0 var(--space-4); font-size: var(--text-base); font-weight: 600; }
+.doc-dialog label { display: block; margin-bottom: var(--space-1); font-size: var(--text-sm); }
+.doc-dialog input { width: 100%; }
+/* 空理由提交过一次之后的红框。aria-invalid 同时是样式钩子和无障碍信息，
+   两者不会走散——没有一个只改了 class 却忘了改属性的机会。 */
+.doc-dialog input[aria-invalid='true'] { border-color: var(--red); }
+.doc-dialog input[aria-invalid='true']:focus-visible { box-shadow: 0 0 0 3px var(--red-subtle); }
+.doc-dialog .form-error { margin-top: var(--space-3); }
+.doc-dialog__actions {
+  display: flex; gap: var(--space-3); justify-content: flex-end;
+  margin-top: var(--space-5);
+}
+
+/* 单据状态条：draft → sent → partially_paid → paid 走到哪一步了。 */
+.doc-lifecycle {
+  margin-bottom: var(--space-6); padding: var(--space-4);
+  background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md);
+}
+.doc-lifecycle__caption {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-xs); color: var(--text-tertiary);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.doc-lifecycle__steps {
+  display: flex; flex-wrap: wrap; gap: var(--space-2);
+  margin: 0; padding: 0; list-style: none;
+  /* 用 counter 而不是 list-style：既要去掉默认项目符号，又要保留
+     「这是有序的几步」这个信息——序号在视觉上也画出来。 */
+  counter-reset: doc-step;
+}
+.doc-lifecycle__step {
+  counter-increment: doc-step;
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  font-size: var(--text-xs); color: var(--text-tertiary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-secondary); border-radius: var(--radius-sm);
+}
+.doc-lifecycle__step::before {
+  content: counter(doc-step);
+  font-family: var(--font-mono); font-variant-numeric: tabular-nums;
+  opacity: 0.7;
+}
+/* 当前这一步。选择器直接挂在 aria-current 上，不另起一个 class：
+   一个只改了 class 而没写 aria-current 的高亮，看得见的人以为对了，
+   读屏器用户什么都听不到。让样式依赖那个属性，就不可能只写一半。 */
+.doc-lifecycle__step[aria-current='step'] {
+  color: var(--accent); background: var(--accent-subtle);
+  border-color: var(--accent-border); font-weight: 600;
+}
+.doc-lifecycle__steps[data-voided] .doc-lifecycle__step {
+  opacity: 0.4; text-decoration: line-through; text-decoration-thickness: 1px;
+}
+.doc-lifecycle__voided { margin: var(--space-3) 0 0; }
+.doc-lifecycle__notice {
+  margin: var(--space-3) 0 0;
+  font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.5;
+}
+
+/* 表单里的开关式勾选（「立即开具」「先存成草稿」）：一句主文案加一句解释。 */
+.doc-toggle {
+  display: flex; align-items: flex-start; gap: var(--space-3);
+  margin-top: var(--space-5); padding: var(--space-4);
+  font-size: var(--text-sm); color: var(--text-primary);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary); border-radius: var(--radius-sm);
+  cursor: pointer;
+}
+.doc-toggle input[type='checkbox'] { flex-shrink: 0; margin-top: 2px; }
+.doc-toggle .field-hint { margin-top: var(--space-1); }
+
+@media (max-width: 767px) {
+  /* 表格在窄屏变成卡片（上面那段既有规则），操作那一格要独占一行，
+     不然几个按钮会被挤进右侧那条 auto 列里。 */
+  .transaction-table td:has(> .doc-actions) { grid-column: 1 / -1; margin-top: var(--space-2); }
+  /* 44px 触控下限：.doc-actions 里的链接不是 <button>，上面那条
+     `button:not(.text-button)` 的全局兜底够不着它。 */
+  .doc-actions a.btn-small { min-height: 44px !important; }
+  .doc-lifecycle__steps { gap: var(--space-1); }
+}
+
+/* ==========================================================================
+   Year-end closing（设置 → 年度结转）
+   ==========================================================================
+   前缀统一用 ye-，与 .doc- / .coa- / .ye- 这一套按功能区分段的写法一致。
+   这一页只有 owner 看得到，内容是「一段说明 + 一张预览分录表 + 历史」，
+   所以样式全部围绕「读得清楚」而不是「排得漂亮」：一个会永久改变报表
+   数字的确认界面，密度高一点也好过让用户漏看一行。 */
+
+.ye-panel { display: flex; flex-direction: column; gap: var(--space-8); }
+.ye-intro { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.6; max-width: 70ch; }
+.ye-section > h2 { font-size: var(--text-xl); margin-bottom: var(--space-4); }
+
+/* 起止日期与净利润三行事实。沿用 .record-detail 的两列网格观感，但这里
+   只有三行，不值得为它引一整套定义列表样式。 */
+.ye-facts {
+  display: grid; grid-template-columns: minmax(140px, 220px) 1fr;
+  background: var(--bg-secondary); border: 1px solid var(--border-primary);
+  border-radius: var(--radius-md); overflow: hidden; margin-bottom: var(--space-3);
+}
+.ye-facts dt, .ye-facts dd {
+  padding: var(--space-3) var(--space-4); border-top: 1px solid var(--border-primary);
+  font-size: var(--text-sm);
+}
+.ye-facts dt {
+  color: var(--text-tertiary); background: var(--bg-tertiary);
+  border-right: 1px solid var(--border-primary);
+  font-size: var(--text-xs); letter-spacing: 0.03em; text-transform: uppercase;
+}
+.ye-facts dd { margin: 0; color: var(--text-primary); font-variant-numeric: tabular-nums; }
+.ye-facts dt:first-of-type, .ye-facts dt:first-of-type + dd { border-top: none; }
+.ye-facts dd.ye-amount { font-family: var(--font-mono); font-weight: 600; }
+
+/* 留存收益那一行是这张预览表的结论——被冲平的损益科目是过程，它才是
+   「这一年赚了多少、进了哪里」。加一条上边框和一点底色，让它在十几行
+   科目里一眼可辨；不用颜色区分盈亏，盈亏由借贷两列自己表达。 */
+.ye-preview tbody tr.ye-line-retained td {
+  border-top: 2px solid var(--border-secondary);
+  background: var(--bg-tertiary); font-weight: 600;
+}
+
+/* 挡住结转的原因（财年没结束、已封账、功能未开通）。不是错误，是状态，
+   所以用中性底色而不是 .form-error 的红色——红色会让用户以为自己做错了
+   什么，而这几条说的是「现在还不到时候」。 */
+.ye-blocked {
+  margin-top: var(--space-4); padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm); color: var(--text-secondary);
+  background: var(--bg-tertiary); border: 1px solid var(--border-primary);
+  border-left: 3px solid var(--border-secondary); border-radius: var(--radius-sm);
+}
+
+/* 这一条必须比上面几条更显眼：它说的是「点下去之后会永久改变你的报表」。 */
+.ye-warning {
+  margin: var(--space-5) 0 var(--space-4); padding: var(--space-4);
+  font-size: var(--text-sm); color: var(--text-primary); line-height: 1.6;
+  background: var(--amber-subtle);
+  border: 1px solid var(--border-primary); border-left: 3px solid var(--amber);
+  border-radius: var(--radius-sm); max-width: 70ch;
+}
+
+@media (max-width: 767px) {
+  /* 窄屏下两列网格会把日期挤成两行。事实列表改成单列堆叠，标签在上。 */
+  .ye-facts { grid-template-columns: 1fr; }
+  .ye-facts dt { border-right: none; }
+  .ye-facts dt + dd { border-top: none; }
+}
+
+/* ==========================================================================
+   Prepayments & bank-import posting（pp- 前缀）
+   ========================================================================== */
+
+/* 收付款表单里那段「这笔钱会挂在哪」的说明。
+   做成一个有边框的块而不是一行灰色小字：它陈述的是一个**会计后果**
+   （这笔钱进了负债科目，不是收入），用户至少该看见一次。 */
+.pp-on-account {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  margin-top: var(--space-4); padding: var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary); border-left: 3px solid var(--accent-primary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+}
+.pp-on-account .field-hint { margin: 0; }
+
+/* 收付款列表顶上那块「挂账的款项」。它是一份待办，不是流水，所以不进表。 */
+.pp-open-list { margin-bottom: var(--space-6); }
+.pp-open-list ul { list-style: none; margin: var(--space-3) 0 0; padding: 0; }
+.pp-open-list li {
+  display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border: 1px solid var(--border-primary); border-radius: var(--radius-sm);
+  background: var(--bg-secondary);
+}
+.pp-open-list li + li { margin-top: var(--space-2); }
+/* 金额靠右、按钮再靠右：一行里最先要读的是「谁、多少」，最后才是动作。 */
+.pp-open-list li strong { margin-left: auto; }
+
+/* 核销对话框里那行可用余额。它是这个对话框唯一的硬约束，要显眼。 */
+.pp-apply-balance {
+  margin: var(--space-2) 0 0; font-weight: 600; font-size: var(--text-sm);
+}
+
+/* 银行导入页顶上那条批量操作栏。 */
+.pp-import-batch {
+  display: flex; flex-direction: column; gap: var(--space-2);
+  margin: var(--space-4) 0; padding: var(--space-4);
+  background: var(--bg-tertiary);
+  border: 1px solid var(--border-primary); border-radius: var(--radius-sm);
+}
+.pp-import-batch button { align-self: flex-start; }
+.pp-import-batch p { margin: 0; }
+
+@media (max-width: 767px) {
+  /* 窄屏上金额不再靠右浮到天边：一行挤成三段之后 margin-left:auto 会把
+     按钮推到下一行的最右侧，离它要操作的那笔钱最远。 */
+  .pp-open-list li strong { margin-left: 0; }
+  .pp-import-batch button { align-self: stretch; }
+}
 
 /* ==========================================================================
    Print

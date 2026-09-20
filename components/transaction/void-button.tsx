@@ -1,8 +1,9 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Messages } from '@/lib/i18n';
+import { ModalDialog } from '@/components/shell/modal-dialog';
 import { voidTransaction } from '@/server/actions/transactions';
 
 type Props = {
@@ -25,6 +26,7 @@ export function VoidButton({ orgSlug, transactionId, t }: Props) {
   const [voidReason, setVoidReason] = useState('');
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const reasonId = useId();
 
   async function handleVoid() {
     if (!voidReason.trim()) return;
@@ -60,30 +62,34 @@ export function VoidButton({ orgSlug, transactionId, t }: Props) {
         </button>
       </div>
 
-      {voidDialog ? (
-        <dialog open className="void-dialog">
-          <p>{t.transaction.voidReason}</p>
-          <input
-            value={voidReason}
-            onChange={(e) => setVoidReason(e.target.value)}
-            placeholder={t.transaction.voidReason}
-            autoFocus
-          />
-          <div className="void-dialog-actions">
-            <button type="button" onClick={() => setVoidDialog(false)}>
-              {t.common.cancel}
-            </button>
-            <button
-              type="button"
-              className="btn-danger"
-              disabled={!voidReason.trim() || pending}
-              onClick={handleVoid}
-            >
-              {t.transaction.void}
-            </button>
-          </div>
-        </dialog>
-      ) : null}
+      <ModalDialog
+        open={voidDialog}
+        onClose={() => setVoidDialog(false)}
+        title={t.transaction.void}
+      >
+        {/* 原来这里是一个裸 <p> 加一个只有 placeholder 的输入框——placeholder
+            不是标签，一开始打字它就消失了，读屏也未必念。 */}
+        <label htmlFor={reasonId}>{t.transaction.voidReason}</label>
+        <input
+          id={reasonId}
+          value={voidReason}
+          onChange={(e) => setVoidReason(e.target.value)}
+          autoFocus
+        />
+        <div className="app-dialog-actions">
+          <button type="button" onClick={() => setVoidDialog(false)}>
+            {t.common.cancel}
+          </button>
+          <button
+            type="button"
+            className="btn-danger"
+            disabled={!voidReason.trim() || pending}
+            onClick={handleVoid}
+          >
+            {t.transaction.void}
+          </button>
+        </div>
+      </ModalDialog>
     </>
   );
 }

@@ -31,6 +31,7 @@ beforeAll(async () => {
     role: 'owner',
     baseCurrency: 'MYR',
     lockedUntil: null,
+    timezone: 'Asia/Kuala_Lumpur',
   };
 });
 

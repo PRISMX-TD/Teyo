@@ -1,0 +1,177 @@
+# 这个仓库在此之前没有 .github/ —— 所有质量保证都押在「每次都记得跑
+# npx vitest run」上。而 eslint.config.mjs 里那两条守护记账写入边界的规则，
+# 其配套测试 tests/posting/boundary-lint.test.ts 曾因为 node_modules 损坏而
+# 整个 suite 加载失败，没有任何机制报告过这件事——一个没人跑的门禁，和
+# 没有门禁是一回事。
+#
+# ── 为什么自带一个 Postgres 容器，而不是连远端库 ──
+#
+# 仓库里 62% 的测试是集成测试，真的要连数据库。两条路：
+#   a) 用 secret 注入一个远端 DATABASE_URL；
+#   b) 在 CI 里起一个空 Postgres，跑一遍 supabase/migrations/。
+# 选 b。理由不只是「不依赖外部服务」：跑迁移这件事本身就是一项检查——
+# 它每次都证明「这套迁移能在一个空库上从 0001 跑到最后一条」。而这正是
+# 这个仓库出过事的地方（0017 的注释写着索引是某次手工执行 SQL 建的，
+# 0018 干脆标注「未应用」）。a) 那条路跑不出这个结论，还会让任何一个
+# fork 的 PR 直接把测试库写花。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+# 同一个分支上后推的 commit 取消前一次跑到一半的，省额度也省等待。
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  verify:
+    name: typecheck, lint, tests
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        # 16 是下限，不是偏好：0003_app_role_grant.sql 里的
+        # `grant teyo_app to postgres with set true` 用的是 Postgres 16 才
+        # 有的语法（15 及以前角色成员关系没有拆成 INHERIT / SET 两个选项），
+        # 在 15 上这条迁移会直接语法错误。17 与 Supabase 现在给新项目开的
+        # 版本一致。
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: teyo_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/teyo_test
+      # lib/supabase/* 在模块加载时不读这两个变量（都在函数体里），但任何
+      # 一个不小心提前求值的改动都会让整套测试以一句 "Invalid URL" 倒掉。
+      # 给一对形状正确的假值，让失败的原因只可能是代码本身。
+      NEXT_PUBLIC_SUPABASE_URL: https://ci.example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-anon-key-not-a-real-key
+      # tests/api/cron-exchange-rates.test.ts 自己会覆盖它，这里只是保证
+      # 变量存在时的行为与本地一致。
+      CRON_SECRET: ci-cron-secret
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      # npm ci 而不是 npm install：锁文件说什么就装什么。上面提到的
+      # 「node_modules 损坏导致整个 suite 静默失败」，在 CI 里不可能发生，
+      # 因为每次都是从零装。
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Supabase 托管的那两个 schema，在空容器里要自己补 ──
+      #
+      # supabase/migrations/ 假设 auth 与 storage 这两个 schema 已经存在：
+      # 0001 的 app_users.id 外键指向 auth.users，0006 往 storage.buckets 插
+      # 记录并在 storage.objects 上建策略。这两个 schema 在真实项目里由
+      # Supabase 的 Auth 与 Storage 服务各自的迁移建出来，不在本仓库里。
+      #
+      # 这里建的是「够跑通迁移与测试的最小形状」，不是它们的复制品：
+      # 只有被引用到的那些列，而且都可空（tests/db/*.test.ts 里有多处只插
+      # (id, email)）。这不是在模拟 Supabase，而是在声明「本仓库的迁移对
+      # 外部 schema 的全部依赖，就是下面这些」——哪天依赖变多了，CI 会红。
+      - name: Bootstrap the Supabase-managed schemas
+        run: |
+          psql "$DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+          create schema if not exists auth;
+
+          create table if not exists auth.users (
+            id uuid primary key default gen_random_uuid(),
+            email text,
+            encrypted_password text,
+            email_confirmed_at timestamptz,
+            aud text,
+            role text,
+            raw_app_meta_data jsonb default '{}'::jsonb,
+            raw_user_meta_data jsonb default '{}'::jsonb,
+            created_at timestamptz default now(),
+            updated_at timestamptz default now()
+          );
+
+          create schema if not exists storage;
+
+          create table if not exists storage.buckets (
+            id text primary key,
+            name text not null,
+            public boolean not null default false,
+            file_size_limit bigint,
+            allowed_mime_types text[],
+            created_at timestamptz not null default now()
+          );
+
+          create table if not exists storage.objects (
+            id uuid primary key default gen_random_uuid(),
+            bucket_id text references storage.buckets (id),
+            name text,
+            owner uuid,
+            created_at timestamptz not null default now()
+          );
+
+          alter table storage.objects enable row level security;
+
+          -- Supabase 的 storage.foldername 返回路径去掉文件名之后的各段。
+          -- 0006 的三条策略只用到 [1]（首段是 organization_id），而按 '/'
+          -- 直接切分给出的 [1] 与真实实现完全一致，所以这个简化不会让策略
+          -- 的行为出现差别。
+          create or replace function storage.foldername(name text)
+          returns text[]
+          language sql
+          immutable
+          as $fn$
+            select string_to_array(name, '/');
+          $fn$;
+
+          -- teyo_app 由 0002 建，但 0006 要在 storage 上给它建策略，而
+          -- grant 只能在角色存在之后做。0002 那段 create role 自带
+          -- `if not exists`，这里先建一次是安全的。
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'teyo_app') then
+              create role teyo_app nologin;
+            end if;
+          end
+          $$;
+
+          grant usage on schema storage to teyo_app;
+          grant select, insert, update, delete on storage.objects to teyo_app;
+          grant select on storage.buckets to teyo_app;
+          SQL
+
+      # 空库从 0001 跑到最后一条。任何一条迁移写坏了，这里就红。
+      - name: Run migrations
+        run: npm run migrate
+
+      # 再确认一遍文件与记录一致：有待应用的、有校验和漂移的、有孤儿记录的，
+      # 一律非零退出。这条挡的是「新加了迁移但没跑」和「改了一条已经跑过的
+      # 迁移」——后者在本地是完全无声的。
+      - name: Verify the schema matches supabase/migrations
+        run: npm run migrate:verify
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # server/ 与 tests/ 都在这条命令的范围里，而 `next lint` 与
+      # `next build` 内置的那次 lint 都不覆盖它们——记账写入边界的两条规则
+      # 保护的每个文件都在 server/ 下。理由见 eslint.config.mjs 顶部。
+      - name: Lint
+        run: npm run lint
+
+      - name: Tests
+        run: npm test

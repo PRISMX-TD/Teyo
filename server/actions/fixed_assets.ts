@@ -154,15 +154,32 @@ export async function createFixedAsset(
   return result;
 }
 
+/**
+ * 改一条资产的属性；关键参数变了就重算排程。
+ *
+ * 返回值不是 void 而是被冻结的那些期间：generateDepreciationSchedule 现在
+ * 拒绝改写任何已过账的期间（原因见那个函数的注释——改写它们会让同一期折旧
+ * 记第二笔，而四道校验一道都看不出来），于是「我把年限从 4 个月改成 6 个月，
+ * 为什么前两期的金额没跟着变」必须有个地方能答得上来。把期间列表交回给调用方，
+ * 界面就能说清楚「前 N 期已入账，本次改动只影响之后的期间」——option (a) 的
+ * 那句提示不是额外的 UI 工作，是这个返回值。
+ *
+ * 加返回值不会打断既有调用方：TypeScript 允许忽略一个 Promise 的解析值，而
+ * 今天 components/ 与 app/ 下没有任何地方调用这个 action（只有 createFixedAsset
+ * 有表单），所以这里没有静默改变任何页面的行为。
+ */
 export async function updateFixedAssetAction(
   orgSlug: string,
   id: string,
   input: z.infer<typeof updateFixedAssetSchema>,
-): Promise<void> {
+): Promise<{ keptPostedPeriods: string[] }> {
   const context = await requirePermission(orgSlug, 'account:manage');
   const parsed = updateFixedAssetSchema.parse(input);
 
-  await withTransaction(context.userId, async (tx) => {
+  const result = await withTransaction(context.userId, async (tx) => {
+    const before = await getFixedAsset(tx, context.organizationId, id);
+    if (!before) throw new Error('Fixed asset not found.');
+
     const updates: Parameters<typeof updateFixedAsset>[3] = {};
     if (parsed.name !== undefined) updates.name = parsed.name;
     if (parsed.description !== undefined) updates.description = parsed.description;
@@ -192,8 +209,9 @@ export async function updateFixedAssetAction(
       parsed.decliningRateBps !== undefined ||
       parsed.purchaseDate !== undefined;
 
+    let keptPostedPeriods: string[] = [];
     if (needsRegen) {
-      await generateDepreciationSchedule(tx, context.organizationId, id);
+      ({ keptPostedPeriods } = await generateDepreciationSchedule(tx, context.organizationId, id));
     }
 
     await recordAudit(tx, {
@@ -202,12 +220,33 @@ export async function updateFixedAssetAction(
       action: 'fixed_asset.updated',
       entityType: 'fixed_asset',
       entityId: id,
-      after: parsed,
+      // before 原来是空的。改资产参数是会改写往后每一期折旧金额的动作，只记
+      // after 的话，审计日志回答不了「改之前原值是多少」——而那正是事后对账
+      // 时唯一想知道的事。bigint 不能直接进 JSON，统一转字符串（同 postJournal）。
+      before: {
+        purchaseDate: before.purchaseDate,
+        costMinor: before.costMinor.toString(),
+        salvageValueMinor: before.salvageValueMinor.toString(),
+        usefulLifeMonths: before.usefulLifeMonths,
+        method: before.method,
+        decliningRateBps: before.decliningRateBps,
+      },
+      after: {
+        ...parsed,
+        // 这一条是本次改动里唯一「用户看不见却必须留痕」的事实：哪些期间因为
+        // 已经入账而被原样保留。没有它，日后看到排程前后两段金额不一致的人
+        // 无从判断那是缺陷还是规则。
+        regenerated: needsRegen,
+        keptPostedPeriods,
+      },
     });
+
+    return { keptPostedPeriods };
   });
 
   revalidatePath(`/${orgSlug}/fixed-assets`);
   revalidatePath(`/${orgSlug}/fixed-assets/${id}`);
+  return result;
 }
 
 export async function disposeFixedAssetAction(

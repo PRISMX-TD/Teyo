@@ -22,6 +22,10 @@ export default async function SettingsIndexPage({
     { href: 'accounts', label: t.settings.accounts, action: 'account:manage' },
     { href: 'recurring', label: t.settings.recurring, action: 'transaction:create' },
     { href: 'contacts', label: t.settings.contacts, action: 'account:manage' },
+    // 年结用 period:lock，与 0024 迁移里 fiscal_year_closings 的 owner-only
+    // 策略对齐——理由见 server/actions/year_end.ts 顶部。这里必须用同一个
+    // Action，否则 admin 会看到一个点进去就 403 的入口。
+    { href: 'year-end', label: t.settings.yearEnd, action: 'period:lock' },
     { href: 'audit', label: t.settings.audit, action: 'report:export' },
   ];
 

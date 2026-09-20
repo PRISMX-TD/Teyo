@@ -15,9 +15,13 @@ import { signUp } from '@/server/actions/auth';
  *
  * 复用 /account 语言切换器的形状与文案（t.account.language/english/chinese），
  * 不新造一套。
+ *
+ * initialLocale 由页面按浏览器的 Accept-Language 算好传进来（见
+ * app/(auth)/signup/page.tsx）。它只是**默认值**——用户改了就以用户为准，
+ * 而那个选择才是写进 app_users.locale 的东西。
  */
-export function SignupForm() {
-  const [locale, setLocale] = useState<Locale>('en');
+export function SignupForm({ initialLocale = 'en' }: { initialLocale?: Locale }) {
+  const [locale, setLocale] = useState<Locale>(initialLocale);
   const t = getMessages(locale);
 
   async function action(formData: FormData) {

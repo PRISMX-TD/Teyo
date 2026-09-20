@@ -51,7 +51,7 @@ export function AssetList({ orgSlug, baseCurrency, locale, i18n: t, assets }: Pr
   }
 
   function methodLabel(method: string): string {
-    return method === 'straight_line' ? 'Straight Line' : 'Declining Balance';
+    return method === 'straight_line' ? t.fixedAssets.straightLine : t.fixedAssets.decliningBalance;
   }
 
   return (
@@ -88,7 +88,7 @@ export function AssetList({ orgSlug, baseCurrency, locale, i18n: t, assets }: Pr
                   </>
                 ) : null}
                 <a href={`/${orgSlug}/fixed-assets/${asset.id}`} className="secondary-button" style={{ minHeight: 36, padding: 'var(--space-1) var(--space-3)', fontSize: 'var(--text-xs)' }}>
-                  {locale === 'zh' ? '查看详情' : 'View Details'}
+                  {t.common.viewDetails}
                 </a>
               </div>
             </div>

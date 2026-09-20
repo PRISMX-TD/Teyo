@@ -76,6 +76,11 @@ export async function getMonthTotals(
  * 列表里（余额 0），否则新建的钱包在概览页上整行消失，看起来像账户丢了；
  * 二是 join 版本要先把 accounts 与 transactions 交叉再过滤，行数白涨一轮。
  * coalesce 包在子查询外面，空集合返回 null 时补 0。
+ *
+ * 归档账户只要还有余额就保留，与 reports.ts 的 I10、
+ * repositories/dashboard.ts 的 getBankBalances 是同一条规则：把一个还有钱的
+ * 账户从列表里抹掉，那笔钱在用户眼里就是凭空消失了，而报表上它还在。
+ * 真正零余额的归档账户照旧不显示。
  */
 export async function getAccountBalances(
   tx: Tx,
@@ -83,25 +88,31 @@ export async function getAccountBalances(
   asOf: string,
 ): Promise<AccountBalance[]> {
   const rows = await tx`
-    select
-      a.id,
-      a.name_en,
-      a.name_zh,
-      coalesce((
-        select sum(
-          case when l.direction = 'debit' then l.base_amount_minor else -l.base_amount_minor end
-        )
-        from journal_lines l
-        join transactions t on t.id = l.transaction_id
-        where l.account_id = a.id
-          and t.voided_at is null
-          and t.occurred_on <= ${asOf}::date
-      ), 0) as balance
-    from accounts a
-    where a.organization_id = ${organizationId}
-      and a.is_money_account
-      and a.is_active
-    order by a.sort_order, a.id
+    with balance as (
+      select
+        a.id,
+        a.name_en,
+        a.name_zh,
+        a.is_active,
+        a.sort_order,
+        coalesce((
+          select sum(
+            case when l.direction = 'debit' then l.base_amount_minor else -l.base_amount_minor end
+          )
+          from journal_lines l
+          join transactions t on t.id = l.transaction_id
+          where l.account_id = a.id
+            and t.voided_at is null
+            and t.occurred_on <= ${asOf}::date
+        ), 0) as balance
+      from accounts a
+      where a.organization_id = ${organizationId}
+        and a.is_money_account
+    )
+    select id, name_en, name_zh, balance
+    from balance
+    where is_active or balance <> 0
+    order by sort_order, id
   `;
 
   return rows.map((row) => ({

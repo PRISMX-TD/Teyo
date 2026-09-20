@@ -34,6 +34,7 @@ export type TransactionListRow = {
   exchangeRate: string;
   rateSource: RateSource;
   categoryId: string | null;
+  projectId: string | null;
   categoryNameEn: string | null;
   categoryNameZh: string | null;
   moneyAccountId: string | null;
@@ -169,7 +170,7 @@ export async function listTransactions(
     select
       t.id, t.kind, t.occurred_on, t.description, t.currency,
       t.amount_minor, t.base_amount_minor, t.exchange_rate, t.rate_source,
-      t.category_id, t.created_by, t.voided_at, t.void_reason, t.created_at,
+      t.category_id, t.project_id, t.created_by, t.voided_at, t.void_reason, t.created_at,
       c.name_en as category_name_en,
       c.name_zh as category_name_zh,
       m.account_id as money_account_id,
@@ -208,6 +209,7 @@ function mapListRow(row: Record<string, unknown>): TransactionListRow {
     exchangeRate: String(row.exchange_rate),
     rateSource: row.rate_source as RateSource,
     categoryId: (row.category_id as string | null) ?? null,
+    projectId: (row.project_id as string | null) ?? null,
     categoryNameEn: (row.category_name_en as string | null) ?? null,
     categoryNameZh: (row.category_name_zh as string | null) ?? null,
     moneyAccountId: (row.money_account_id as string | null) ?? null,
@@ -285,7 +287,7 @@ export async function getTransactionDetail(
     select
       t.id, t.kind, t.occurred_on, t.description, t.currency,
       t.amount_minor, t.base_amount_minor, t.exchange_rate, t.rate_source,
-      t.category_id, t.created_by, t.voided_at, t.void_reason,
+      t.category_id, t.project_id, t.created_by, t.voided_at, t.void_reason,
       c.name_en as category_name_en,
       c.name_zh as category_name_zh,
       m.account_id as money_account_id,
@@ -358,6 +360,14 @@ export type TransactionHeadUpdate = {
   scaledRate: bigint;
   rateSource: RateSource;
   categoryId: string | null;
+  /**
+   * 交易归属的项目。null 表示不挂项目。
+   *
+   * transactions.project_id 这一列 0009 就加了，而在此之前**没有任何地方
+   * 给它写过值**——server/repositories/projects.ts 的项目盈亏查询一直在
+   * 按它聚合，算出来的恒定是零。查询侧写对了，写入侧从来没接上。
+   */
+  projectId: string | null;
 };
 
 /**
@@ -380,6 +390,7 @@ export async function updateTransactionHead(
       exchange_rate = ${formatScaledRate(row.scaledRate)},
       rate_source = ${row.rateSource},
       category_id = ${row.categoryId},
+      project_id = ${row.projectId},
       updated_at = now()
     where id = ${id} and organization_id = ${organizationId}
   `;

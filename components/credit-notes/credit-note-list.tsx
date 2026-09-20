@@ -31,6 +31,7 @@ export function CreditNoteList({ orgSlug, locale, i18n, creditNotes }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
   if (creditNotes.length === 0) {
     return <p className="empty-state">{i18n.creditNotes.empty}</p>;
@@ -45,19 +46,30 @@ export function CreditNoteList({ orgSlug, locale, i18n, creditNotes }: Props) {
 
   async function handleAction(id: string, action: 'issue' | 'apply' | 'void') {
     setPendingId(id);
+    setError(null);
     try {
       if (action === 'issue') await issueCreditNote(orgSlug, id);
       else if (action === 'apply') await applyCreditNote(orgSlug, id);
       else if (action === 'void') await voidCreditNote(orgSlug, id);
       router.refresh();
-    } catch {
-      // ignore
+    } catch (e) {
+      // 原来这里是 `catch { /* ignore */ }`。签发一张贷项通知单会过账，
+      // 于是期间封账、科目没配、金额为零、权限不足都会抛错——而用户看到的
+      // 只是「点了没反应」，他会再点一次，然后再一次。必须说出来。
+      setError((e as Error).message);
     } finally {
       setPendingId(null);
     }
   }
 
   return (
+    <>
+    {error ? (
+      <p role="alert" className="form-error">
+        {error}
+      </p>
+    ) : null}
+
     <table className="transaction-table">
       <caption className="visually-hidden">{i18n.creditNotes.title}</caption>
       <thead>
@@ -68,7 +80,7 @@ export function CreditNoteList({ orgSlug, locale, i18n, creditNotes }: Props) {
           <th scope="col">{i18n.transaction.date}</th>
           <th scope="col" className="numeric">{i18n.transaction.amount}</th>
           <th scope="col">{i18n.invoices.status}</th>
-          <th scope="col"></th>
+          <th scope="col">{i18n.creditNotes.actions}</th>
         </tr>
       </thead>
       <tbody>
@@ -131,5 +143,6 @@ export function CreditNoteList({ orgSlug, locale, i18n, creditNotes }: Props) {
         ))}
       </tbody>
     </table>
+    </>
   );
 }

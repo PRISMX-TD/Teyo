@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, interpolate } from '@/lib/i18n';
 import type { MemberRow } from '@/server/repositories/memberships';
 import type { InvitationRow } from '@/server/repositories/invitations';
 import { inviteMember, changeMemberRole, setMemberStatus, revokeInvitation, transferOwnership } from '@/server/actions/members';
@@ -21,6 +21,24 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
   const [role, setRole] = useState<string>('bookkeeper');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+  /**
+   * 刚生成的那条邀请链接。
+   *
+   * 这一段存在的理由：inviteMember 返回 { token }，而这个组件原来把返回值
+   * 直接丢掉了。库里存的是 token 的 sha256 哈希（见
+   * server/repositories/invitations.ts——明文从不落库，这是对的），所以
+   * **丢掉就再也拿不回来**。撤销重发也没用，那一样会被丢掉。
+   *
+   * 结果是邀请功能整个不通：能建出一条 invitations 记录，但世界上没有任何
+   * 人能拿到那个链接去接受它。members.ts 里那句「邮件发送在 Task 21 接入」
+   * 一直没有兑现，而界面这边也没有替代出口。
+   *
+   * 这里不引入邮件服务（那要一个这个项目没有的第三方密钥），而是把链接
+   * 交回给邀请人自己发。对马来西亚的小生意来说这反而更贴合实际——他们
+   * 本来就用 WhatsApp 联系同事和会计师。
+   */
+  const [invite, setInvite] = useState<{ email: string; url: string } | null>(null);
+  const [copied, setCopied] = useState(false);
 
   const currentMember = members.find((m) => m.userId === currentUserId);
   const isOwner = currentMember?.role === 'owner';
@@ -99,13 +117,62 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
               disabled={pending || !email}
               onClick={async () => {
                 setPending(true);
-                try { await inviteMember(orgSlug, { email, role: role as import('@/server/domain/permissions').Role }); setEmail(''); } catch (err) { setError((err as Error).message); }
+                setError(null);
+                setCopied(false);
+                try {
+                  const { token } = await inviteMember(orgSlug, {
+                    email,
+                    role: role as import('@/server/domain/permissions').Role,
+                  });
+                  // origin 取自浏览器而不是服务端的环境变量：本地开发、预览
+                  // 部署、生产各有各的域名，而链接必须在用户此刻所在的那个
+                  // 域名下才点得开。
+                  setInvite({ email, url: `${window.location.origin}/invite/${token}` });
+                  setEmail('');
+                } catch (err) {
+                  setError((err as Error).message);
+                }
                 finally { setPending(false); }
               }}
             >
               {t.members.invite}
             </button>
           </div>
+
+          {invite ? (
+            <div className="invite-link" role="status">
+              <p className="invite-link-title">
+                {interpolate(t.members.inviteLinkTitle, { email: invite.email })}
+              </p>
+              <p className="invite-link-hint">{t.members.inviteLinkHint}</p>
+              <div className="invite-link-row">
+                <input
+                  type="text"
+                  readOnly
+                  value={invite.url}
+                  aria-label={t.members.inviteLinkTitle}
+                  onFocus={(e) => e.currentTarget.select()}
+                />
+                <button
+                  type="button"
+                  onClick={async () => {
+                    try {
+                      await navigator.clipboard.writeText(invite.url);
+                      setCopied(true);
+                    } catch {
+                      // 剪贴板在非 HTTPS、或用户拒绝授权时会失败。输入框
+                      // 是只读且可全选的，用户照样能手动复制——所以这里
+                      // 不报错，只是不显示「已复制」。
+                      setCopied(false);
+                    }
+                  }}
+                >
+                  {copied ? t.members.copied : t.members.copyLink}
+                </button>
+              </div>
+              <p className="invite-link-once">{t.members.inviteLinkOnce}</p>
+            </div>
+          ) : null}
         </section>
       ) : null}
 
