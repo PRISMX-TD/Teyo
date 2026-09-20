@@ -12,6 +12,9 @@
     "migrate:status": "node scripts/migrate.mjs status",
     "migrate:verify": "node scripts/migrate.mjs verify",
     "cleanup:test-data": "node scripts/cleanup-test-data.mjs",
+    "dev:session": "node scripts/dev-session-cookie.mjs",
+    "dev:seed-org": "node --experimental-strip-types scripts/dev-seed-org.mjs",
+    "dev:sweep": "node scripts/dev-route-sweep.mjs",
     "test": "vitest run",
     "test:watch": "vitest"
   },
