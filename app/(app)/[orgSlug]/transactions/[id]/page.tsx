@@ -8,6 +8,8 @@ import { getTransactionDetail, TransactionNotFoundError } from '@/server/reposit
 import { listMoneyAccounts } from '@/server/repositories/accounts';
 import { listSelectableCategories, type CategoryRow } from '@/server/repositories/categories';
 import { listAttachments } from '@/server/repositories/attachments';
+import { listProjects } from '@/server/repositories/projects';
+import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 import { TransactionForm } from '@/components/transaction/transaction-form';
 import { VoidButton } from '@/components/transaction/void-button';
@@ -29,19 +31,20 @@ export default async function TransactionDetailPage({
   let incomeCategories: CategoryRow[];
   let expenseCategories: CategoryRow[];
   let attachments: Awaited<ReturnType<typeof listAttachments>>;
+  let allProjects: Awaited<ReturnType<typeof listProjects>>;
 
   try {
-    [row, accounts, incomeCategories, expenseCategories, attachments] = await withTransaction(
-      context.userId,
-      async (tx) =>
+    [row, accounts, incomeCategories, expenseCategories, attachments, allProjects] =
+      await withTransaction(context.userId, async (tx) =>
         Promise.all([
           getTransactionDetail(tx, context.organizationId, id),
           listMoneyAccounts(tx, context.organizationId),
           listSelectableCategories(tx, context.organizationId, 'income'),
           listSelectableCategories(tx, context.organizationId, 'expense'),
           listAttachments(tx, context.organizationId, id),
+          listProjects(tx, context.organizationId),
         ]),
-    );
+      );
   } catch (e) {
     if (e instanceof TransactionNotFoundError) {
       return (
@@ -188,6 +191,15 @@ export default async function TransactionDetailPage({
   }
   const currenciesList = [...SUPPORTED_CURRENCIES];
 
+  // 进行中的项目 + 这笔交易当前挂着的那个（它可能已经完结了——不补回去的话
+  // 下拉框会落到「--」，用户只是想改个备注，保存之后项目归属被抹掉）。
+  const activeProjects = allProjects.filter((project) => project.status === 'active');
+  const projectOptions = (
+    row.projectId && !activeProjects.some((project) => project.id === row.projectId)
+      ? [...allProjects.filter((project) => project.id === row.projectId), ...activeProjects]
+      : activeProjects
+  ).map((project) => ({ id: project.id, name: project.name }));
+
   return (
     <Layout orgSlug={orgSlug} t={t}>
       <h1>{t.transaction.editTitle}</h1>
@@ -211,14 +223,24 @@ export default async function TransactionDetailPage({
           name_zh: c.nameZh,
         }))}
         currencies={currenciesList}
+        projects={projectOptions}
         mode="edit"
         initialData={{
           id: row.id,
           occurredOn: row.occurredOn,
-          amount: (Number(row.amountMinor) / 100).toString(),
+          // 原来是 (Number(row.amountMinor) / 100).toString()，两个毛病，
+          // 和这个仓库反复修过的是同一类：
+          //   1. 硬编码 ÷100。零小数币种（JPY/KRW/VND）没有小数位，一笔
+          //      10,000 日元的交易打开编辑表单会显示成 100，用户什么都没
+          //      改直接保存，账上那笔就真的变成 100 日元了。
+          //   2. Number(bigint)。超过 2^53 的最小单位会静默丢精度。
+          // formatMinorToDecimal 按币种的小数位还原，和保存时解析用的
+          // parseDecimalToMinor 是同一把尺。
+          amount: formatMinorToDecimal(row.amountMinor, currencyExponent(row.currency)),
           currency: row.currency,
           moneyAccountId: row.moneyAccountId ?? '',
           categoryId,
+          projectId: row.projectId ?? null,
           counterAccountId: row.counterAccountId ?? null,
           description: row.description ?? '',
           exchangeRate: row.exchangeRate ?? '1',

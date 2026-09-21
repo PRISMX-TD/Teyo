@@ -1,0 +1,2 @@
+# SQL 迁移一律 LF：校验和按内容算，但让工作区也别再被 autocrlf 改来改去。
+*.sql text eol=lf

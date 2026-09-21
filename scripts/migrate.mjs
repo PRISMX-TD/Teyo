@@ -36,6 +36,19 @@ import postgres from 'postgres';
 const rootDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 loadEnv({ path: path.join(rootDir, '.env.local') });
 
+/**
+ * 把 CRLF 归一成 LF 之后再算校验和。
+ *
+ * Windows 上 git 的 autocrlf 会在检出时把 .sql 全部换成 CRLF，于是一份
+ * 一个字都没改的迁移算出另一个哈希，所有已应用的迁移一起报「被改过」，
+ * up 直接拒绝执行。那时唯一走得通的路是关掉警告或重新 baseline——一个
+ * 总在误报的守卫最后一定会被绕过，而它本来要拦的是真正的篡改。
+ * 换行符不是 SQL 的一部分：按归一化后的内容判，误报没了，真改动照样抓。
+ */
+function normaliseEol(text) {
+  return text.split('\r\n').join('\n');
+}
+
 const MIGRATIONS_DIR = path.join(rootDir, 'supabase', 'migrations');
 
 if (!process.env.DATABASE_URL) {
@@ -63,7 +76,15 @@ async function loadMigrationFiles() {
       // 记下校验和，好让「已应用的迁移被事后改过」这件事可以被发现。
       // 改一条已经跑过的迁移，本地重跑不会有任何动静，而生产库上是另一个
       // schema——这正是最难查的那种漂移。
-      checksum: createHash('sha256').update(body).digest('hex'),
+      // 换行符先归一化，理由见 normaliseEol。
+      checksum: createHash('sha256').update(normaliseEol(body)).digest('hex'),
+      // 同一份内容在 CRLF 下的哈希。库里有一批行是在工作区还是 CRLF 的
+      // 时候写进去的（0012-0020），它们记的是这个值。只要能对上它，就
+      // 证明内容一个字都没变，只是换行符不同——这种行可以安全地就地
+      // 改写成归一化后的校验和，而不是让用户去 baseline 一遍。
+      crlfChecksum: createHash('sha256')
+        .update(normaliseEol(body).split('\n').join('\r\n'))
+        .digest('hex'),
     });
   }
 
@@ -100,18 +121,46 @@ function report(files, applied) {
   const byVersion = new Map(applied.map((row) => [row.version, row]));
   const pending = [];
   const drifted = [];
+  /** 内容没变、只是当初按 CRLF 记的哈希——可以就地改写，不算漂移。 */
+  const eolOnly = [];
 
   for (const file of files) {
     const row = byVersion.get(file.version);
     if (!row) {
       pending.push(file);
-    } else if (row.checksum !== file.checksum && !row.baselined) {
+    } else if (row.checksum === file.checksum || row.baselined) {
+      // 对得上，或者是 baseline 进来的（baseline 本来就不校验内容）。
+    } else if (row.checksum === file.crlfChecksum) {
+      eolOnly.push({ file, row });
+    } else {
       drifted.push({ file, row });
     }
   }
 
   const orphans = applied.filter((row) => !files.some((f) => f.version === row.version));
-  return { pending, drifted, orphans };
+  return { pending, drifted, orphans, eolOnly };
+}
+
+/**
+ * 把「只是换行符不同」的那些行的校验和改写成归一化后的值。
+ *
+ * 只动 checksum === crlfChecksum 的行：那等于已经证明了这份文件的字节在
+ * 去掉 CR 之后与当初应用的完全一致。内容真的被改过的行走不到这里，仍然会
+ * 让 up 拒绝执行。
+ */
+async function healEolChecksums(eolOnly) {
+  for (const { file } of eolOnly) {
+    await sql`
+      update schema_migrations
+      set checksum = ${file.checksum}
+      where version = ${file.version}
+    `;
+  }
+  if (eolOnly.length > 0) {
+    console.log(
+      `已把 ${eolOnly.length} 条迁移的校验和按 LF 重新记录（内容未变，仅换行符）。`,
+    );
+  }
 }
 
 async function cmdStatus() {
@@ -196,7 +245,12 @@ async function cmdUnbaseline(version) {
 async function cmdUp() {
   const files = await loadMigrationFiles();
   const applied = await appliedRows();
-  const { pending, drifted } = report(files, applied);
+  const { pending, drifted, eolOnly } = report(files, applied);
+
+  // 先把「只是换行符不同」的那几条就地记正，再判漂移。不这样的话，
+  // 一次 git 检出（Windows 上 autocrlf 会把 .sql 全换成 CRLF）就能让所有
+  // 已应用的迁移一起报「被改过」，而真正被改过的那一条就此淹没在噪音里。
+  await healEolChecksums(eolOnly);
 
   if (drifted.length > 0) {
     // 不自动「修正」校验和：一条已经跑过的迁移被改了，意味着库里的 schema

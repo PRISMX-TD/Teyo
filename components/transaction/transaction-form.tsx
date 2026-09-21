@@ -21,6 +21,9 @@ import { todayLocalISO } from '@/lib/date';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null };
 
+/** 项目只有一个 name 列，没有中英两份，所以不走 Option。 */
+type ProjectOption = { id: string; name: string };
+
 type EditData = {
   id: string;
   occurredOn: string;
@@ -28,6 +31,7 @@ type EditData = {
   currency: string;
   moneyAccountId: string;
   categoryId: string | null;
+  projectId: string | null;
   counterAccountId: string | null;
   description: string;
   exchangeRate: string;
@@ -57,6 +61,18 @@ type Props = {
   recentIncomeCategories?: Option[];
   recentExpenseCategories?: Option[];
   currencies: string[];
+  /**
+   * 可以把这笔交易挂上去的项目。空数组时整个下拉不渲染——没有项目的公司
+   * 不该多看一个永远只有「--」的框。
+   *
+   * 这个字段此前**在界面上根本不存在**。写入链路是齐的：lib/schemas.ts 的
+   * transactionBase 有 projectId、server/actions/transactions.ts 传下去、
+   * server/posting/insert.ts 还专门校验了它属不属于本公司。缺的只有表单
+   * 这一端，于是 transactions.project_id 永远是 null，项目盈亏那张表
+   * （getProjectProfitability）算出来的恒定是三个零——查询侧一直是对的，
+   * 没有任何东西写过那一列。
+   */
+  projects?: ProjectOption[];
   /** 编辑模式时传入已有数据 */
   mode?: 'create' | 'edit';
   initialData?: EditData;
@@ -89,6 +105,7 @@ export function TransactionForm({
   recentIncomeCategories = [],
   recentExpenseCategories = [],
   currencies,
+  projects = [],
   mode = 'create',
   initialData,
   attachments = [],
@@ -117,6 +134,7 @@ export function TransactionForm({
   // 受控（原来是 defaultValue）：这样「再记一笔」重建表单时它不会被一起
   // 清空——连续录入时资金账户通常就是同一个。
   const [moneyAccountId, setMoneyAccountId] = useState(initialData?.moneyAccountId ?? '');
+  const [projectId, setProjectId] = useState(initialData?.projectId ?? '');
   const [currency, setCurrency] = useState(initialData?.currency ?? baseCurrency);
   const [occurredOn, setOccurredOn] = useState(
     () => initialData?.occurredOn ?? todayLocalISO(),
@@ -244,7 +262,8 @@ export function TransactionForm({
         currency: baseCurrency,
         debitAccountId,
         creditAccountId,
-        description: String(formData.get('description') ?? ''),
+        projectId: formData.get('projectId') ? String(formData.get('projectId')) : undefined,
+      description: String(formData.get('description') ?? ''),
         // Same clientUuid the form was created with — fixed for its lifetime,
         // so a replay from the offline queue or a double-tap after a lost
         // response dedupes on the server instead of posting twice.
@@ -288,6 +307,7 @@ export function TransactionForm({
       categoryId:
         presetCategoryId ??
         (formData.get('categoryId') ? String(formData.get('categoryId')) : undefined),
+      projectId: formData.get('projectId') ? String(formData.get('projectId')) : undefined,
       description: String(formData.get('description') ?? ''),
       // RateField renders no exchangeRate field for domestic currency (see
       // components/transaction/rate-field.tsx) so createTransaction/updateTransaction
@@ -304,7 +324,10 @@ export function TransactionForm({
       } else {
         await createTransaction(orgSlug, payload);
       }
-      router.push(`/${orgSlug}/transactions`);
+      // 在线保存此前一句回执都没有——只有离线那一支渲染了 savedOffline，
+      // 于是「存进设备」有反馈、「真的存进账本」反而没有。?saved=1 让列表页
+      // 接手说这句话；在这张表单上闪一下再跳走，用户看不见。
+      router.push(`/${orgSlug}/transactions?saved=1`);
     } catch (e) {
       const message = (e as Error)?.message ?? '';
       const isNetwork = !isOnline() || neverReachedServer(e);
@@ -536,6 +559,29 @@ export function TransactionForm({
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {localizedName(category, locale)}
+              </option>
+            ))}
+          </select>
+        </>
+      )}
+
+      {/*
+        项目归属。没有建过项目的公司不渲染这一段——多一个永远只有「--」的
+        下拉，对绝大多数用户就是纯噪音。
+      */}
+      {projects.length > 0 && (
+        <>
+          <label htmlFor="projectId">{t.projects.title}</label>
+          <select
+            id="projectId"
+            name="projectId"
+            value={projectId}
+            onChange={(e) => setProjectId(e.target.value)}
+          >
+            <option value="">--</option>
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
               </option>
             ))}
           </select>

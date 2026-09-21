@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -17,12 +18,29 @@ const MONTH_KEYS = [
   'month7', 'month8', 'month9', 'month10', 'month11', 'month12',
 ] as const;
 
+/**
+ * 保存成功的回执。
+ *
+ * 这一页的两个保存按钮此前既不跳转也不提示：点下去，表单原地不动，用户
+ * 没有任何办法判断改动到底有没有写进去——尤其是公司名这种改完之后长得
+ * 和改之前一模一样的字段。这里是 Server Action + 原生 <form>，没有客户端
+ * state 可用，所以回执走「保存完 redirect 回本页并带一个查询参数」这条路：
+ * 它同时清掉了浏览器里那次 POST，用户刷新页面不会被问「要不要重新提交」。
+ *
+ * 用两个值而不是一个 ?saved=1，是为了让提示出现在他刚操作的那一节旁边；
+ * 页面顶上一句笼统的「已保存」说不清楚保存的是锁账期还是公司资料。
+ */
+type SavedSection = 'lock' | 'general';
+
 export default async function GeneralSettingsPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<{ saved?: string }>;
 }) {
   const { orgSlug } = await params;
+  const saved = (await searchParams).saved as SavedSection | undefined;
   const context = await requirePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
@@ -57,11 +75,17 @@ export default async function GeneralSettingsPage({
               const lockDate = String(formData.get('lockDate') ?? '');
               if (!lockDate) return;
               await updatePeriodLock(orgSlug, { lockedUntil: lockDate || null });
+              redirect(`/${orgSlug}/settings/general?saved=lock`);
             }}
           >
             <input name="lockDate" type="date" required />
             <button type="submit">{t.settings.save}</button>
           </form>
+          {saved === 'lock' ? (
+            <p role="status" className="form-success">
+              {t.settings.saved}
+            </p>
+          ) : null}
           {context.lockedUntil && (
             <form
               action={async () => {
@@ -86,8 +110,10 @@ export default async function GeneralSettingsPage({
               name: String(formData.get('name') ?? ''),
               timezone: String(formData.get('timezone') ?? ''),
               industry: String(formData.get('industry') ?? '') || undefined,
+              address: String(formData.get('address') ?? '') || undefined,
               fiscalYearStartMonth: String(formData.get('fiscalYearStartMonth') ?? ''),
             });
+            redirect(`/${orgSlug}/settings/general?saved=general`);
           }}
         >
           <label htmlFor="name">{t.settings.name}</label>
@@ -103,6 +129,21 @@ export default async function GeneralSettingsPage({
           <label htmlFor="industry">{t.onboarding.industry}</label>
           <input id="industry" name="industry" defaultValue={settings.industry ?? ''} />
 
+          {/*
+            开票方地址。发票单据（invoices/[id]/print）会把它印在公司名下面——
+            一张寄给客户的发票上没有开票方地址，很多地方在法律上就不算一张发票。
+            这一列是 0026 迁移补的：在此之前 getInvoicePdfData 一直在
+            `select name, address from organizations`，而那一列根本不存在，
+            于是「下载发票」每一次都撞 42703，从上线起一次都没成功过。
+          */}
+          <label htmlFor="address">{t.settings.companyAddress}</label>
+          <input
+            id="address"
+            name="address"
+            maxLength={300}
+            defaultValue={settings.address ?? ''}
+          />
+
           <label htmlFor="fiscalYearStartMonth">{t.settings.fiscalYearStart}</label>
           <select
             id="fiscalYearStartMonth"
@@ -116,6 +157,12 @@ export default async function GeneralSettingsPage({
             ))}
           </select>
           <p className="field-hint">{t.settings.fiscalYearStartHint}</p>
+
+          {saved === 'general' ? (
+            <p role="status" className="form-success">
+              {t.settings.saved}
+            </p>
+          ) : null}
 
           <button type="submit">{t.settings.save}</button>
         </form>

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
@@ -85,7 +86,14 @@ export function CreditNoteList({ orgSlug, locale, baseCurrency, i18n, creditNote
       <tbody>
         {creditNotes.map((cn) => (
           <tr key={cn.id} className={cn.status === 'voided' ? 'row-voided' : undefined}>
-            <td>{cn.cnNumber}</td>
+            {/* 单号链到详情/编辑页。这个链接与
+                app/(app)/[orgSlug]/credit-notes/[id]/page.tsx 是同一次改动的
+                两半，必须同时到位：本仓库出过「列表链过去但路由不存在」的
+                404（见 invoice-list 与 po-list 上的注释），一个通向 404 的
+                链接比没有链接更糟——它承诺了一个不存在的地方。 */}
+            <td>
+              <Link href={`/${orgSlug}/credit-notes/${cn.id}`}>{cn.cnNumber}</Link>
+            </td>
             <td>{cn.contactName}</td>
             <td>{cn.invoiceId ? `#${cn.invoiceId.slice(0, 8)}...` : '-'}</td>
             <td>{cn.issueDate}</td>

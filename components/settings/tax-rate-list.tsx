@@ -4,6 +4,56 @@ import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { createTaxRate, updateTaxRateAction, setDefaultTaxRateAction, deleteTaxRateAction } from '@/server/actions/tax';
+import { parseDecimalToMinor } from '@/server/domain/money';
+
+/**
+ * 税率的输入与存储。
+ *
+ * 库里存的是**基点**（rate_bps，6% = 600），而这两个输入框原来直接绑
+ * rateBps，标签只写「Rate」。想设 6% 的人打「6」，得到的是 0.06%——
+ * 此后每一张开出去的发票税额都几乎为零，而界面上从头到尾没有一句话说明
+ * 这个框要的是基点。文案键 t.tax.ratePercent（「税率 (%)」）一直存在，
+ * 却从没被用过：按百分比录入这件事本来就是打算做的。
+ *
+ * 转换不经浮点。parseDecimalToMinor(value, 2) 就是「把一个十进制串按两位
+ * 小数放大成整数」，"6" -> 600、"6.5" -> 650、"8.25" -> 825，和这个仓库
+ * 处理金额用的是同一个函数、同一套半进位规则。写成 parseFloat(v) * 100
+ * 的话，"8.25" 会在二进制里变成 824.9999999999999，Math.round 今天救得
+ * 回来，下一个小数位就未必。
+ */
+const RATE_DECIMALS = 2;
+
+function percentToBps(value: string): number {
+  const cleaned = value.trim();
+  if (!cleaned) return 0;
+  return Number(parseDecimalToMinor(cleaned, RATE_DECIMALS));
+}
+
+/**
+ * 输入框里现在的内容能不能变成一个税率。
+ *
+ * parseDecimalToMinor 对非法输入是抛错的，而它抛的是 MoneyError——文案讲的
+ * 是「金额」。把它直接冒到界面上，用户在税率这一格会读到一句谈金额的话。
+ * 所以这里先判一次，非法时直接把保存按钮禁掉，用户根本走不到那个错误。
+ */
+function isValidPercent(value: string): boolean {
+  const cleaned = value.trim();
+  if (!cleaned) return false;
+  try {
+    parseDecimalToMinor(cleaned, RATE_DECIMALS);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function bpsToPercent(bps: number): string {
+  const sign = bps < 0 ? '-' : '';
+  const abs = Math.abs(Math.trunc(bps)).toString().padStart(RATE_DECIMALS + 1, '0');
+  const whole = abs.slice(0, -RATE_DECIMALS);
+  const frac = abs.slice(-RATE_DECIMALS).replace(/0+$/, '');
+  return frac ? `${sign}${whole}.${frac}` : `${sign}${whole}`;
+}
 
 type TaxRateItem = {
   id: string;
@@ -25,7 +75,7 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
   const [showAdd, setShowAdd] = useState(false);
   const [nameEn, setNameEn] = useState('');
   const [nameZh, setNameZh] = useState('');
-  const [rateBps, setRateBps] = useState(600);
+  const [ratePct, setRatePct] = useState('6');
   const [isDefault, setIsDefault] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -34,7 +84,7 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
   const [editing, setEditing] = useState<string | null>(null);
   const [editNameEn, setEditNameEn] = useState('');
   const [editNameZh, setEditNameZh] = useState('');
-  const [editRateBps, setEditRateBps] = useState(0);
+  const [editRatePct, setEditRatePct] = useState('0');
   const [editIsDefault, setEditIsDefault] = useState(false);
 
   async function handleCreate() {
@@ -45,12 +95,12 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
       await createTaxRate(orgSlug, {
         nameEn: nameEn.trim(),
         nameZh: nameZh.trim(),
-        rateBps,
+        rateBps: percentToBps(ratePct),
         isDefault,
       });
       setNameEn('');
       setNameZh('');
-      setRateBps(600);
+      setRatePct('6');
       setIsDefault(false);
     } catch (e) {
       setError((e as Error).message);
@@ -66,7 +116,7 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
       await updateTaxRateAction(orgSlug, id, {
         nameEn: editNameEn.trim(),
         nameZh: editNameZh.trim(),
-        rateBps: editRateBps,
+        rateBps: percentToBps(editRatePct),
         isDefault: editIsDefault,
       });
       setEditing(null);
@@ -105,7 +155,7 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
     setEditing(item.id);
     setEditNameEn(item.nameEn);
     setEditNameZh(item.nameZh);
-    setEditRateBps(item.rateBps);
+    setEditRatePct(bpsToPercent(item.rateBps));
     setEditIsDefault(item.isDefault);
   }
 
@@ -133,11 +183,13 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
                 placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
               />
               <input
-                type="number"
-                value={editRateBps}
-                onChange={(e) => setEditRateBps(Number(e.target.value))}
-                placeholder={t.tax.rate} aria-label={t.tax.rate}
+                type="text"
+                inputMode="decimal"
+                value={editRatePct}
+                onChange={(e) => setEditRatePct(e.target.value)}
+                placeholder={t.tax.ratePercent} aria-label={t.tax.ratePercent}
               />
+              <span className="hint">%</span>
               <label className="checkbox-label">
                 <input
                   type="checkbox"
@@ -146,7 +198,10 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
                 />
                 {t.tax.defaultRate}
               </label>
-              <button onClick={() => handleUpdate(item.id)} disabled={pending}>
+              <button
+                onClick={() => handleUpdate(item.id)}
+                disabled={pending || !isValidPercent(editRatePct)}
+              >
                 {t.settings.save}
               </button>
               <button onClick={() => setEditing(null)}>{t.common.cancel}</button>
@@ -208,12 +263,13 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
             onChange={(e) => setNameZh(e.target.value)}
           />
           <input
-            type="number"
-            placeholder={t.tax.rate} aria-label={t.tax.rate}
-            value={rateBps}
-            onChange={(e) => setRateBps(Number(e.target.value))}
+            type="text"
+            inputMode="decimal"
+            placeholder={t.tax.ratePercent} aria-label={t.tax.ratePercent}
+            value={ratePct}
+            onChange={(e) => setRatePct(e.target.value)}
           />
-          <span className="hint">{ratePercent(rateBps)}</span>
+          <span className="hint">%</span>
           <label className="checkbox-label">
             <input
               type="checkbox"
@@ -222,7 +278,10 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
             />
             {t.tax.defaultRate}
           </label>
-          <button onClick={handleCreate} disabled={pending || !nameEn.trim() || !nameZh.trim()}>
+          <button
+            onClick={handleCreate}
+            disabled={pending || !nameEn.trim() || !nameZh.trim() || !isValidPercent(ratePct)}
+          >
             {t.tax.addRate}
           </button>
           <button onClick={() => setShowAdd(false)}>{t.common.cancel}</button>

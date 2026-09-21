@@ -8,10 +8,14 @@ import { BillList } from '@/components/bills/bill-list';
 
 export default async function BillsListPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<{ saved?: string }>;
 }) {
   const { orgSlug } = await params;
+  // ?saved=1 是账单表单存完之后带过来的回执。理由见 invoices/page.tsx 同一处。
+  const { saved } = await searchParams;
   const context = await requirePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
@@ -30,6 +34,12 @@ export default async function BillsListPage({
           </Link>
         </div>
       </div>
+
+      {saved === '1' ? (
+        <p role="status" className="form-success">
+          {t.bills.saved}
+        </p>
+      ) : null}
 
       <BillList
         orgSlug={orgSlug}

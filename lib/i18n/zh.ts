@@ -275,6 +275,7 @@ const zh: Translated<typeof en> = {
     address: '地址',
     notes: '备注',
     yearEnd: '年度结转',
+    companyAddress: '公司地址（会印在发票上）',
     fiscalYearStart: '财年从几月开始',
     fiscalYearStartHint:
       '报表、总账与年度结转都以这个月作为一年的开始。多数公司是 1 月，但你的公司未必。',
@@ -357,6 +358,7 @@ const zh: Translated<typeof en> = {
   reports: {
     title: '报表',
     tabsLabel: '选择报表',
+    rangeBackwards: '开始日期不能晚于结束日期。',
     statementLoadFailed: '对账单没能加载出来，请重试。',
     trialBalance: '试算平衡表',
     profitLoss: '损益表',
@@ -503,6 +505,9 @@ const zh: Translated<typeof en> = {
   },
   invoicePdf: {
     download: '下载 PDF',
+    print: '打印',
+    printHint: '用浏览器自带的打印对话框打印，或在那里存成 PDF。',
+    billTo: '开票给',
   },
   bills: {
     title: '账单',
@@ -645,6 +650,7 @@ const zh: Translated<typeof en> = {
     date: '日期',
     description: '描述',
     noTransactions: '该期间无交易。',
+    excludedNotice: '有 {count} 张外币单据（{currencies}）尚未过账、换不出本位币，没有计入下面的金额。',
   },
   inventory: {
     title: '库存',
@@ -703,6 +709,15 @@ const zh: Translated<typeof en> = {
     total: '合计',
     actions: '操作',
     noTax: '不含税',
+    editTitle: '编辑采购订单 {number}',
+    saveChanges: '保存修改',
+    backToList: '返回采购订单列表',
+    notFound: '在本公司里找不到这张采购订单。',
+    lifecycle: '这张采购订单走到哪一步',
+    draftNotice: '草稿还没发给供应商，上面的任何一项都还能改。',
+    lockedNotice: '只有草稿能改。这张单已经发给供应商了，要变更请重开一张，而不是改掉对方手上那一份。',
+    voidedNotice: '这张采购订单已作废，不能再编辑。',
+    baseTotal: '折合本位币',
   },
   projects: {
     title: '项目',
@@ -794,6 +809,18 @@ const zh: Translated<typeof en> = {
     noContacts: '请先添加联系人。',
     actions: '操作',
     draftNotice: '草稿还没进账。发出之后才会把这笔金额从客户欠你的钱里减掉。',
+    editTitle: '编辑贷项通知单 {number}',
+    saveChanges: '保存修改',
+    backToList: '返回贷项通知单列表',
+    notFound: '在本公司里找不到这张贷项通知单。',
+    lifecycle: '这张贷项通知单走到哪一步',
+    issuedNotice: '这张单已经进账。要改动只能作废后重开一张。',
+    appliedNotice: '这张单已经抵扣到发票上。要改动只能作废后重开一张。',
+    voidedNotice: '这张单已作废，不能再编辑，也不能再发出。',
+    total: '合计',
+    subtotal: '小计',
+    tax: '税额',
+    baseTotal: '折合本位币',
   },
   bankImport: {
     title: '银行导入',
@@ -843,6 +870,17 @@ const zh: Translated<typeof en> = {
     outputTax: '销项税（销售）',
     inputTax: '进项税（采购）',
     netTaxPayable: '应纳税净额',
+    report: '税额汇总',
+    side: '方向',
+    netBase: '计税基数',
+    taxAmount: '税额',
+    unmatched: '税科目有变动、但背后没有对应的销售或采购',
+    unmatchedHint:
+      '最常见的就是向税局缴税或收到退税。它让税科目变动，但它不是一笔销售、也不是一笔采购，所以单列在这里，而不是并进上面的税额。',
+    unmatchedReconcile:
+      '本期税科目一共动了 {output}（销项）和 {input}（进项）——也就是上面的税额加上这里的金额。',
+    zeroRatedCaveat:
+      '这里只统计真的产生了税的销售与采购。零税率和免税的部分不在其中，因为账上目前还没有任何地方标出它们。',
     addRate: '新增税率',
     ratePercent: '税率 (%)',
     deleteRateWarning: '该税率已被发票使用，无法删除。',
@@ -868,6 +906,13 @@ const zh: Translated<typeof en> = {
     decliningBalance: '余额递减法',
     purchaseCurrency: '购入时用的币种',
     baseCurrencyTag: '本位币',
+    editTitle: '编辑这条资产',
+    saveChanges: '保存修改',
+    editBaseCurrencyHint:
+      '原值与残值按本位币 {currency} 填写。当初用原币付了多少、购入日汇率是多少只作留痕，这里改不了。',
+    scheduleRebuilt: '折旧计划表已重算。',
+    scheduleKept: '已经进账的 {count} 期原样保留（{periods}），只有它们之后的期间被重算。',
+    scheduleKeptNone: '此前没有任何一期过账，所以整张表都按新参数重算了。',
   },
   common: {
     cancel: '取消',
@@ -887,6 +932,7 @@ const zh: Translated<typeof en> = {
     close: '关闭',
     actions: '操作',
     viewDetails: '查看详情',
+    noEditPermission: '你可以查看，但你的角色不能修改它。',
   },
 };
 

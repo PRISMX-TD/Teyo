@@ -6,7 +6,10 @@ import { localizedName, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { TrialBalanceRow } from '@/server/repositories/reports';
 import type { ProfitLossResult, BalanceSheetResult, CashFlowResult } from '@/server/repositories/reports';
-import type { ArAgingRow, ApAgingRow, CustomerStatement } from '@/server/repositories/aging';
+import type { ArAgingRow, ApAgingRow } from '@/server/repositories/aging';
+import type { StatementResponse } from '@/app/api/[orgSlug]/statement/route';
+import type { TaxReportResponse } from '@/app/api/[orgSlug]/tax-report/route';
+import { TaxReportView } from '@/components/reports/tax-report-view';
 import type { ContactRow } from '@/server/repositories/contacts';
 import {
   checkBalanceSheet,
@@ -15,7 +18,7 @@ import {
   type BalanceCheck,
 } from '@/server/domain/report-invariants';
 
-type Tab = 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ar-aging' | 'ap-aging' | 'customer-statement' | 'vendor-statement';
+type Tab = 'trial-balance' | 'profit-loss' | 'balance-sheet' | 'cash-flow' | 'ar-aging' | 'ap-aging' | 'customer-statement' | 'vendor-statement' | 'tax';
 
 type Props = {
   locale: Locale;
@@ -98,6 +101,7 @@ export function ReportsView({
     { key: 'ap-aging', label: t.apAging.title },
     { key: 'customer-statement', label: t.customerStatement.title },
     { key: 'vendor-statement', label: t.vendorStatement.title },
+    { key: 'tax', label: t.tax.report },
   ], [t]);
 
   /**
@@ -178,7 +182,7 @@ export function ReportsView({
           type="customer"
           period={period}
         />
-      ) : (
+      ) : tab === 'vendor-statement' ? (
         <StatementTab
           contacts={contacts.filter((c) => c.type === 'vendor' || c.type === 'both')}
           orgSlug={orgSlug}
@@ -186,6 +190,14 @@ export function ReportsView({
           baseCurrency={baseCurrency}
           t={t}
           type="vendor"
+          period={period}
+        />
+      ) : (
+        <TaxTab
+          orgSlug={orgSlug}
+          locale={locale}
+          baseCurrency={baseCurrency}
+          t={t}
           period={period}
         />
       )}
@@ -586,12 +598,13 @@ function AgingTable({
   const totals = rows.reduce(
     (acc, r) => ({
       current: acc.current + r.current,
+      d1_30: acc.d1_30 + r.d1_30,
       d31_60: acc.d31_60 + r.d31_60,
       d61_90: acc.d61_90 + r.d61_90,
       over90: acc.over90 + r.over90,
       total: acc.total + r.total,
     }),
-    { current: 0n, d31_60: 0n, d61_90: 0n, over90: 0n, total: 0n },
+    { current: 0n, d1_30: 0n, d31_60: 0n, d61_90: 0n, over90: 0n, total: 0n },
   );
 
   return (
@@ -599,7 +612,14 @@ function AgingTable({
       <thead>
         <tr>
           <th>{type === 'ar' ? t.invoices.customer : t.bills.vendor}</th>
+          {/*
+            「逾期 1-30 天」这一列原来不存在，那笔钱被并进了 current。于是
+            表头写着「未逾期」的那一列里，躺着已经欠了快一个月的账——而账龄
+            表存在的全部理由就是回答「哪些钱该去催了」。文案键 days30 从建库
+            起就在，一直没被用过。
+          */}
           <th className="numeric">{aging.current}</th>
+          <th className="numeric">{aging.days30}</th>
           <th className="numeric">{aging.days60}</th>
           <th className="numeric">{aging.days90}</th>
           <th className="numeric">{aging.over90}</th>
@@ -611,6 +631,7 @@ function AgingTable({
           <tr key={row.contactId}>
             <td>{row.contactName}</td>
             <td className="numeric mono">{formatMoney(row.current, baseCurrency, locale)}</td>
+            <td className="numeric mono">{formatMoney(row.d1_30, baseCurrency, locale)}</td>
             <td className="numeric mono">{formatMoney(row.d31_60, baseCurrency, locale)}</td>
             <td className="numeric mono">{formatMoney(row.d61_90, baseCurrency, locale)}</td>
             <td className="numeric mono">{formatMoney(row.over90, baseCurrency, locale)}</td>
@@ -622,6 +643,7 @@ function AgingTable({
         <tr>
           <th>{t.reports.total}</th>
           <th className="numeric mono">{formatMoney(totals.current, baseCurrency, locale)}</th>
+          <th className="numeric mono">{formatMoney(totals.d1_30, baseCurrency, locale)}</th>
           <th className="numeric mono">{formatMoney(totals.d31_60, baseCurrency, locale)}</th>
           <th className="numeric mono">{formatMoney(totals.d61_90, baseCurrency, locale)}</th>
           <th className="numeric mono">{formatMoney(totals.over90, baseCurrency, locale)}</th>
@@ -633,6 +655,90 @@ function AgingTable({
 }
 
 /* ── Statement tab (Customer / Vendor) ── */
+
+/**
+ * 税额汇总标签页。
+ *
+ * 期间由用户自己选，和对账单一样——税表的期间是申报周期（月 / 季），
+ * 跟财年起点没有关系，所以不能沿用页面顶上那个 period。默认仍然给财年
+ * 至今，至少是一个有意义的起点。
+ */
+function TaxTab({
+  orgSlug,
+  locale,
+  baseCurrency,
+  t,
+  period,
+}: {
+  orgSlug: string;
+  locale: Locale;
+  baseCurrency: string;
+  t: Messages;
+  period: { from: string; to: string };
+}) {
+  const [from, setFrom] = useState(period.from);
+  const [to, setTo] = useState(period.to);
+  const [data, setData] = useState<TaxReportResponse | null>(null);
+  const [shown, setShown] = useState<{ from: string; to: string } | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const fetchReport = useCallback(async () => {
+    setLoading(true);
+    setError('');
+    try {
+      const res = await fetch(`/api/${orgSlug}/tax-report?from=${from}&to=${to}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      setData(await res.json());
+      // 记下这份数据实际对应的期间。用户改了日期却还没点按钮时，表头
+      // 不能跟着输入框走——那会让屏幕上的期间和数字对不上。
+      setShown({ from, to });
+    } catch {
+      setError(t.reports.statementLoadFailed);
+      setData(null);
+      setShown(null);
+    } finally {
+      setLoading(false);
+    }
+  }, [orgSlug, from, to, t]);
+
+  return (
+    <div className="tax-tab">
+      <h3>{t.tax.report}</h3>
+
+      <div className="statement-controls">
+        <label>
+          {t.reports.from}
+          <input type="date" value={from} onChange={(e) => setFrom(e.target.value)} />
+        </label>
+        <label>
+          {t.reports.to}
+          <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
+        </label>
+        <button onClick={fetchReport} disabled={loading || from > to}>
+          {loading ? t.common.loading : t.tax.report}
+        </button>
+      </div>
+
+      {from > to && <p className="hint">{t.reports.rangeBackwards}</p>}
+      {error && <p className="error-message">{error}</p>}
+
+      {data && shown && (
+        <TaxReportView
+          outputTax={data.outputTax}
+          inputTax={data.inputTax}
+          netPayableMinor={data.netPayableMinor}
+          from={shown.from}
+          to={shown.to}
+          locale={locale}
+          // 服务端回的本位币优先：它和那些数字来自同一次调用。
+          baseCurrency={data.baseCurrency || baseCurrency}
+          i18n={t}
+        />
+      )}
+    </div>
+  );
+}
 
 function StatementTab({
   contacts,
@@ -661,7 +767,14 @@ function StatementTab({
   // 的期间不同，而屏幕上没有任何东西说明为什么。
   const [from, setFrom] = useState(period.from);
   const [to, setTo] = useState(period.to);
-  const [data, setData] = useState<CustomerStatement | null>(null);
+  /**
+   * 这里原来写的是 `useState<CustomerStatement | null>`，而数据来自
+   * res.json()——CustomerStatement 的金额字段类型是 bigint，JSON 里不可能
+   * 有 bigint。那是一句编译器信了、运行时不成立的话：真跑起来这些字段是
+   * 字符串，而它们被直接喂给 formatMoney(amountMinor: bigint)。
+   * 改成按出网的真实形状（字符串）声明，在下面显式转回 bigint。
+   */
+  const [data, setData] = useState<StatementResponse | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -718,6 +831,20 @@ function StatementTab({
 
       {error && <p className="error-message">{error}</p>}
 
+      {/*
+        被排除的外币单据必须说出来。仓储专门回了这个 notice（见 aging.ts），
+        而这里原来把它整个忽略掉——用户看到的是一份金额偏小、但看起来毫无
+        异样的对账单，没有任何线索说明少了什么。
+      */}
+      {data?.notice && (
+        <p role="status" className="form-error">
+          {interpolate(t.statement.excludedNotice, {
+            count: data.notice.count,
+            currencies: data.notice.currencies.join(', '),
+          })}
+        </p>
+      )}
+
       {data && (
         <table className="report-table">
           <thead>
@@ -730,11 +857,13 @@ function StatementTab({
             </tr>
           </thead>
           <tbody>
-            {data.openingBalance !== 0n && (
+            {BigInt(data.openingBalance) !== 0n && (
               <tr className="opening-balance">
                 <td colSpan={3}>{t.statement.openingBalance}</td>
                 <td className="numeric mono" />
-                <td className="numeric mono">{formatMoney(data.openingBalance, baseCurrency, locale)}</td>
+                <td className="numeric mono">
+                  {formatMoney(BigInt(data.openingBalance), baseCurrency, locale)}
+                </td>
               </tr>
             )}
             {data.lines.length === 0 && !loading ? (
@@ -749,8 +878,12 @@ function StatementTab({
                   <td className="mono">{line.date}</td>
                   <td>{line.description}</td>
                   <td className="mono">{line.reference}</td>
-                  <td className="numeric mono">{formatMoney(line.amount, baseCurrency, locale)}</td>
-                  <td className="numeric mono">{formatMoney(line.balance, baseCurrency, locale)}</td>
+                  <td className="numeric mono">
+                    {formatMoney(BigInt(line.amount), baseCurrency, locale)}
+                  </td>
+                  <td className="numeric mono">
+                    {formatMoney(BigInt(line.balance), baseCurrency, locale)}
+                  </td>
                 </tr>
               ))
             )}
@@ -758,7 +891,9 @@ function StatementTab({
           <tfoot>
             <tr>
               <th colSpan={4}>{t.statement.closingBalance}</th>
-              <th className="numeric mono">{formatMoney(data.closingBalance, baseCurrency, locale)}</th>
+              <th className="numeric mono">
+                {formatMoney(BigInt(data.closingBalance), baseCurrency, locale)}
+              </th>
             </tr>
           </tfoot>
         </table>

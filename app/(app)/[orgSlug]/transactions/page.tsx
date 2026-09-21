@@ -82,11 +82,18 @@ export default async function TransactionsListPage({
 
   // 保留除 page 以外的全部查询参数，翻页时筛选条件不丢。
   // searchParams 的值可能是 string[]（重复参数），只取第一个。
+  // saved 也排除：它是「刚存完那一笔」的一次性回执（见下方 justSaved），
+  // 跟着翻页链接走的话，用户翻到第 3 页还在被告知保存成功。
   const currentQuery: Record<string, string> = {};
   for (const [key, value] of Object.entries(raw)) {
-    if (key === 'page' || value === undefined) continue;
+    if (key === 'page' || key === 'saved' || value === undefined) continue;
     currentQuery[key] = Array.isArray(value) ? value[0] : value;
   }
+
+  // 保存成功后表单跳到这里并带上 ?saved=1。回执必须由**落地页**渲染，
+  // 而不是表单自己先闪一下再跳——那种提示用户来不及读完就没了。
+  // 这与登录页 ?checkEmail=1 是同一套做法。
+  const justSaved = first(raw.saved) === '1';
 
   const data = await withTransaction(context.userId, async (tx) => {
     const [accounts, categories, members, transactions] = await Promise.all([
@@ -125,6 +132,12 @@ export default async function TransactionsListPage({
         </div>
       </div>
 
+      {justSaved ? (
+        <p role="status" className="form-success">
+          {t.transaction.saved}
+        </p>
+      ) : null}
+
       <TransactionFilters
         orgSlug={orgSlug}
         locale={locale}
@@ -132,6 +145,16 @@ export default async function TransactionsListPage({
         moneyAccounts={data.accounts.map(toOption)}
         members={data.members.map((m) => ({ userId: m.userId, displayName: m.displayName }))}
       />
+
+      {/* 解析失败时必须说出来。上面那段注释说的「在页面上说明」一直没有兑现：
+          列表照常渲染、筛选条件被整组丢掉，而用户手里那个链接看上去还是
+          筛过的——他会把一份没筛的流水当成筛选结果去对账。
+          放在筛选条附近而不是页首，因为它说的是筛选这件事。 */}
+      {!parsedFilters.success ? (
+        <p role="status" className="form-error">
+          {t.filters.invalidIgnored}
+        </p>
+      ) : null}
 
       <TransactionTable
         orgSlug={orgSlug}

@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
@@ -91,15 +92,13 @@ export function PoList({ orgSlug, locale, purchaseOrders: initialPos }: Props) {
             return (
               <tr key={po.id} className={po.status === 'voided' ? 'row-voided' : undefined}>
                 <td>
-                  {/* 采购单号不是链接。
-                      这里原来链到 `/{orgSlug}/purchase-orders/{id}`，而
-                      app/(app)/[orgSlug]/purchase-orders/ 下只有 page.tsx
-                      与 new/ 两项——点单号得到的是 404。发票与账单这一轮补上了
-                      各自的详情页，采购单还没有（没有 updatePurchaseOrder，
-                      改动只有状态流转，而那几个按钮就在这一行的右端）。
-                      一个通向 404 的链接比没有链接更糟：它承诺了一个不存在的
-                      地方，用户会以为是自己点错了。详情页该补，已在报告里记下。 */}
-                  {po.poNumber}
+                  {/* 单号链到详情/编辑页。
+                      这里曾经是一段纯文本，因为链接指向的路由不存在——点单号
+                      得到的是 404，而一个通向 404 的链接比没有链接更糟：它
+                      承诺了一个不存在的地方。现在
+                      app/(app)/[orgSlug]/purchase-orders/[id]/page.tsx 补上了，
+                      链接与路由是同一次改动的两半，必须同时到位。 */}
+                  <Link href={`/${orgSlug}/purchase-orders/${po.id}`}>{po.poNumber}</Link>
                 </td>
                 <td>{po.contactName ?? '-'}</td>
                 <td>{po.issueDate}</td>

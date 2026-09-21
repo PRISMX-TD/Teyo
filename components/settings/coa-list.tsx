@@ -159,7 +159,23 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
 
       <div className="add-form">
         <h3>{t.settings.addAccount}</h3>
-        <select value={newType} onChange={(e) => setNewType(e.target.value as AccountType)}>
+        {/* aria-label：同一张表单里两个输入框都成对写了 placeholder + aria-label，
+            唯独这个下拉既没有 <label> 也没有名字，读屏器只能念出当前选中的
+            那个值（「资产」），说不出这一栏问的是什么。 */}
+        <select
+          aria-label={t.settings.accountType}
+          value={newType}
+          onChange={(e) => {
+            const next = e.target.value as AccountType;
+            setNewType(next);
+            // 类型改成非资产时必须把「资金账户」清掉。此前复选框只是被
+            // disabled，值还留在 state 里：先选资产、勾上、再改成负债，提交
+            // 的是 { type:'liability', isMoneyAccount:true }。accountSchema
+            // 不管这个组合，于是它一路走到数据库，撞在 accounts_money_is_asset
+            // 上——用户得到的是一句裸的 Postgres 约束名。
+            if (next !== 'asset') setNewIsMoney(false);
+          }}
+        >
           {ACCOUNT_TYPES.map((type) => (
             <option key={type} value={type}>
               {t.settings[TYPE_LABEL_KEYS[type]]}

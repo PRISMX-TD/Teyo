@@ -10,6 +10,7 @@ import {
   type CategoryRow,
 } from '@/server/repositories/categories';
 import { getUserLocale } from '@/server/repositories/organizations';
+import { listProjects } from '@/server/repositories/projects';
 import { scenarioById, type Scenario } from '@/server/domain/scenario';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
@@ -32,12 +33,14 @@ async function loadFormData(tx: Tx, organizationId: string) {
     expenseCategories,
     recentIncomeCategories,
     recentExpenseCategories,
+    projects,
   ] = await Promise.all([
     listMoneyAccounts(tx, organizationId),
     listSelectableCategories(tx, organizationId, 'income'),
     listSelectableCategories(tx, organizationId, 'expense'),
     listRecentCategories(tx, organizationId, 'income'),
     listRecentCategories(tx, organizationId, 'expense'),
+    listProjects(tx, organizationId),
   ]);
   return {
     moneyAccounts,
@@ -45,6 +48,11 @@ async function loadFormData(tx: Tx, organizationId: string) {
     expenseCategories,
     recentIncomeCategories,
     recentExpenseCategories,
+    // 只给还在进行中的项目。已完成/已取消的项目不该继续接收新交易，
+    // 但它们在项目列表里仍然看得到历史。
+    projects: projects
+      .filter((project) => project.status === 'active')
+      .map((project) => ({ id: project.id, name: project.name })),
   };
 }
 
@@ -73,6 +81,7 @@ export default async function NewTransactionPage({
       expenseCategories,
       recentIncomeCategories,
       recentExpenseCategories,
+      projects,
     } = await withTransaction(context.userId, (tx) => loadFormData(tx, context.organizationId));
 
     return (
@@ -88,6 +97,7 @@ export default async function NewTransactionPage({
           recentIncomeCategories={recentIncomeCategories.map(toOption)}
           recentExpenseCategories={recentExpenseCategories.map(toOption)}
           currencies={[...SUPPORTED_CURRENCIES]}
+          projects={projects}
         />
       </>
     );
@@ -106,6 +116,7 @@ export default async function NewTransactionPage({
     expenseCategories,
     recentIncomeCategories,
     recentExpenseCategories,
+    projects,
     presetCategoryId,
     presetAccountId,
   } = await withTransaction(context.userId, (tx) => loadScenarioFormData(tx, context, scenario));
@@ -123,6 +134,7 @@ export default async function NewTransactionPage({
         recentIncomeCategories={recentIncomeCategories.map(toOption)}
         recentExpenseCategories={recentExpenseCategories.map(toOption)}
         currencies={[...SUPPORTED_CURRENCIES]}
+        projects={projects}
         scenario={scenario}
         presetCategoryId={presetCategoryId}
         presetAccountId={presetAccountId}
@@ -133,7 +145,7 @@ export default async function NewTransactionPage({
 
 async function loadScenarioFormData(tx: Tx, context: OrgContext, scenario: Scenario) {
   const [
-    { moneyAccounts, incomeCategories, expenseCategories, recentIncomeCategories, recentExpenseCategories },
+    { moneyAccounts, incomeCategories, expenseCategories, recentIncomeCategories, recentExpenseCategories, projects },
     presetAccount,
   ] = await Promise.all([
     loadFormData(tx, context.organizationId),
@@ -164,6 +176,7 @@ async function loadScenarioFormData(tx: Tx, context: OrgContext, scenario: Scena
     expenseCategories,
     recentIncomeCategories,
     recentExpenseCategories,
+    projects,
     presetCategoryId,
     presetAccountId,
   };

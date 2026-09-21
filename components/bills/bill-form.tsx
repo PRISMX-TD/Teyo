@@ -151,7 +151,8 @@ export function BillForm({
       } else {
         await createBill(orgSlug, { ...payload, status: keepDraft ? 'draft' : 'received' });
       }
-      router.push(`/${orgSlug}/bills`);
+      // ?saved=1：回执由列表页渲染。理由见 components/invoices/invoice-form.tsx。
+      router.push(`/${orgSlug}/bills?saved=1`);
       router.refresh();
     } catch (err) {
       setError((err as Error).message);

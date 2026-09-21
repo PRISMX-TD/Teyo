@@ -67,6 +67,7 @@ export async function updateOrganization(
     name: string;
     timezone: string;
     industry?: string;
+    address?: string;
     fiscalYearStartMonth: number | string;
   },
 ): Promise<void> {
@@ -83,6 +84,7 @@ export async function updateOrganization(
       name: data.name,
       timezone: data.timezone,
       industry: data.industry ?? null,
+      address: data.address ?? null,
       fiscalYearStartMonth: data.fiscalYearStartMonth,
     });
 

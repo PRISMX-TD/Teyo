@@ -189,13 +189,16 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
                       </button>
                     ) : null}
 
-                    <a
-                      href={`/api/invoice/${row.id}/pdf?orgSlug=${orgSlug}`}
-                      download
-                      className="text-button"
-                    >
-                      {t.invoicePdf.download}
-                    </a>
+                    {/*
+                      原来这里链的是 /api/invoice/[id]/pdf —— 一个手写的
+                      PDF 生成器，对象图、xref 偏移、货币小数位和非拉丁字符
+                      四处同时坏（详见 invoices/[id]/print/page.tsx 的注释）。
+                      改成一张可打印的单据页：浏览器的「打印 → 另存为 PDF」
+                      自带真字体，中文、日文、带重音的马来/欧洲人名都正常。
+                    */}
+                    <Link href={`/${orgSlug}/invoices/${row.id}/print`} className="text-button">
+                      {t.invoicePdf.print}
+                    </Link>
                   </span>
                 </td>
               </tr>

@@ -295,6 +295,28 @@ describe('updatePurchaseOrderAction - 不再把两个 not null 列写成 NULL', 
     // 300.00 × 5 = 1500.00。不重算的话这里会停在 1200.00，而汇率列上写的是 5。
     expect(row.base_total_minor).toBe('150000');
   });
+
+  it('非草稿状态直接拒绝——这道判断不能只留在界面上', async () => {
+    currentUserId = ownerId;
+    const { id } = await createPurchaseOrder(org.slug, {
+      contactId: vendorId,
+      issueDate: ISSUE_DATE,
+      currency: 'USD',
+      exchangeRate: '4.00',
+      items: ONE_LINE,
+    });
+    await setPoStatusAction(org.slug, id, 'received');
+
+    // 详情页对非草稿渲染的是只读视图，但 Server Action 是一个网络端点：
+    // 拿得到 orgSlug 和单号的人可以直接 POST 一份 payload 绕过那张页面。
+    // 一张已经收货的采购单被改掉金额，不会有任何一处报错。
+    await expect(
+      updatePurchaseOrderAction(org.slug, id, { notes: 'sneaky edit' }),
+    ).rejects.toThrow(/no longer a draft/i);
+
+    const row = await poRow(id);
+    expect(row.exchange_rate).toBe('400000000');
+  });
 });
 
 describe('setPoStatusAction - 作废要同时写 voided_at', () => {

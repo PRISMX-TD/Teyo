@@ -10,8 +10,40 @@ import {
   signUpSchema,
 } from '@/lib/schemas';
 import type { Locale } from '@/lib/i18n';
+import { getMessages } from '@/lib/i18n';
+import { resolveAnonymousLocale } from '@/lib/i18n/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { ensureAppUser } from '@/server/auth/ensure-app-user';
+
+/**
+ * 「这次登录失败是因为凭据不对」还是「根本没问到服务」。
+ *
+ * 这个判断必须做，因为两者在界面上是同一个红字。之前登录失败一律把
+ * Supabase 的英文原文透传到表单，中文界面上的用户看到的是
+ * "Invalid login credentials"；更糟的是网络断了、Supabase 挂了的时候，
+ * 那句话同样会变成「密码不对」——用户会去改一个本来没错的密码，甚至
+ * 走一遍重置流程，而问题根本不在他这边。
+ *
+ * 判据优先看 code：supabase-js 从 2.x 起给 AuthApiError 带了稳定的
+ * error code，比 message 文本可靠（message 会随 GoTrue 版本改）。
+ * message 那一支只是给没有 code 的旧响应兜底。
+ */
+function isCredentialError(error: { code?: string; message: string }): boolean {
+  if (error.code === 'invalid_credentials') return true;
+  return /invalid login credentials/i.test(error.message);
+}
+
+/**
+ * 压根没连上服务的那一类错误。
+ *
+ * AuthRetryableFetchError 是 supabase-js 对 fetch 失败的包装，它的 status
+ * 是 0；某些运行时下连 status 都没有。这一类**不能**显示成凭据错误，也
+ * 不该把 "Failed to fetch" 这种实现细节丢给用户——换成 errors.unexpected
+ * （「出了点问题，请再试一次」），它说的正是「再试一次」这个正确动作。
+ */
+function isUnreachableError(error: { name?: string; status?: number }): boolean {
+  return error.name === 'AuthRetryableFetchError' || !error.status;
+}
 
 /**
  * Server Action 的返回值。
@@ -74,7 +106,17 @@ export async function signIn(input: {
     password: parsed.password,
   });
 
-  if (error) return { error: error.message };
+  if (error) {
+    // 语言取自 Accept-Language：这一刻还没有用户身份，app_users.locale 拿不到。
+    // 登录页外壳本来就是这样选语言的（见 lib/i18n/server.ts），错误提示跟着
+    // 同一个来源，才不会出现「页面是中文、错误是英文」。
+    const t = getMessages(await resolveAnonymousLocale());
+    if (isCredentialError(error)) return { error: t.auth.invalidCredentials };
+    if (isUnreachableError(error)) return { error: t.errors.unexpected };
+    // 其余（限流、账号被封、邮箱未确认……）保留 Supabase 的原文：它们各自
+    // 带着用户需要的具体信息，翻成一句笼统的中文反而丢掉了那条信息。
+    return { error: error.message };
+  }
 
   if (data.user) {
     const metadata = data.user.user_metadata as { display_name?: string; locale?: Locale };

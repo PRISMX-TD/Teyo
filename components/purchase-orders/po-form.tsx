@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
-import { createPurchaseOrder } from '@/server/actions/purchase_orders';
+import { createPurchaseOrder, updatePurchaseOrderAction } from '@/server/actions/purchase_orders';
 import { todayLocalISO } from '@/lib/date';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { RateField } from '@/components/transaction/rate-field';
@@ -21,6 +21,28 @@ export type PoTaxRateOption = {
   rateBps: number;
 };
 
+/**
+ * 编辑模式下这张表单需要的那张采购单，已经摊平成字符串。
+ *
+ * 不直接收 PurchaseOrderWithItems：那上面的数量是放大 10^4 的 bigint、
+ * 金额是最小单位 bigint、汇率是放大 10^8 的 bigint，还原各有各的函数
+ * （formatScaledQuantity / formatMinorToDecimal / formatScaledRate），
+ * 其中头一个住在 server/repositories/inventory.ts 里——把一个仓储模块拖进
+ * 客户端包只为了格式化三个数字，不值。换算在页面（服务端）做一次。
+ */
+export type PoEditable = {
+  id: string;
+  poNumber: string;
+  contactId: string;
+  issueDate: string;
+  expectedDate: string | null;
+  currency: string;
+  /** 十进制字符串，由 formatScaledRate 从 exchange_rate 那一列还原。 */
+  exchangeRate: string;
+  notes: string | null;
+  items: LineItem[];
+};
+
 type Props = {
   orgSlug: string;
   locale: Locale;
@@ -29,6 +51,11 @@ type Props = {
   /** 公司本位币。理由见 components/invoices/invoice-form.tsx 上的同名字段。 */
   baseCurrency: string;
   taxRates: PoTaxRateOption[];
+  /**
+   * 有值即编辑模式。只有草稿会走到这里——已发送的那一份在供应商手上了，
+   * 页面负责在这之前就把表单换成只读视图。
+   */
+  purchaseOrder?: PoEditable | null;
 };
 
 type LineItem = {
@@ -44,20 +71,31 @@ function bpsToPercent(bps: number): string {
   return `${whole}.${String(fraction).padStart(2, '0')}`;
 }
 
-export function PoForm({ orgSlug, locale, vendors, currencies, baseCurrency, taxRates }: Props) {
+export function PoForm({
+  orgSlug,
+  locale,
+  vendors,
+  currencies,
+  baseCurrency,
+  taxRates,
+  purchaseOrder = null,
+}: Props) {
   const t = getMessages(locale);
   const router = useRouter();
 
   const today = todayLocalISO();
+  const isEdit = purchaseOrder !== null;
 
-  const [contactId, setContactId] = useState(vendors[0]?.id ?? '');
-  const [issueDate, setIssueDate] = useState(today);
-  const [expectedDate, setExpectedDate] = useState('');
-  const [currency, setCurrency] = useState(baseCurrency);
-  const [notes, setNotes] = useState('');
-  const [items, setItems] = useState<LineItem[]>([
-    { description: '', quantity: '1', unitPrice: '', taxRateId: '' },
-  ]);
+  const [contactId, setContactId] = useState(purchaseOrder?.contactId ?? vendors[0]?.id ?? '');
+  const [issueDate, setIssueDate] = useState(purchaseOrder?.issueDate ?? today);
+  const [expectedDate, setExpectedDate] = useState(purchaseOrder?.expectedDate ?? '');
+  const [currency, setCurrency] = useState(purchaseOrder?.currency ?? baseCurrency);
+  const [notes, setNotes] = useState(purchaseOrder?.notes ?? '');
+  const [items, setItems] = useState<LineItem[]>(
+    purchaseOrder && purchaseOrder.items.length > 0
+      ? purchaseOrder.items
+      : [{ description: '', quantity: '1', unitPrice: '', taxRateId: '' }],
+  );
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -96,35 +134,53 @@ export function PoForm({ orgSlug, locale, vendors, currencies, baseCurrency, tax
     try {
       const exponent = currencyExponent(currency);
 
-      await createPurchaseOrder(orgSlug, {
-        contactId,
-        issueDate,
-        expectedDate: expectedDate || undefined,
-        currency,
-        exchangeRate,
-        notes: notes || undefined,
-        items: items.map((item) => ({
-          description: item.description,
-          // 数量原样传字符串。原来这里是 `parseFloat(item.quantity) || 0`，
-          // 而行金额又用 `Math.round(qty)` 把它四舍五入成整数——采购 2.5 吨
-          // 按 3 吨计价，单据与明细各自自洽，没有任何地方看得出来。服务端的
-          // parseQuantityToScaled 收字符串，按四位小数定标，一分不差。
-          quantity: item.quantity || '1',
-          // 十进制字符串 → 最小单位整数，走 parseDecimalToMinor 而不是
-          // `Math.round(parseFloat(x) * 100)`。后者对 JPY 这种零位小数的币种
-          // 直接差两个数量级（1000 日元变成 100000），而且浮点乘法本身就会
-          // 在某些值上偏一分。exponent 由币种决定，不是写死的 100。
-          unitPriceMinor: parseDecimalToMinor(
-            (item.unitPrice || '0').trim(),
-            exponent,
-          ).toString(),
-          // amountMinor 不传：服务端 totalsFor 在缺省时用整数 half-up 的
-          // extendQuantity 自己算（单价 × 数量）。前端算一遍再传过去，等于
-          // 让「行金额」有两个来源，而只有其中一个受记账边界的舍入规则约束。
-          taxRateId: item.taxRateId || undefined,
-        })),
-      });
-      router.push(`/${orgSlug}/purchase-orders`);
+      const payloadItems = items.map((item) => ({
+        description: item.description,
+        // 数量原样传字符串。原来这里是 `parseFloat(item.quantity) || 0`，
+        // 而行金额又用 `Math.round(qty)` 把它四舍五入成整数——采购 2.5 吨
+        // 按 3 吨计价，单据与明细各自自洽，没有任何地方看得出来。服务端的
+        // parseQuantityToScaled 收字符串，按四位小数定标，一分不差。
+        quantity: item.quantity || '1',
+        // 十进制字符串 → 最小单位整数，走 parseDecimalToMinor 而不是
+        // `Math.round(parseFloat(x) * 100)`。后者对 JPY 这种零位小数的币种
+        // 直接差两个数量级（1000 日元变成 100000），而且浮点乘法本身就会
+        // 在某些值上偏一分。exponent 由币种决定，不是写死的 100。
+        unitPriceMinor: parseDecimalToMinor(
+          (item.unitPrice || '0').trim(),
+          exponent,
+        ).toString(),
+        // amountMinor 不传：服务端 totalsFor 在缺省时用整数 half-up 的
+        // extendQuantity 自己算（单价 × 数量）。前端算一遍再传过去，等于
+        // 让「行金额」有两个来源，而只有其中一个受记账边界的舍入规则约束。
+        taxRateId: item.taxRateId || undefined,
+      }));
+
+      if (isEdit && purchaseOrder) {
+        await updatePurchaseOrderAction(orgSlug, purchaseOrder.id, {
+          contactId,
+          issueDate,
+          // expectedDate 与 notes 在仓储层是「不传就清空」的语义（那是有意的，
+          // 见 updatePurchaseOrder 上的注释：把预计到货日清掉是用户真的会做的
+          // 动作）。所以这张表单每次都把这两栏当前的值原样送过去，空就是空。
+          expectedDate: expectedDate || undefined,
+          currency,
+          exchangeRate,
+          notes: notes || undefined,
+          items: payloadItems,
+        });
+      } else {
+        await createPurchaseOrder(orgSlug, {
+          contactId,
+          issueDate,
+          expectedDate: expectedDate || undefined,
+          currency,
+          exchangeRate,
+          notes: notes || undefined,
+          items: payloadItems,
+        });
+      }
+      // ?saved=1：回执由列表页渲染。理由见 components/invoices/invoice-form.tsx。
+      router.push(`/${orgSlug}/purchase-orders?saved=1`);
       router.refresh();
     } catch (err) {
       setError((err as Error).message);
@@ -185,6 +241,12 @@ export function PoForm({ orgSlug, locale, vendors, currencies, baseCurrency, tax
         occurredOn={issueDate}
         amount=""
         locale={locale}
+        // 编辑时带上这张单当初记下的汇率，并原样提交回去。不带的话，
+        // updatePurchaseOrderAction 在币种没变时会沿用库里那个值——结果是
+        // 对的，但屏幕上那一栏显示的会是今天查到的汇率，与真正保存下去的
+        // 不是同一个数。让看到的和存下去的是同一个。
+        initialRate={isEdit ? purchaseOrder?.exchangeRate : undefined}
+        initialSource={isEdit ? 'manual' : undefined}
       />
 
       <fieldset className="invoice-items">
@@ -277,7 +339,11 @@ export function PoForm({ orgSlug, locale, vendors, currencies, baseCurrency, tax
 
       <div className="form-actions">
         <button type="submit" disabled={pending}>
-          {pending ? t.common.loading : t.purchaseOrders.save}
+          {pending
+            ? t.common.loading
+            : isEdit
+              ? t.purchaseOrders.saveChanges
+              : t.purchaseOrders.save}
         </button>
       </div>
     </form>

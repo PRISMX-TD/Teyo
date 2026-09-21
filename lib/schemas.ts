@@ -63,6 +63,13 @@ export const updateOrgSchema = z.object({
   name: nonEmpty.max(120),
   timezone: nonEmpty.max(60),
   industry: z.string().trim().max(60).optional(),
+  /**
+   * 开票方地址，印在发票单据上（0026 迁移加的列）。
+   *
+   * 只在「编辑公司资料」里出现，不进 createOrgSchema：开公司那一步问的越少
+   * 越好，而地址在开第一张发票之前都用不上。
+   */
+  address: z.string().trim().max(300).optional(),
   fiscalYearStartMonth,
 });
 

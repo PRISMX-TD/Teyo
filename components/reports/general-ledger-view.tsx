@@ -18,6 +18,25 @@ function toOption(row: { nameEn: string | null; nameZh: string | null }) {
   return { name_en: row.nameEn, name_zh: row.nameZh };
 }
 
+/**
+ * 分录种类的文案。
+ *
+ * 总账每一行原来只有日期、摘要和金额，看不出这笔是收入、支出、转账、
+ * 手工凭证还是年结分录——而这几种在对账时要用完全不同的方式去核实
+ * （年结那一条尤其：它是系统生成的，去找一张对应的单据只会白找）。
+ * kind 一直躺在 LedgerLine 里没人用。
+ *
+ * 分支顺序与 transactions/[id]/page.tsx 的同名逻辑保持一致；'closing'
+ * 借 yearEnd.closingEntry，因为 transaction 命名空间下没有它。
+ */
+function kindLabel(kind: string, t: Messages): string {
+  if (kind === 'income') return t.transaction.income;
+  if (kind === 'expense') return t.transaction.expense;
+  if (kind === 'journal') return t.transaction.journal;
+  if (kind === 'closing') return t.yearEnd.closingEntry;
+  return t.transaction.transfer;
+}
+
 export function GeneralLedgerView({
   orgSlug,
   locale,
@@ -118,6 +137,7 @@ export function GeneralLedgerView({
               <tr>
                 <th>{t.generalLedger.date}</th>
                 <th>{t.generalLedger.description}</th>
+                <th>{t.generalLedger.kind}</th>
                 <th className="numeric">{t.generalLedger.debit}</th>
                 <th className="numeric">{t.generalLedger.credit}</th>
                 <th className="numeric">{t.generalLedger.balance}</th>
@@ -128,6 +148,7 @@ export function GeneralLedgerView({
                 <tr key={i}>
                   <td>{line.date}</td>
                   <td>{line.description || '\u2014'}</td>
+                  <td>{kindLabel(line.kind, t)}</td>
                   <td className="numeric mono">
                     {line.debitMinor > 0n ? formatMoney(line.debitMinor, baseCurrency, locale) : ''}
                   </td>
@@ -140,7 +161,7 @@ export function GeneralLedgerView({
             </tbody>
             <tfoot>
               <tr>
-                <th colSpan={4}>{t.generalLedger.closingBalance}</th>
+                <th colSpan={5}>{t.generalLedger.closingBalance}</th>
                 <th className="numeric mono">{formatMoney(ledger.closingBalance, baseCurrency, locale)}</th>
               </tr>
             </tfoot>

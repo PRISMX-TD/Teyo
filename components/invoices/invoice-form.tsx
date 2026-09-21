@@ -136,7 +136,9 @@ export function InvoiceForm({
       } else {
         await createInvoice(orgSlug, { ...payload, issue: issueNow });
       }
-      router.push(`/${orgSlug}/invoices`);
+      // 带上 ?saved=1，让列表页去说「已保存」。在这张表单上先弹一句再跳走
+      // 是没有意义的——用户的眼睛还没到那句话，页面已经换了。
+      router.push(`/${orgSlug}/invoices?saved=1`);
       // push 之后再 refresh：过账改了总账，列表页、流水页与首页的数字都变了，
       // 而那几个页面可能还在路由缓存里。
       router.refresh();

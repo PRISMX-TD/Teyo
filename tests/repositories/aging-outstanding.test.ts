@@ -306,16 +306,20 @@ describe('getArAging - 未结余额而不是单据总额', () => {
     expect(rows.find((r) => r.contactName === 'Acme Bhd')!.total).toBe(35000n);
   });
 
-  it('逾期金额按到期日 < asOf 单独算，不等于任何一个桶', async () => {
-    // 到期日 2026-06-20（早于 asOf 6/30，但在 30 天以内）→ 落在 current 桶，
-    // 同时必须被算进 overdue。
+  it('逾期 1-30 天单独成桶，不再混进「未逾期」', async () => {
+    // 到期日 2026-06-20，早于 asOf 6/30 十天 → 逾期 1-30 天那一桶。
+    //
+    // 这一条以前断言的是它落在 current 里：那时 current 的定义是「到期日在
+    // asOf 前 30 天之内**或**尚未到期」，于是表头写着 Current 的那一列里
+    // 装着已经欠了十天的钱。账龄表的全部用途就是回答「哪些该去催了」，
+    // 而那个分法恰好把最该催的一档藏进了看起来最安全的一列。
     await insertInvoice({
       currency: 'MYR',
       totalMinor: 20000n,
       issueDate: '2026-05-20',
       dueDate: '2026-06-20',
     });
-    // 到期日 2026-01-05，早于 asOf 90 天以上 → over90 桶，也计入 overdue。
+    // 到期日 2026-01-05，早于 asOf 90 天以上 → over90 桶。
     await insertInvoice({
       currency: 'MYR',
       totalMinor: 10000n,
@@ -326,12 +330,17 @@ describe('getArAging - 未结余额而不是单据总额', () => {
     const rows = await withTransaction(ownerId, (tx) => getArAging(tx, orgId, AS_OF));
     const acme = rows.find((r) => r.contactName === 'Acme Bhd')!;
 
-    expect(acme.current).toBe(35000n + 20000n);
+    expect(acme.current).toBe(35000n);
+    expect(acme.d1_30).toBe(20000n);
     expect(acme.over90).toBe(10000n);
     expect(acme.total).toBe(65000n);
-    // overdue 横跨 current 与 over90 两个桶——它是另一种切法，不是桶的合计。
     expect(acme.overdue).toBe(30000n);
-    expect(acme.overdue).not.toBe(acme.over90);
+
+    // 四个逾期桶不重不漏地铺满 due_date < asOf，所以这两条恒等式必须成立。
+    // 它们同时挡住「桶的边界改出重叠或空隙」这一类改动——那种错不会让任何
+    // 一个数看起来异常，只会让合计对不上。
+    expect(acme.d1_30 + acme.d31_60 + acme.d61_90 + acme.over90).toBe(acme.overdue);
+    expect(acme.current + acme.overdue).toBe(acme.total);
   });
 });
 

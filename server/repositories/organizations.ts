@@ -68,6 +68,8 @@ export type OrganizationSettings = {
   name: string;
   timezone: string;
   industry: string | null;
+  /** 开票方地址，印在发票单据上（0026 迁移加的列）。 */
+  address: string | null;
   /**
    * 财年起始月（1–12）。0024 迁移加的列，默认 1（日历年）。
    *
@@ -89,7 +91,7 @@ export async function getOrganizationSettings(
   organizationId: string,
 ): Promise<OrganizationSettings> {
   const rows = await tx`
-    select name, timezone, industry, fiscal_year_start_month
+    select name, timezone, industry, address, fiscal_year_start_month
     from organizations
     where id = ${organizationId}
   `;
@@ -101,6 +103,7 @@ export async function getOrganizationSettings(
     name: row.name as string,
     timezone: (row.timezone as string | null) ?? 'UTC',
     industry: (row.industry as string | null) ?? null,
+    address: (row.address as string | null) ?? null,
     // smallint 由驱动解析成 number；列上有 not null default 1 与
     // between 1 and 12 的 CHECK，所以这里不需要再兜底一次。
     fiscalYearStartMonth: row.fiscal_year_start_month as number,
@@ -114,6 +117,7 @@ export async function updateOrganizationSettings(
     name: string;
     timezone: string;
     industry: string | null;
+    address: string | null;
     fiscalYearStartMonth: number;
   },
 ): Promise<void> {
@@ -122,6 +126,7 @@ export async function updateOrganizationSettings(
     set name = ${input.name},
         timezone = ${input.timezone},
         industry = ${input.industry},
+        address = ${input.address},
         fiscal_year_start_month = ${input.fiscalYearStartMonth}
     where id = ${organizationId}
   `;

@@ -263,6 +263,7 @@ const en = {
     address: 'Address',
     notes: 'Notes',
     yearEnd: 'Year-end closing',
+    companyAddress: 'Company address (shown on invoices)',
     fiscalYearStart: 'Financial year starts in',
     fiscalYearStartHint:
       'Your reports, your general ledger and the year-end closing all use this month as the start of the year. Most companies use January, but yours may not.',
@@ -349,6 +350,7 @@ const en = {
   reports: {
     title: 'Reports',
     tabsLabel: 'Choose a report',
+    rangeBackwards: 'The start date must be on or before the end date.',
     statementLoadFailed: 'That statement could not be loaded. Try again.',
     trialBalance: 'Trial Balance',
     profitLoss: 'Profit & Loss',
@@ -500,6 +502,14 @@ const en = {
   },
   invoicePdf: {
     download: 'Download PDF',
+    // 这三个键由并行进行的「可打印发票」那一项使用
+    // （app/(app)/[orgSlug]/invoices/[id]/print/page.tsx 与 invoice-list.tsx）。
+    // 它们落在这里而不是那一项自己加，是因为 en.ts / zh.ts 这一轮只由一个
+    // 任务写——两个任务同时改同一个对象字面量，合并出来的多半是少了一半键
+    // 的文件，而少掉的那一半只在运行到那一页时才显形。
+    print: 'Print',
+    printHint: 'Use your browser’s print dialog to print this or save it as a PDF.',
+    billTo: 'Bill to',
   },
   bills: {
     title: 'Bills',
@@ -645,6 +655,10 @@ const en = {
     date: 'Date',
     description: 'Description',
     noTransactions: 'No transactions in this period.',
+    // 外币单据未过账时换不出本位币，仓储会把它们排除并回一个 notice。
+    // 不显示这句，用户看到的就是一份「金额偏小但看起来完全正常」的对账单。
+    excludedNotice:
+      '{count} unposted foreign-currency document(s) ({currencies}) could not be converted to your main currency, so they are not in the totals below.',
   },
   inventory: {
     title: 'Inventory',
@@ -703,6 +717,17 @@ const en = {
     total: 'Total',
     actions: 'Actions',
     noTax: 'No tax',
+    editTitle: 'Edit purchase order {number}',
+    saveChanges: 'Save changes',
+    backToList: 'Back to purchase orders',
+    notFound: 'This purchase order was not found in this company.',
+    lifecycle: 'Where this purchase order is',
+    draftNotice: 'A draft has not gone to the vendor yet. Anything on it can still be changed.',
+    // 「已发送」往后一律只读：那份单子已经在供应商手上，事后改掉自己这份
+    // 会让两边各拿着一张不一样的采购单，而账上没有任何地方记得曾经改过。
+    lockedNotice: 'Only a draft can be edited. This purchase order has already gone to the vendor, so raise a new one instead of changing what they were sent.',
+    voidedNotice: 'This purchase order is voided. It cannot be edited.',
+    baseTotal: 'Total in your main currency',
   },
   projects: {
     title: 'Projects',
@@ -795,6 +820,20 @@ const en = {
     noContacts: 'You need to add a contact first.',
     actions: 'Actions',
     draftNotice: 'A draft is not in your books yet. Issuing it takes the amount back off what the customer owes you.',
+    editTitle: 'Edit credit note {number}',
+    saveChanges: 'Save changes',
+    backToList: 'Back to credit notes',
+    notFound: 'This credit note was not found in this company.',
+    lifecycle: 'Where this credit note is',
+    // 已签发之后服务端直接拒绝编辑（server/actions/credit_notes.ts），所以
+    // 界面在这一步就该把表单收起来，而不是让用户填完再吃一个报错。
+    issuedNotice: 'This credit note is in your books. To change it, void it and raise a new one.',
+    appliedNotice: 'This credit note has been applied to an invoice. To change it, void it and raise a new one.',
+    voidedNotice: 'This credit note is voided. It cannot be edited or issued again.',
+    total: 'Total',
+    subtotal: 'Subtotal',
+    tax: 'Tax',
+    baseTotal: 'Total in your main currency',
   },
   tax: {
     title: 'Tax',
@@ -804,6 +843,17 @@ const en = {
     outputTax: 'Output Tax (Sales)',
     inputTax: 'Input Tax (Purchases)',
     netTaxPayable: 'Net Tax Payable',
+    report: 'Tax Summary',
+    side: 'Side',
+    netBase: 'Taxable base',
+    taxAmount: 'Tax',
+    unmatched: 'Tax account movement with no sale or purchase behind it',
+    unmatchedHint:
+      'Most often this is tax paid to (or refunded by) the tax authority. It moves the tax account but is not a sale or a purchase, so it is shown separately instead of being netted into the figures above.',
+    unmatchedReconcile:
+      'Your tax accounts moved by {output} (output) and {input} (input) in total this period — that is the tax above plus the amounts here.',
+    zeroRatedCaveat:
+      'Only sales and purchases that actually carried tax are counted here. Zero-rated and exempt supplies are not, because nothing in the books marks them as such yet.',
     addRate: 'Add Tax Rate',
     ratePercent: 'Rate (%)',
     deleteRateWarning: 'This tax rate is used by invoices and cannot be deleted.',
@@ -829,6 +879,19 @@ const en = {
     decliningBalance: 'Declining balance',
     purchaseCurrency: 'Currency it was bought in',
     baseCurrencyTag: 'main currency',
+    editTitle: 'Edit this asset',
+    saveChanges: 'Save changes',
+    // 编辑表单没有币种与汇率两栏，理由要说出来：updateFixedAssetAction 收的
+    // cost 是本位币账面原值，原币三列只作购入留痕（见 0011 迁移）。不写这句，
+    // 一个当初按日元录入的用户会以为这里的「原值」还是日元。
+    editBaseCurrencyHint:
+      'Cost and salvage value are in {currency}, your main currency. What you paid in the original currency, and the rate on the purchase date, are kept as a record and cannot be changed here.',
+    scheduleRebuilt: 'The depreciation schedule has been rebuilt.',
+    // keptPostedPeriods 是 updateFixedAssetAction 的返回值。不显示它，用户
+    // 改完年限之后会发现前几期金额没跟着变，而界面上没有任何地方解释得了。
+    scheduleKept:
+      '{count} period(s) already in your books were left exactly as they were ({periods}). Only the periods after them were recalculated.',
+    scheduleKeptNone: 'No period had been posted yet, so every period was recalculated.',
   },
   common: {
     cancel: 'Cancel',
@@ -851,6 +914,10 @@ const en = {
     close: 'Close',
     actions: 'Actions',
     viewDetails: 'View details',
+    // 只读的原因分两种，用户要分得清：单据自己的状态不许改（那由各模块的
+    // lifecycle 文案说），以及这个人的角色不许改。后者不说出来就成了「按钮
+    // 怎么没了」。
+    noEditPermission: 'You can look at this, but your role cannot change it.',
   },
   bankImport: {
     title: 'Bank Import',

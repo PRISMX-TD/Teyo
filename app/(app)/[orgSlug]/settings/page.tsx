@@ -22,6 +22,12 @@ export default async function SettingsIndexPage({
     { href: 'accounts', label: t.settings.accounts, action: 'account:manage' },
     { href: 'recurring', label: t.settings.recurring, action: 'transaction:create' },
     { href: 'contacts', label: t.settings.contacts, action: 'account:manage' },
+    // settings/inventory 与 settings/tax 两页一直是完整可用的，但这个数组里
+    // 没有它们，侧栏里也没有——除了手敲 URL 之外走不到。权限跟着它们各自
+    // requirePermission 的那一个走（两页都是 account:manage），否则这里会
+    // 出现一个点进去就 403 的入口。
+    { href: 'inventory', label: t.nav.inventory, action: 'account:manage' },
+    { href: 'tax', label: t.nav.tax, action: 'account:manage' },
     // 年结用 period:lock，与 0024 迁移里 fiscal_year_closings 的 owner-only
     // 策略对齐——理由见 server/actions/year_end.ts 顶部。这里必须用同一个
     // Action，否则 admin 会看到一个点进去就 403 的入口。

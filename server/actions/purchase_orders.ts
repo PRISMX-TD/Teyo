@@ -21,6 +21,7 @@ import {
   parseRateToScaled,
 } from '@/server/domain/exchange-rate';
 import { sumMinor } from '@/server/domain/money';
+import { LedgerError } from '@/server/domain/ledger';
 // 数量的定标整数解析在库存仓储里（那是它唯一真正被用来算钱的地方，注释也在
 // 那里）。po_items.quantity 与 inventory_transactions.quantity 同为
 // numeric(12,4)，同一套解析，不在这里再写一份——两份四位小数的解析里改错
@@ -258,6 +259,20 @@ export async function updatePurchaseOrderAction(
     const before = await getPurchaseOrder(tx, context.organizationId, id);
     if (!before) throw new Error('Purchase order not found.');
 
+    // 只有草稿能改，而且这道判断必须在服务端。
+    //
+    // 界面上（purchase-orders/[id]/page.tsx）非草稿状态渲染的是只读视图，
+    // 但 Server Action 是一个网络端点：能拿到 orgSlug 和单号的人，直接
+    // POST 一份 payload 就绕过了那张只读页面。一张已经收货、甚至已经转成
+    // 账单的采购单被改掉金额，不会有任何一处报错——贷项通知单那边
+    // （server/actions/credit_notes.ts:192）一直有这道判断，这里漏了。
+    if (before.status !== 'draft') {
+      throw new LedgerError(
+        `Purchase order ${before.poNumber} is no longer a draft and cannot be edited. ` +
+          'Void it and raise a new one.',
+      );
+    }
+
     // 币种与汇率任一没给就沿用这张单原来的。原来的写法是「没给就不改」，
     // 但金额换算必须知道这两个值，缺一个就只能猜——猜出来的结果是
     // base_total_minor 按另一个汇率算，而 exchange_rate 列上写的是旧的。
@@ -357,6 +372,9 @@ export async function setPoStatusAction(
     const before = await getPurchaseOrder(tx, context.organizationId, id);
     if (!before) throw new Error('Purchase order not found.');
 
+    // 这里**刻意没有**「只能改草稿」那道判断：状态流转本身就是从 draft 走到
+    // sent / received / billed / closed，再加上作废，每一步的起点都不是草稿。
+    // 只有改单据内容（updatePurchaseOrderAction）才限草稿。
     await setPoStatus(tx, context.organizationId, id, parsedStatus);
 
     await recordAudit(tx, {

@@ -14,7 +14,10 @@ export type AgingNotice = {
 export type ArAgingRow = {
   contactId: string;
   contactName: string;
+  /** 尚未到期（到期日 >= asOf）。 */
   current: bigint;
+  /** 逾期 1-30 天。 */
+  d1_30: bigint;
   d31_60: bigint;
   d61_90: bigint;
   over90: bigint;
@@ -22,10 +25,14 @@ export type ArAgingRow = {
   /**
    * 已逾期（到期日严格早于 asOf）的未结余额，本位币。
    *
-   * 它**不是**任何一个桶的合计，也不是 total 减 current：`current` 桶按
-   * 项目既有口径把「逾期 30 天以内」也算在内，所以逾期金额与桶是同一批
-   * 数据的两种切法。dashboard 的 overdueInvoices / overdueBills 直接取它，
-   * 这样「未结」与「逾期」在整个产品里只有一处定义。
+   * 自从 `current` 只装「尚未到期」之后，这个数等于 total - current，也等于
+   * 后四个桶之和。保留它是因为 dashboard 的 overdueInvoices / overdueBills
+   * 直接取它——「逾期」在整个产品里只有一处定义，各处自己去加桶迟早会漂。
+   *
+   * （在此之前它确实**不**等于 total - current：`current` 桶当时把「逾期
+   * 30 天以内」也算在内，于是表头写着「未逾期」的那一列里躺着已经欠了一个月
+   * 的钱。i18n 里 days30 这个键一直存在却从没被用过，说明第五个桶本来就是
+   * 打算做的。）
    */
   overdue: bigint;
   /**
@@ -94,6 +101,7 @@ function mapAgingRow(row: Record<string, unknown>): ArAgingRow {
       contactId: '',
       contactName: noticeLabel(notice),
       current: 0n,
+      d1_30: 0n,
       d31_60: 0n,
       d61_90: 0n,
       over90: 0n,
@@ -107,6 +115,7 @@ function mapAgingRow(row: Record<string, unknown>): ArAgingRow {
     contactId,
     contactName: row.contact_name as string,
     current: BigInt(row.current as string),
+    d1_30: BigInt(row.d1_30 as string),
     d31_60: BigInt(row.d31_60 as string),
     d61_90: BigInt(row.d61_90 as string),
     over90: BigInt(row.over90 as string),
@@ -219,9 +228,17 @@ export function sumAgingOverdue(rows: readonly ArAgingRow[]): bigint {
  *
  * ## 六、分桶口径
  *
- * 保持原有的边界不变（current = 到期日在 asOf 前 30 天之内或尚未到期，
- * 之后每 30 天一档），只把「按什么金额分桶」换成未结余额。边界本身没有
- * 错，改动它会让这次的修复与一次口径变更混在一起，出问题时分不清是哪一边。
+ * 五个桶：未到期 / 逾期 1-30 / 31-60 / 61-90 / 90+。
+ *
+ * 「未到期」原来的定义是「到期日在 asOf 前 30 天之内**或**尚未到期」——
+ * 也就是说，表头写着 Current 的那一列里，混着已经逾期将近一个月的钱。一份
+ * 账龄表的全部用途就是回答「哪些钱该去催了」，而这个分法恰好把最该催的那
+ * 一档藏进了看起来最安全的那一列。i18n 里 `days30`（1-30 天）这个键从建库
+ * 起就在、却从没有被任何地方引用过，说明第五个桶本来就在计划里，只是没做。
+ *
+ * 现在 current 严格等于「到期日 >= asOf」，逾期部分单独成桶。边界仍然每
+ * 30 天一档，四个逾期桶不重不漏地铺满 due_date < asOf，因此
+ * overdue === d1_30 + d31_60 + d61_90 + over90 === total - current。
  *
  * ## 七、为什么桶与提示行在同一条 SQL 里
  *
@@ -335,8 +352,12 @@ export async function getArAging(
         d.contact_id,
         c.name as contact_name,
         coalesce(sum(d.outstanding_base) filter (
-          where d.due_date > ${asOf}::date - interval '30 days'
+          where d.due_date >= ${asOf}::date
         ), 0) as current,
+        coalesce(sum(d.outstanding_base) filter (
+          where d.due_date < ${asOf}::date
+            and d.due_date > ${asOf}::date - interval '30 days'
+        ), 0) as d1_30,
         coalesce(sum(d.outstanding_base) filter (
           where d.due_date <= ${asOf}::date - interval '30 days'
             and d.due_date > ${asOf}::date - interval '60 days'
@@ -363,7 +384,10 @@ export async function getArAging(
 
       select
         null::uuid, null::text,
-        0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric,
+        -- 五个桶 + total + overdue = 7 个 0。上面那一支加了 d1_30 之后，
+        -- union 两支的列数必须一起改——少一个 Postgres 会直接报列数不符，
+        -- 但顺序错了它不会报，只会把 overdue 的值放进 total 那一列。
+        0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric,
         count(*)::bigint,
         coalesce(array_agg(distinct d.currency::text), array[]::text[])
       from doc d
@@ -449,8 +473,12 @@ export async function getApAging(
         d.contact_id,
         c.name as contact_name,
         coalesce(sum(d.outstanding_base) filter (
-          where d.due_date > ${asOf}::date - interval '30 days'
+          where d.due_date >= ${asOf}::date
         ), 0) as current,
+        coalesce(sum(d.outstanding_base) filter (
+          where d.due_date < ${asOf}::date
+            and d.due_date > ${asOf}::date - interval '30 days'
+        ), 0) as d1_30,
         coalesce(sum(d.outstanding_base) filter (
           where d.due_date <= ${asOf}::date - interval '30 days'
             and d.due_date > ${asOf}::date - interval '60 days'
@@ -477,7 +505,10 @@ export async function getApAging(
 
       select
         null::uuid, null::text,
-        0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric,
+        -- 五个桶 + total + overdue = 7 个 0。上面那一支加了 d1_30 之后，
+        -- union 两支的列数必须一起改——少一个 Postgres 会直接报列数不符，
+        -- 但顺序错了它不会报，只会把 overdue 的值放进 total 那一列。
+        0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric, 0::numeric,
         count(*)::bigint,
         coalesce(array_agg(distinct d.currency::text), array[]::text[])
       from doc d

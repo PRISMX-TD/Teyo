@@ -2195,6 +2195,44 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
    报表要能打印出来交给会计。打印时强制回到黑白：屏幕上的暖墨底
    在纸上是一整页碳粉。 */
 
+/* ── 可打印的发票单据（app/(app)/[orgSlug]/invoices/[id]/print） ── */
+.printable-invoice {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-lg);
+  padding: var(--space-8);
+  max-width: 52rem;
+}
+.printable-invoice-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: var(--space-6);
+  flex-wrap: wrap;
+  margin-bottom: var(--space-6);
+}
+.printable-invoice-head h1 { margin: 0; }
+.printable-invoice-org { text-align: right; }
+.printable-invoice-org p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-sm); }
+.printable-invoice-meta {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: var(--space-6);
+  margin-bottom: var(--space-6);
+}
+.printable-invoice-meta dl {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: var(--space-1) var(--space-4);
+  margin: 0;
+}
+.printable-invoice-meta dt { color: var(--text-secondary); font-size: var(--text-sm); }
+.printable-invoice-meta dd { margin: 0; font-size: var(--text-sm); }
+.printable-invoice-bill-to h2 { font-size: var(--text-sm); color: var(--text-secondary); margin: 0 0 var(--space-2); }
+.printable-invoice-bill-to p { margin: 0 0 var(--space-1); font-size: var(--text-sm); }
+.printable-invoice-notes { margin-top: var(--space-6); }
+.printable-invoice-notes h2 { font-size: var(--text-sm); color: var(--text-secondary); margin: 0 0 var(--space-2); }
+
 @media print {
   .sidebar, .floating-dock, .offline-banner, .filters, .primary-button,
   .sidebar-action, .page-header-actions, .report-tabs button:not(.active),
@@ -2215,4 +2253,18 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
   .report-tabs { border-bottom: none; }
   .report-tabs button.active { display: block; color: #000; background: none; font-size: 12pt; font-weight: 700; }
   .report-tabs button.active::after { display: none; }
+
+  /* 单据页：屏幕上的操作区一律不进纸。.no-print 是通用的，不只发票在用。 */
+  .no-print { display: none !important; }
+  .printable-invoice {
+    background: none !important;
+    border: none !important;
+    border-radius: 0;
+    padding: 0;
+    max-width: none;
+  }
+  .printable-invoice-org p,
+  .printable-invoice-meta dt,
+  .printable-invoice-bill-to h2,
+  .printable-invoice-notes h2 { color: #333 !important; }
 }
