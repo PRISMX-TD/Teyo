@@ -24,7 +24,7 @@ export default async function JournalPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/transactions`}>&larr; {t.transaction.listTitle}</Link>
+      <Link href={`/${orgSlug}/transactions`} className="back-link">&larr; {t.transaction.listTitle}</Link>
       <h1>{t.journal.newTitle}</h1>
       <JournalForm
         orgSlug={orgSlug}

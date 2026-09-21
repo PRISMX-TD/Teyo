@@ -99,7 +99,7 @@ export function ImportForm({ orgSlug, locale, i18n, moneyAccounts }: Props) {
           value={moneyAccountId}
           onChange={(e) => setMoneyAccountId(e.target.value)}
         >
-          <option value="">--</option>
+          <option value="">{i18n.transaction.choosePlaceholder}</option>
           {moneyAccounts.map((a) => (
             <option key={a.id} value={a.id}>
               {localizedName({ name_en: a.name_en, name_zh: a.name_zh }, locale)}

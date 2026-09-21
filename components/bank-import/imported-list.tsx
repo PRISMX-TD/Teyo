@@ -223,7 +223,7 @@ export function ImportedList({
         <label>
           {i18n.bankImport.selectAccount}
           <select value={moneyAccountFilter} onChange={(e) => setMoneyAccountFilter(e.target.value)}>
-            <option value="">--</option>
+            <option value="">{i18n.filters.any}</option>
             {moneyAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {localizedName({ name_en: a.name_en, name_zh: a.name_zh }, locale)}
@@ -233,9 +233,9 @@ export function ImportedList({
         </label>
 
         <label>
-          Status
+          {i18n.bankImport.status}
           <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)}>
-            <option value="">--</option>
+            <option value="">{i18n.filters.any}</option>
             <option value="pending">{i18n.bankImport.pending}</option>
             <option value="matched">{i18n.bankImport.matched}</option>
             <option value="ignored">{i18n.bankImport.ignored}</option>
@@ -378,7 +378,7 @@ export function ImportedList({
                                   onClick={() => handleMatch(txn.id, r.id)}
                                   disabled={acting === txn.id}
                                 >
-                                  {r.occurredOn} — {r.description}
+                                  {r.occurredOn} · {r.description}
                                 </button>
                               </li>
                             ))}

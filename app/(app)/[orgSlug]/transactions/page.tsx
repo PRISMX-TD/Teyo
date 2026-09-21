@@ -111,11 +111,15 @@ export default async function TransactionsListPage({
     <>
       <div className="page-header">
         <h1>{t.transaction.listTitle}</h1>
+        {/* 两个动作，一个主一个次。原来两个都是 primary-button——并排两块
+            同样醒目的实色，用户没有被告知该先看哪一个。「记一笔」是这个
+            产品的主路径（PRODUCT.md：用户只做收入/支出/转账三种动作），
+            「记账凭证」是懂复式记账的人才会走的旁路。 */}
         <div className="page-header-actions">
           <Link href={`/${orgSlug}/transactions/new`} className="primary-button">
             {t.transaction.newTitle}
           </Link>
-          <Link href={`/${orgSlug}/transactions/journal`} className="primary-button">
+          <Link href={`/${orgSlug}/transactions/journal`} className="secondary-button">
             {t.journal.newTitle}
           </Link>
         </div>

@@ -10,17 +10,20 @@ import type { MetadataRoute } from 'next';
  * 桌面上是一个绿图标，点开启动画面是绿的，界面却是蓝的，地址栏还是第三种
  * 颜色——四套色值互相不认识。
  *
- * 全部收敛到 --accent。取亮色模式的那一档 #2563eb 而不是暗色的 #3b82f6：
- * 这两个色值都会被白字压在上面（图标里的 T、启动画面的文字），#3b82f6 配
- * 白字只有 3.68:1，#2563eb 是 5.17:1（实测，算法见 globals.css 亮色 token
- * 块的注释）。图标不可能跟着系统主题换色，所以取两者中达标的那个。
+ * 全部收敛到 --accent，方向选绿不选蓝：#0f7a5f 是 PRODUCT.md
+ * 「Brand Commitments」里唯一列出的颜色，也是这个文件与 app/icon.tsx 里
+ * 原本就在用的值。globals.css 的亮色档 --accent 现在就是它本身。
+ *
+ * 取亮色档而不是暗色档 #34a882：图标里是白字压底色，图标不可能跟着系统
+ * 主题换色，所以取两者中配白字达标的那个——白字在 #0f7a5f 上 5.29:1，
+ * 在 #34a882 上只有 2.55:1（实测，算法见 globals.css 的 token 块注释）。
  *
  * background_color 取 --bg-primary 的暗色值：:root 的默认主题就是暗色
  * （globals.css 第一个 token 块），启动画面也该是它。原来的 #f7f9f8 会让
  * 亮色启动画面紧接着闪成暗色的应用界面——正是 theme-script 修掉的那种闪烁，
  * 换了个地方重演。
  */
-const BRAND = '#2563eb';
+const BRAND = '#0f7a5f';
 
 export default function manifest(): MetadataRoute.Manifest {
   return {
@@ -29,7 +32,7 @@ export default function manifest(): MetadataRoute.Manifest {
     description: 'The easy way to own your business.',
     start_url: '/',
     display: 'standalone',
-    background_color: '#0b0e14',
+    background_color: '#0b0a09',
     theme_color: BRAND,
     icons: [
       // 原来只声明了一档 192×192。app/icon.tsx 顶上的注释写着「PWA manifest

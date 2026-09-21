@@ -79,15 +79,15 @@ export function AssetList({ orgSlug, baseCurrency, locale, i18n: t, assets }: Pr
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
                 {asset.isActive && !asset.disposedAt ? (
                   <>
-                    <button onClick={() => handlePost(asset.id)} disabled={pending} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                    <button onClick={() => handlePost(asset.id)} disabled={pending} className="btn-small">
                       {t.fixedAssets.postDepreciation}
                     </button>
-                    <button onClick={() => handleDispose(asset.id)} disabled={pending} className="btn-danger" style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                    <button onClick={() => handleDispose(asset.id)} disabled={pending} className="btn-small btn-danger">
                       {t.fixedAssets.dispose}
                     </button>
                   </>
                 ) : null}
-                <a href={`/${orgSlug}/fixed-assets/${asset.id}`} className="secondary-button" style={{ minHeight: 36, padding: 'var(--space-1) var(--space-3)', fontSize: 'var(--text-xs)' }}>
+                <a href={`/${orgSlug}/fixed-assets/${asset.id}`} className="secondary-button btn-small">
                   {t.common.viewDetails}
                 </a>
               </div>

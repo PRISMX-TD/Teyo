@@ -2,6 +2,7 @@ import type { Tx } from '@/server/db/transaction';
 // 数量的定标整数格式化与库存共用一份实现，理由见 server/actions/purchase_orders.ts
 // 顶部那条 import 上的注释。
 import { formatScaledQuantity, parseQuantityToScaled } from '@/server/repositories/inventory';
+import { toIsoDate } from '@/lib/format';
 
 export type PurchaseOrderRow = {
   id: string;
@@ -263,6 +264,21 @@ export async function getNextPoNumber(tx: Tx, organizationId: string): Promise<s
   return `PO-${next.toString().padStart(5, '0')}`;
 }
 
+/*
+ * postgres.js 把 `date` 列解析成 JS Date，不是字符串。其余每一个
+ * repository 的 mapper 都走 toIsoDate / formatDateOnly 把它转成
+ * 'YYYY-MM-DD'（见 invoices.ts、bills.ts、payments.ts、fixed_assets.ts…），
+ * 只有这里直接 `as string` 断言了一下。
+ *
+ * TypeScript 的类型断言不做任何运行时检查——编译通过，类型看上去是
+ * string，运行时拿到的还是 Date。渲染到 JSX 里 React 就抛
+ * 「Objects are not valid as a React child (found: [object Date])」，
+ * 整页进 error boundary。
+ *
+ * 触发条件是「这条记录填了日期」，而此前的测试数据里没有一条填过，
+ * 所以 1246 个单元测试、tsc、eslint 全绿。是灌进一份带日期的真实数据
+ * 之后打开页面才看见的。
+ */
 function mapPo(row: Record<string, unknown>): PurchaseOrderRow {
   return {
     id: row.id as string,
@@ -271,8 +287,8 @@ function mapPo(row: Record<string, unknown>): PurchaseOrderRow {
     contactName: (row.contact_name as string | null) ?? null,
     poNumber: row.po_number as string,
     status: row.status as PurchaseOrderRow['status'],
-    issueDate: row.issue_date as string,
-    expectedDate: (row.expected_date as string | null) ?? null,
+    issueDate: toIsoDate(row.issue_date as Date | string),
+    expectedDate: row.expected_date ? toIsoDate(row.expected_date as Date | string) : null,
     currency: row.currency as string,
     exchangeRate: BigInt(row.exchange_rate as string),
     baseTotalMinor: BigInt(row.base_total_minor as string),

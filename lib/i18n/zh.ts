@@ -76,7 +76,10 @@ const zh: Translated<typeof en> = {
     bankBalance: '银行存款',
     unpaidInvoices: '未收发票',
     unpaidBills: '未付账单',
-    unpaidCount: '{count} 笔未付 ({overdue} 逾期)',
+    // 占位符必须是 {unpaid}，与 components/dashboard/dashboard-view.tsx 的
+    // replace 对齐；而且两个值都是 formatMoney 的输出（金额），不是笔数。
+    // 原来写作 '{count} 笔未付'，于是页面上原样渲染出 '{count} 笔未付'。
+    unpaidCount: '{unpaid} 未结清（其中 {overdue} 已逾期）',
     monthlyTrends: '月度趋势',
     expenseBreakdown: '支出分类',
     accountBalances: '资金账户',
@@ -180,6 +183,11 @@ const zh: Translated<typeof en> = {
     maxAmount: '最大金额',
     keyword: '搜索备注',
     includeVoided: '包含已作废记录',
+    // 四个筛选下拉的空值项原来写死一根「—」。用户看到一根破折号，
+    // 分不清它是「不限」「无」还是「没读出来」；读屏器把它念成
+    // 「破折号」或者干脆跳过，于是那个选项对读屏用户不存在。
+    any: '不限',
+    activeHint: '有筛选条件正在生效',
     apply: '筛选',
     reset: '重置',
     invalidIgnored: '有筛选条件我们读不懂，已经忽略。下面这份列表没有按那几项筛。',
@@ -725,6 +733,13 @@ const zh: Translated<typeof en> = {
     type: '类型',
     all: '全部',
     method: '方式',
+    // 五种收付方式原来在 components/payments/payment-form.tsx 里硬写成
+    // 英文常量（Cash / Bank Transfer / …），中文界面上这一个下拉是全英文的。
+    methodCash: '现金',
+    methodBankTransfer: '银行转账',
+    methodCheque: '支票',
+    methodOnline: '线上支付',
+    methodOther: '其他',
     reference: '参考号',
     applyToInvoices: '应用于发票',
     applyToBills: '应用于账单',
@@ -790,6 +805,9 @@ const zh: Translated<typeof en> = {
     match: '匹配',
     ignore: '忽略',
     reset: '重置',
+    // 组件里这一栏的标签原来硬写着英文 'Status'——中文界面上突然冒出
+    // 一个英文词，而这个仓库的双语是平权的，不是把中文当补丁。
+    status: '状态',
     matched: '已匹配',
     ignored: '已忽略',
     pending: '待处理',

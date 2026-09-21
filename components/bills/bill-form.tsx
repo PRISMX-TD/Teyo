@@ -265,10 +265,18 @@ export function BillForm({
         <fieldset className="invoice-items">
           <legend>{t.bills.items}</legend>
 
+          {/* 列名，理由同发票表单。账单行只有「描述 + 金额」两栏，用
+              --pair 修饰类换一套列宽——它此前套用的是发票那套四列网格
+              （1fr 80px 120px 120px），金额输入框落在 80px 的那一列里。 */}
+          <div className="invoice-item-head invoice-item-head--pair" aria-hidden="true">
+            <span>{t.bills.description}</span>
+            <span>{t.bills.amount}</span>
+          </div>
+
           {items.map((item, index) => (
-            <div key={index} className="invoice-item-row">
+            <div key={index} className="invoice-item-row invoice-item-row--pair">
               <input
-                placeholder={t.bills.description}
+                placeholder={t.bills.description} aria-label={t.bills.description}
                 value={item.description}
                 onChange={(e) => updateItem(index, 'description', e.target.value)}
                 required
@@ -277,7 +285,7 @@ export function BillForm({
                 type="number"
                 min="0"
                 step="0.01"
-                placeholder={t.bills.amount}
+                placeholder={t.bills.amount} aria-label={t.bills.amount}
                 value={item.amount}
                 onChange={(e) => updateItem(index, 'amount', e.target.value)}
                 required

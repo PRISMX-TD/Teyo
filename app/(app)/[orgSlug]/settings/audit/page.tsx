@@ -26,13 +26,13 @@ export default async function AuditSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+      <Link href={`/${orgSlug}/settings`} className="back-link">
         &larr; {t.nav.settings}
       </Link>
       <h1>{t.audit.title}</h1>
 
       {rows.length === 0 ? (
-        <p>{t.audit.empty}</p>
+        <p className="empty-state">{t.audit.empty}</p>
       ) : (
         <table className="audit-table">
           <thead>

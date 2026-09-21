@@ -14,8 +14,9 @@ type MoreGroup = { label: string; items: MoreLink[] };
  * 移动端 dock 只放得下 5 格（Overview/Transactions/Reports/More/+），
  * 侧栏其余分组、以及从 dock 挪出来的 Settings/主题切换/My account 都在这里——
  * 分组方式与 components/shell/sidebar.tsx 一致，只去掉 dock 上已有入口的三项
- * （Overview/Transactions/Reports）。「切换公司」不在这里：OrgSwitcher 直接
- * 渲染在 app-main 顶部，各屏宽都看得到，侧栏底部那个链接本来就是它的冗余副本。
+ * （Overview/Transactions/Reports）。「切换公司」现在**在**这里：公司切换器
+ * 已经从 app-main 顶部移进侧栏报头，而侧栏在 767px 以下 display:none——
+ * 不在这一页补一个入口，手机用户就再也换不了公司。
  *
  * dock 最初塞了 8 格（含 Settings/主题切换/My account），用 Playwright 在
  * 375px 量过之后才发现问题不是某个格子里的文字被裁——是一整行本身在 320-390px
@@ -108,6 +109,9 @@ export default async function MorePage({
           <h2 className="coa-section-title">{t.nav.account}</h2>
           <div className="settings-index">
             <Link href="/account">{t.nav.account}</Link>
+            {/* 公司切换。'/' 会按公司数量分流：多家时列出来选，一家时直接
+                跳回去（见 app/page.tsx）。 */}
+            <Link href="/">{t.nav.switchCompany}</Link>
             <ThemeToggleButton label={t.nav.toggleTheme} />
           </div>
         </section>

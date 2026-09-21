@@ -12,7 +12,7 @@ export default async function AccountPage() {
 
   return (
     <main className="account-page">
-      <Link href="/" style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+      <Link href="/" className="back-link">
         ← {t.common.back}
       </Link>
       <h1>{t.account.title}</h1>

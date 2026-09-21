@@ -39,7 +39,7 @@ export default function GlobalError({
 }) {
   return (
     <html lang={documentLocale()}>
-      <body style={{ margin: 0, background: '#0b0e14', color: '#e6eaf0' }}>
+      <body style={{ margin: 0, background: '#0b0a09', color: '#f0ede8' }}>
         <style dangerouslySetInnerHTML={{ __html: LANG_CSS }} />
         <main
           style={{
@@ -54,13 +54,13 @@ export default function GlobalError({
             <span className="lang-only-en">{en.errors.pageTitle}</span>
             <span className="lang-only-zh">{zh.errors.pageTitle}</span>
           </h1>
-          <p style={{ margin: '0 0 2rem', color: '#8896a8' }}>
+          <p style={{ margin: '0 0 2rem', color: '#b3aca3' }}>
             <span className="lang-only-en">{en.errors.globalBody}</span>
             <span className="lang-only-zh">{zh.errors.globalBody}</span>
           </p>
 
           {error.digest ? (
-            <p style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.75rem', color: '#566077' }}>
+            <p style={{ fontFamily: 'ui-monospace, monospace', fontSize: '0.75rem', color: '#958e84' }}>
               <span className="lang-only-en">
                 {interpolate(en.errors.reference, { digest: error.digest })}
               </span>
@@ -79,10 +79,12 @@ export default function GlobalError({
               marginTop: '1.5rem',
               font: 'inherit',
               fontWeight: 550,
-              color: '#fff',
-              background: '#3b82f6',
-              border: '1px solid #3b82f6',
-              borderRadius: 4,
+              // 墨压纸，与 .primary-button 同一套（globals.css 的 --btn-*）。
+              // 这一页拿不到 CSS 变量，值只能写死；改调色板时这里要跟着改。
+              color: '#0b0a09',
+              background: '#f0ede8',
+              border: '1px solid #f0ede8',
+              borderRadius: 6,
               cursor: 'pointer',
             }}
           >

@@ -22,7 +22,7 @@ export default async function TaxSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+      <Link href={`/${orgSlug}/settings`} className="back-link">
         &larr; {t.nav.settings}
       </Link>
       <h1>{t.tax.title}</h1>

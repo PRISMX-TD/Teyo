@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from 'next';
-import { Inter, JetBrains_Mono } from 'next/font/google';
+import { Geist, Geist_Mono } from 'next/font/google';
 import './globals.css';
 import { OfflineBanner } from '@/components/shell/offline-banner';
 import { ThemeScript } from '@/components/shell/theme-script';
@@ -27,13 +27,18 @@ export const metadata: Metadata = {
  * 是蓝。用户装完 PWA 看到一个绿色图标，点开是蓝色界面，浏览器地址栏又是
  * 第三种深色——三处各自都"没错"，合起来不像同一个产品。
  *
+ * 收敛的方向选绿不选蓝：#0f7a5f 是 PRODUCT.md「Brand Commitments」里唯一
+ * 列出的颜色，也是 icon/manifest 里已经存在的既成事实。现在 globals.css 的
+ * --accent 亮色档就是它本身，暗色档是它在暗底上提亮到达标对比度的
+ * #34a882（6.66:1，算法与实测见 globals.css 的 token 块注释）。
+ *
  * 统一取强调色而不是底色：themeColor 染的是浏览器工具栏与任务切换器里的
  * 那一条，它在视觉上属于"这个应用的颜色"，不是"这一页的背景"。
  */
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: dark)', color: '#3b82f6' },
-    { media: '(prefers-color-scheme: light)', color: '#2563eb' },
+    { media: '(prefers-color-scheme: dark)', color: '#34a882' },
+    { media: '(prefers-color-scheme: light)', color: '#0f7a5f' },
   ],
   width: 'device-width',
   initialScale: 1,
@@ -43,16 +48,21 @@ export const viewport: Viewport = {
  * 自托管字体：金额与日期必须用等宽 + tabular-nums 才能纵向对齐，
  * 这是记账界面的核心排版纪律，不能依赖用户机器上恰好装了什么。
  * display: 'swap' 保证字体没下载完时文字仍可读。
+ *
+ * Geist 取代 Inter。Inter 是每一个用默认值搭起来的界面的字；Geist 是
+ * 为产品界面画的，字腔更开、数字更方，在 13px 的表格行里比 Inter 稳。
+ * 中日韩字符两者都不覆盖，照旧落到 PingFang SC / 微软雅黑（见 globals.css
+ * 的 --font-text），所以换字只影响拉丁字母、数字与标点。
  */
-const inter = Inter({
+const geist = Geist({
   subsets: ['latin'],
-  variable: '--font-inter',
+  variable: '--font-geist',
   display: 'swap',
 });
 
-const jetbrainsMono = JetBrains_Mono({
+const geistMono = Geist_Mono({
   subsets: ['latin'],
-  variable: '--font-jetbrains-mono',
+  variable: '--font-geist-mono',
   display: 'swap',
 });
 
@@ -102,7 +112,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
     // 属性。删掉它等于为了一个已经修好的 bug 去掉一个本来就需要的东西。
     <html
       lang={locale}
-      className={`${inter.variable} ${jetbrainsMono.variable}`}
+      className={`${geist.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>

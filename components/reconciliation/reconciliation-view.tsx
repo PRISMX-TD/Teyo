@@ -224,7 +224,7 @@ export function ReconciliationView({
             value={selectedAccount}
             onChange={(e) => setSelectedAccount(e.target.value)}
           >
-            <option value="">--</option>
+            <option value="">{t.transaction.choosePlaceholder}</option>
             {moneyAccounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {localizedName(toOption(a), locale)}

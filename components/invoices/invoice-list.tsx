@@ -143,7 +143,11 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
                     {statusLabel[status] ?? status}
                   </span>
                 </td>
-                <td className="numeric money-out">{formatMoney(row.totalMinor, row.currency)}</td>
+                {/* money-in 而不是 money-out：发票是**应收**，这笔钱是往
+                    公司里进的。account/bill/po 三张表标 money-out 是对的，
+                    发票跟着抄过来就错了——旧配色里红绿都很艳，四张表看上去
+                    差不多，所以一直没人发现整页发票金额都是红的。 */}
+                <td className="numeric money-in">{formatMoney(row.totalMinor, row.currency)}</td>
                 <td>
                   <span className="doc-actions">
                     {/* 开具只在草稿上出现。issueInvoice 对其余状态一律抛错，

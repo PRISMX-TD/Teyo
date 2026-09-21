@@ -223,7 +223,15 @@ function TrialBalanceTable({
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={row.code}>
+          /* 预置科目表有 40 个科目，一家刚起步的公司只动了其中七八个——
+             试算平衡表照规矩要把它们全部列出（会计要看到「这个科目确实是
+             零」，而不是「这一行不见了」），于是有数的那几行被三十行空行
+             埋掉。row-zero 只调透明度，不删行、不改导出：数据一行不少，
+             但扫一眼就知道该看哪几行。 */
+          <tr
+            key={row.code}
+            className={row.debitMinor === 0n && row.creditMinor === 0n ? 'row-zero' : undefined}
+          >
             <td>
               {localizedName(toOption(row), locale)}
               {row.isActive ? null : <span className="badge badge-voided">{t.reports.archived}</span>}

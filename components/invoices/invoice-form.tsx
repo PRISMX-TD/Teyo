@@ -238,10 +238,20 @@ export function InvoiceForm({
         <fieldset className="invoice-items">
           <legend>{t.invoices.items}</legend>
 
+          {/* 列名。此前每一行只靠 placeholder 说明这一栏是什么——一开始
+              打字它就消失，第二行往后用户只能靠列宽去猜哪个是数量哪个是
+              单价。表头写一次，所有行共用。aria-hidden：每个输入框自己
+              已经带了 aria-label，读屏器不必再听一遍列名。 */}
+          <div className="invoice-item-head" aria-hidden="true">
+            <span>{t.invoices.description}</span>
+            <span>{t.invoices.quantity}</span>
+            <span>{t.invoices.unitPrice}</span>
+          </div>
+
           {items.map((item, index) => (
             <div key={index} className="invoice-item-row">
               <input
-                placeholder={t.invoices.description}
+                placeholder={t.invoices.description} aria-label={t.invoices.description}
                 value={item.description}
                 onChange={(e) => updateItem(index, 'description', e.target.value)}
                 required
@@ -250,7 +260,7 @@ export function InvoiceForm({
                 type="number"
                 min="0.0001"
                 step="0.0001"
-                placeholder={t.invoices.quantity}
+                placeholder={t.invoices.quantity} aria-label={t.invoices.quantity}
                 value={item.quantity}
                 onChange={(e) => updateItem(index, 'quantity', e.target.value)}
               />
@@ -258,7 +268,7 @@ export function InvoiceForm({
                 type="number"
                 min="0"
                 step="0.01"
-                placeholder={t.invoices.unitPrice}
+                placeholder={t.invoices.unitPrice} aria-label={t.invoices.unitPrice}
                 value={item.unitPrice}
                 onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
                 required

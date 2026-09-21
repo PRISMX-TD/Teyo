@@ -100,12 +100,12 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
                     <input
                       value={editEn}
                       onChange={(e) => setEditEn(e.target.value)}
-                      placeholder={t.settings.nameEn}
+                      placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
                     />
                     <input
                       value={editZh}
                       onChange={(e) => setEditZh(e.target.value)}
-                      placeholder={t.settings.nameZh}
+                      placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
                     />
                     <button onClick={() => handleRename(item.id)} disabled={pending}>
                       {t.settings.save}
@@ -176,12 +176,12 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
           {t.settings.moneyAccount}
         </label>
         <input
-          placeholder={t.settings.nameEn}
+          placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
           value={nameEn}
           onChange={(e) => setNameEn(e.target.value)}
         />
         <input
-          placeholder={t.settings.nameZh}
+          placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
           value={nameZh}
           onChange={(e) => setNameZh(e.target.value)}
         />

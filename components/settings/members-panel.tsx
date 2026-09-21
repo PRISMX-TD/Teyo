@@ -53,7 +53,11 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
   return (
     <div className="members-panel">
       <section>
-        <h2>{t.settings.members}</h2>
+        {/* 页面已经有 <h1>{t.members.title}</h1>（团队），这里原来又写了一个
+            同名的 <h2>，屏幕上连着两行「团队」，读屏器也听到两遍。这一节
+            就是页面的主体，不需要再报一次名；标题隐藏但保留，文档大纲
+            （h1 → h2）不缺一层。 */}
+        <h2 className="visually-hidden">{t.settings.members}</h2>
         <ul>
           {members.map((m) => (
             <li key={m.membershipId}>
@@ -101,18 +105,28 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
       {isOwner ? (
         <section>
           <h2>{t.members.invite}</h2>
+          {/* 原来邮箱框只有 placeholder 没有 <label>，角色下拉连 placeholder
+              都没有。placeholder 一开始打字就消失，用户填到一半忘了这一栏
+              是什么；读屏器对 placeholder 的处理各家不一，有的根本不念。
+              角色下拉更彻底——完全没有名字。 */}
           <div className="invite-form">
-            <input
-              type="email"
-              placeholder={t.members.inviteEmail}
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
-            />
-            <select value={role} onChange={(e) => setRole(e.target.value)}>
-              <option value="admin">{t.members.roleAdmin}</option>
-              <option value="bookkeeper">{t.members.roleBookkeeper}</option>
-              <option value="viewer">{t.members.roleViewer}</option>
-            </select>
+            <label htmlFor="invite-email">
+              {t.members.inviteEmail}
+              <input
+                id="invite-email"
+                type="email"
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+              />
+            </label>
+            <label htmlFor="invite-role">
+              {t.members.inviteRole}
+              <select id="invite-role" value={role} onChange={(e) => setRole(e.target.value)}>
+                <option value="admin">{t.members.roleAdmin}</option>
+                <option value="bookkeeper">{t.members.roleBookkeeper}</option>
+                <option value="viewer">{t.members.roleViewer}</option>
+              </select>
+            </label>
             <button
               disabled={pending || !email}
               onClick={async () => {

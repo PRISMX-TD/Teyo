@@ -65,20 +65,33 @@ export function GeneralLedgerView({
           router.push(`/${orgSlug}/general-ledger?${params.toString()}`);
         }}
       >
-        <select name="account" defaultValue={defaultAccountId}>
-          <option value="">{t.generalLedger.selectAccount}</option>
-          {[...grouped.entries()].map(([type, options]) => (
-            <optgroup key={type} label={type}>
-              {options.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.code} — {localizedName(toOption(a), locale)}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <input type="date" name="from" defaultValue={defaultFrom} />
-        <input type="date" name="to" defaultValue={defaultTo} />
+        {/* 这三个控件此前一个 <label> 都没有。科目下拉还能靠首选项那句
+            「选择科目…」猜出来，两个日期框则完全是裸的——读屏器连着念两次
+            「日期选择器」，哪个是起、哪个是止无从判断，而其余每一张工具条
+            （对账、预算、对账单）都是有标签的。 */}
+        <label htmlFor="gl-account">
+          {t.generalLedger.selectAccount}
+          <select id="gl-account" name="account" defaultValue={defaultAccountId}>
+            <option value="">{t.generalLedger.selectAccount}</option>
+            {[...grouped.entries()].map(([type, options]) => (
+              <optgroup key={type} label={type}>
+                {options.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code} · {localizedName(toOption(a), locale)}
+                  </option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </label>
+        <label htmlFor="gl-from">
+          {t.filters.from}
+          <input id="gl-from" type="date" name="from" defaultValue={defaultFrom} />
+        </label>
+        <label htmlFor="gl-to">
+          {t.filters.to}
+          <input id="gl-to" type="date" name="to" defaultValue={defaultTo} />
+        </label>
         <button type="submit">{t.filters.apply}</button>
       </form>
 
@@ -87,7 +100,7 @@ export function GeneralLedgerView({
       ) : (
         <>
           <h2>
-            {ledger.accountCode} — {localizedName(toOption({ nameEn: ledger.accountNameEn, nameZh: ledger.accountNameZh }), locale)}
+            {ledger.accountCode} · {localizedName(toOption({ nameEn: ledger.accountNameEn, nameZh: ledger.accountNameZh }), locale)}
           </h2>
           <p>
             {t.generalLedger.openingBalance}: {formatMoney(ledger.openingBalance, baseCurrency, locale)}

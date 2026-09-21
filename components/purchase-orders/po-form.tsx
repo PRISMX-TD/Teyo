@@ -190,10 +190,20 @@ export function PoForm({ orgSlug, locale, vendors, currencies, baseCurrency, tax
       <fieldset className="invoice-items">
         <legend>{t.purchaseOrders.items}</legend>
 
+        {/* 列名。此前每一行只靠 placeholder 说明这一栏是什么——一开始
+            打字它就消失，第二行往后用户只能靠列宽去猜哪个是数量哪个是
+            单价。表头写一次，所有行共用。aria-hidden：每个输入框自己
+            已经带了 aria-label，读屏器不必再听一遍列名。 */}
+        <div className="invoice-item-head" aria-hidden="true">
+          <span>{t.purchaseOrders.description}</span>
+          <span>{t.purchaseOrders.quantity}</span>
+          <span>{t.purchaseOrders.unitPrice}</span>
+        </div>
+
         {items.map((item, index) => (
           <div key={index} className="invoice-item-row">
             <input
-              placeholder={t.purchaseOrders.description}
+              placeholder={t.purchaseOrders.description} aria-label={t.purchaseOrders.description}
               value={item.description}
               onChange={(e) => updateItem(index, 'description', e.target.value)}
               required
@@ -202,7 +212,7 @@ export function PoForm({ orgSlug, locale, vendors, currencies, baseCurrency, tax
               type="number"
               min="0.0001"
               step="0.0001"
-              placeholder={t.purchaseOrders.quantity}
+              placeholder={t.purchaseOrders.quantity} aria-label={t.purchaseOrders.quantity}
               value={item.quantity}
               onChange={(e) => updateItem(index, 'quantity', e.target.value)}
             />
@@ -210,7 +220,7 @@ export function PoForm({ orgSlug, locale, vendors, currencies, baseCurrency, tax
               type="number"
               min="0"
               step="0.01"
-              placeholder={t.purchaseOrders.unitPrice}
+              placeholder={t.purchaseOrders.unitPrice} aria-label={t.purchaseOrders.unitPrice}
               value={item.unitPrice}
               onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
               required

@@ -298,22 +298,22 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                         <input
                           value={editSku}
                           onChange={(e) => setEditSku(e.target.value)}
-                          placeholder={t.inventory.sku}
+                          placeholder={t.inventory.sku} aria-label={t.inventory.sku}
                         />
                         <input
                           value={editNameEn}
                           onChange={(e) => setEditNameEn(e.target.value)}
-                          placeholder={t.settings.nameEn}
+                          placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
                         />
                         <input
                           value={editNameZh}
                           onChange={(e) => setEditNameZh(e.target.value)}
-                          placeholder={t.settings.nameZh}
+                          placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
                         />
                         <input
                           value={editUnit}
                           onChange={(e) => setEditUnit(e.target.value)}
-                          placeholder={t.inventory.unit}
+                          placeholder={t.inventory.unit} aria-label={t.inventory.unit}
                         />
                         <div className="inline-edit-row">
                           <select
@@ -332,7 +332,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                             min="0"
                             value={editReorderLevel}
                             onChange={(e) => setEditReorderLevel(e.target.value)}
-                            placeholder={t.inventory.reorderLevel}
+                            placeholder={t.inventory.reorderLevel} aria-label={t.inventory.reorderLevel}
                           />
                         </div>
                         <div className="inline-edit-row">
@@ -439,22 +439,22 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
         <div className="add-form">
           <h3>{t.inventory.addItem}</h3>
           <input
-            placeholder={`${t.inventory.sku}*`}
+            placeholder={`${t.inventory.sku}*`} aria-label={`${t.inventory.sku}*`}
             value={sku}
             onChange={(e) => setSku(e.target.value)}
           />
           <input
-            placeholder={`${t.settings.nameEn}*`}
+            placeholder={`${t.settings.nameEn}*`} aria-label={`${t.settings.nameEn}*`}
             value={nameEn}
             onChange={(e) => setNameEn(e.target.value)}
           />
           <input
-            placeholder={`${t.settings.nameZh}*`}
+            placeholder={`${t.settings.nameZh}*`} aria-label={`${t.settings.nameZh}*`}
             value={nameZh}
             onChange={(e) => setNameZh(e.target.value)}
           />
           <input
-            placeholder={`${t.inventory.unit}*`}
+            placeholder={`${t.inventory.unit}*`} aria-label={`${t.inventory.unit}*`}
             value={unit}
             onChange={(e) => setUnit(e.target.value)}
           />
@@ -468,7 +468,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
           <input
             type="number"
             min="0"
-            placeholder={t.inventory.reorderLevel}
+            placeholder={t.inventory.reorderLevel} aria-label={t.inventory.reorderLevel}
             value={reorderLevel}
             onChange={(e) => setReorderLevel(e.target.value)}
           />

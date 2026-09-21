@@ -421,7 +421,7 @@ export function RecurringList({
               value={form.categoryId}
               onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
             >
-              <option value="">--</option>
+              <option value="">{t.transaction.choosePlaceholder}</option>
               {categories
                 .filter((c) =>
                   form.kind === 'income'

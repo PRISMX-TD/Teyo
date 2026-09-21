@@ -71,7 +71,7 @@ export function AssetForm({
     if (decimals === 0) {
       return locale === 'zh'
         ? `${currency} 没有小数位，请填整数金额。`
-        : `${currency} amounts have no decimal places — enter a whole number.`;
+        : `${currency} amounts have no decimal places. Enter a whole number.`;
     }
     return locale === 'zh'
       ? `${currency} 最多 ${decimals} 位小数。`
@@ -268,7 +268,7 @@ export function AssetForm({
       <div className="form-field">
         <label>{t.fixedAssets.assetAccount}</label>
         <select value={assetAccountId} onChange={(e) => setAssetAccountId(e.target.value)}>
-          <option value="">--</option>
+          <option value="">{t.transaction.choosePlaceholder}</option>
           {assetAccounts.map((acc) => (
             <option key={acc.id} value={acc.id}>{accountName(acc)}</option>
           ))}
@@ -278,7 +278,7 @@ export function AssetForm({
       <div className="form-field">
         <label>{t.fixedAssets.depreciationExpense}</label>
         <select value={depnExpenseAccountId} onChange={(e) => setDepnExpenseAccountId(e.target.value)}>
-          <option value="">--</option>
+          <option value="">{t.transaction.choosePlaceholder}</option>
           {expenseAccounts.map((acc) => (
             <option key={acc.id} value={acc.id}>{accountName(acc)}</option>
           ))}
@@ -288,7 +288,7 @@ export function AssetForm({
       <div className="form-field">
         <label>{t.fixedAssets.accumulatedDepreciation}</label>
         <select value={depnAccumAccountId} onChange={(e) => setDepnAccumAccountId(e.target.value)}>
-          <option value="">--</option>
+          <option value="">{t.transaction.choosePlaceholder}</option>
           {assetAccounts.map((acc) => (
             <option key={acc.id} value={acc.id}>{accountName(acc)}</option>
           ))}

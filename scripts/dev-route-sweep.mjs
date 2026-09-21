@@ -13,6 +13,14 @@
  * 这个脚本不替代 E2E，它只回答一个问题——**每一页都打得开吗**。但那个
  * 问题此前一次都没被自动问过，而它的答案曾经是「有几页打不开」。
  *
+ * 「打得开」不等于「200」。React 的 error boundary 接住一个渲染期异常
+ * 之后，响应码照样是 200，屏幕上却是「出了点问题」。重设计那一轮就踩到
+ * 两次：projects 与 purchase-orders 的 repository 把 date 列 `as string`
+ * 断言了一下——断言不做任何运行时检查，拿到的还是 Date，渲染进 JSX 就抛
+ * 「Objects are not valid as a React child」。两页全白，状态码 200，
+ * tsc / eslint / 1246 个单元测试全绿。所以下面每一条 200 还要再看一眼
+ * HTML 里有没有 error boundary 的标记。
+ *
  * 路由清单从 app/ 目录扫出来，不手写：手写的清单会在下一次加页面时悄悄
  * 漏掉，而漏掉的那一页正是没人验证过的那一页。
  *
@@ -81,6 +89,16 @@ const routes = discoverRoutes(path.join(rootDir, 'app'))
  * 或稳定的 class 名，不是随手抓的实现细节：文案改了这个检查会红，而那
  * 正是应该有人看一眼的时刻。
  */
+/**
+ * app/error.tsx 渲染时才会出现的标记。
+ *
+ * 不能拿 errors.pageTitle 那句文案当判据：整份 i18n catalog 会被序列化进
+ * 每一页的 RSC flight 负载（Sidebar 是客户端组件，接的是整个 Messages
+ * 对象），于是那句话在每一页的 HTML 里都在，只是没被渲染出来。第一版这么
+ * 写的时候，45 条路由报了 37 条失败，而那些页面在浏览器里好好的。
+ */
+const ERROR_BOUNDARY_MARKER = 'class="error-page"';
+
 const CONTENT_CHECKS = {
   '/{slug}/settings/year-end': ['年度结转'],
   '/{slug}/payments/new': ['汇率', '核销'],
@@ -105,9 +123,11 @@ for (const route of routes) {
     const template = route.replace(slug, '{slug}');
     const expected = CONTENT_CHECKS[template];
     let missing;
-    if (expected && response.status === 200) {
+    let crashed = false;
+    if (response.status === 200) {
       const html = await response.text();
-      missing = expected.filter((needle) => !html.includes(needle));
+      crashed = html.includes(ERROR_BOUNDARY_MARKER);
+      if (expected) missing = expected.filter((needle) => !html.includes(needle));
     }
 
     results.push({
@@ -115,21 +135,24 @@ for (const route of routes) {
       status: response.status,
       location: response.headers.get('location'),
       missing: missing && missing.length > 0 ? missing : undefined,
+      crashed: crashed || undefined,
     });
   } catch (error) {
     results.push({ route, status: 0, error: error.message });
   }
 }
 
-const bad = results.filter((r) => r.status >= 400 || r.status === 0 || r.missing);
+const bad = results.filter((r) => r.status >= 400 || r.status === 0 || r.missing || r.crashed);
 const redirects = results.filter((r) => r.status >= 300 && r.status < 400);
 const ok = results.filter((r) => r.status >= 200 && r.status < 300);
 
 for (const r of results) {
-  const mark = r.status >= 400 || r.status === 0 || r.missing ? '✗' : r.status >= 300 ? '→' : '✓';
+  const mark = r.status >= 400 || r.status === 0 || r.missing || r.crashed ? '✗' : r.status >= 300 ? '→' : '✓';
   const extra = r.error
     ? ` ${r.error}`
-    : r.missing
+    : r.crashed
+      ? '  ← 200，但渲染时抛异常，页面是 error boundary'
+      : r.missing
       ? `  ← 页面打得开，但找不到：${r.missing.join('、')}`
       : r.location
         ? ` -> ${r.location}`

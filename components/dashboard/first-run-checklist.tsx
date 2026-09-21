@@ -81,7 +81,7 @@ export function FirstRunChecklist(props: {
             {item.done ? (
               <span>
                 {item.label}
-                <span className="visually-hidden"> — {t.overview.checklistDone}</span>
+                <span className="visually-hidden">, {t.overview.checklistDone}</span>
               </span>
             ) : (
               <Link href={item.href}>{item.label}</Link>

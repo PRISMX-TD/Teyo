@@ -204,16 +204,26 @@ export function ProjectList({
               </div>
               {/* 第三层：操作按钮组 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-1)' }}>
-                <button onClick={() => startEdit(project)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>{t.common.edit}</button>
-                <button onClick={() => setExpanded(expanded === project.id ? null : project.id)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
-                  {expanded === project.id ? '−' : '+'}
+                <button onClick={() => startEdit(project)} className="btn-small">{t.common.edit}</button>
+                {/* 展开盈利分析。原来这颗按钮的全部内容就是一个 '+' 或 '−'，
+                    没有 aria-label、没有 aria-expanded——读屏器念出来是
+                    「加号，按钮」，既不知道它是干什么的，也不知道现在是开是关。
+                    符号留着（视觉上够用），语义交给 aria。 */}
+                <button
+                  onClick={() => setExpanded(expanded === project.id ? null : project.id)}
+                  className="btn-small"
+                  aria-expanded={expanded === project.id}
+                  aria-controls={`project-detail-${project.id}`}
+                  aria-label={`${t.projects.profitability}: ${project.name}`}
+                >
+                  <span aria-hidden="true">{expanded === project.id ? '−' : '+'}</span>
                 </button>
                 {(NEXT_STATUS[project.status] ?? []).map((ns) => (
                   <button
                     key={ns}
                     onClick={() => handleStatusChange(project.id, ns)}
                     disabled={pending}
-                    style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}
+                    className="btn-small"
                   >
                     {statusLabel[ns] ?? ns}
                   </button>
@@ -222,7 +232,7 @@ export function ProjectList({
             </div>
 
             {expanded === project.id && profit ? (
-              <div style={{ marginTop: 8 }}>
+              <div id={`project-detail-${project.id}`} style={{ marginTop: 'var(--space-3)' }}>
                 <ProjectProfitability
                   profitability={profit}
                   locale={locale}
@@ -231,8 +241,10 @@ export function ProjectList({
               </div>
             ) : null}
 
+            {/* 项目描述原来是写死的 style={{ color: '#666' }}：它既不跟主题走，
+                在暗底（#0b0a09）上又只有 3.1:1，不到 WCAG AA 的 4.5。 */}
             {expanded === project.id && project.description ? (
-              <p style={{ color: '#666', marginTop: 4 }}>{project.description}</p>
+              <p className="field-hint">{project.description}</p>
             ) : null}
           </div>
         );

@@ -48,6 +48,24 @@ const MONTH_LABELS_ZH = [
   '7月', '8月', '9月', '10月', '11月', '12月',
 ];
 
+/**
+ * Y 轴刻度。原来是 `(Number(val) / 100).toFixed(0)`，于是轴上写的是
+ * 「9597 / 19193 / 28790」——把最小单位除以 100 得到的原始数，既没有千位
+ * 分隔也没有量级提示，读者要在心里数位数才知道那是九千还是九万。
+ *
+ * 轴刻度的职责是给柱子一个量级参照，不是报准确金额（准确金额在下面的
+ * 列表里）。所以取「9.6k」这种一眼可读的近似：千位以下直接写整数，
+ * 千位以上保留一位小数，百万以上转 m。不带货币符号——轴上重复四遍
+ * 「RM」是噪音，货币在页面别处已经说清楚了。
+ */
+function formatAxisTick(minorValue: number): string {
+  const units = minorValue / 100;
+  if (units === 0) return '0';
+  if (units >= 1_000_000) return `${(units / 1_000_000).toFixed(1)}m`;
+  if (units >= 1_000) return `${(units / 1_000).toFixed(1)}k`;
+  return units.toFixed(0);
+}
+
 export function DashboardView({ kpis, trends, expenses, balances, locale, baseCurrency, orgSlug, i18n, checklist, role, uncertainCount }: Props) {
   const monthLabels = locale === 'zh' ? MONTH_LABELS_ZH : MONTH_LABELS_EN;
 
@@ -140,15 +158,31 @@ function DashboardQuestions({
     },
   ];
 
+  const [lead, ...rest] = questions;
+
+  /* 一个 44px 的首要数字 + 三个 22px 的次要数字，不是四张等宽卡片。
+     四个同等大小的东西并排等于没有重点；而「这个月赚钱了吗」正是用户
+     打开这一页想知道的那一件事，其余三个是它的上下文。 */
   return (
-    <section className="dashboard-questions">
-      {questions.map((q) => (
-        <Link key={q.key} href={q.href} className="question-card">
-          <h3>{q.question}</h3>
-          <p className={`question-value ${q.className}`}>{formatMoney(q.value, baseCurrency, locale)}</p>
-          <p className="question-hint">{q.hint}</p>
-        </Link>
-      ))}
+    <section className="kpi-band" aria-label={i18n.overview.title}>
+      <Link href={lead.href} className="kpi-lead">
+        <span className="kpi-question">{lead.question}</span>
+        <span className={`kpi-value ${lead.className}`}>
+          {formatMoney(lead.value, baseCurrency, locale)}
+        </span>
+        <span className="kpi-hint">{lead.hint}</span>
+      </Link>
+      <div className="kpi-rest">
+        {rest.map((q) => (
+          <Link key={q.key} href={q.href} className="kpi-item">
+            <span className="kpi-question">{q.question}</span>
+            <span className={`kpi-value ${q.className}`}>
+              {formatMoney(q.value, baseCurrency, locale)}
+            </span>
+            <span className="kpi-hint">{q.hint}</span>
+          </Link>
+        ))}
+      </div>
     </section>
   );
 }
@@ -203,7 +237,7 @@ function MonthlyTrendsChart({
                   边框色。 */}
               <line x1={padLeft} y1={y} x2={chartW - padRight} y2={y} style={{stroke:'var(--border-primary)',strokeWidth:1}} />
               <text x={padLeft - 6} y={y + 4} textAnchor="end" style={{fontSize:10,fill:'var(--text-tertiary)'}}>
-                {i === 0 ? '0' : (Number(val) / 100).toFixed(0)}
+                {formatAxisTick(val)}
               </text>
             </g>
           );
@@ -216,7 +250,7 @@ function MonthlyTrendsChart({
           return (
             <g key={t.month}>
               <rect x={groupX + groupW / 2 - barW - gap / 2} y={barCenterY - incomeH} width={barW} height={incomeH || 1} style={{fill:'var(--green)',rx:1}} />
-              <rect x={groupX + groupW / 2 + gap / 2} y={barCenterY - expenseH} width={barW} height={expenseH || 1} style={{fill:'var(--accent)',rx:1}} />
+              <rect x={groupX + groupW / 2 + gap / 2} y={barCenterY - expenseH} width={barW} height={expenseH || 1} style={{fill:'var(--red)',rx:1}} />
               <text x={groupX + groupW / 2} y={chartH - 6} textAnchor="middle" style={{fontSize:10,fill:'var(--text-tertiary)'}}>
                 {monthLabels[Number(t.month.slice(5, 7)) - 1]}
               </text>
@@ -225,7 +259,7 @@ function MonthlyTrendsChart({
         })}
         <rect x={chartW - 170} y={padTop} width="8" height="8" style={{fill:'var(--green)',rx:1}} />
         <text x={chartW - 156} y={padTop + 7} style={{fontSize:10,fill:'var(--text-secondary)'}}>{i18n.transaction.income}</text>
-        <rect x={chartW - 95} y={padTop} width="8" height="8" style={{fill:'var(--accent)',rx:1}} />
+        <rect x={chartW - 95} y={padTop} width="8" height="8" style={{fill:'var(--red)',rx:1}} />
         <text x={chartW - 81} y={padTop + 7} style={{fontSize:10,fill:'var(--text-secondary)'}}>{i18n.transaction.expense}</text>
       </svg>
     </section>

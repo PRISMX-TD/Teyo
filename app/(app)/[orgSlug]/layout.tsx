@@ -4,7 +4,6 @@ import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 import { Sidebar } from '@/components/shell/sidebar';
 import { FloatingDock } from '@/components/shell/floating-dock';
-import { OrgSwitcher } from '@/components/shell/org-switcher';
 import React from 'react';
 
 export default async function AppLayout({
@@ -37,14 +36,17 @@ export default async function AppLayout({
       <a href="#app-main-content" className="skip-link">
         {t.nav.skipToContent}
       </a>
-      <Sidebar orgSlug={orgSlug} i18n={t} />
+      <Sidebar
+        orgSlug={orgSlug}
+        i18n={t}
+        orgs={allOrgs.map((o) => ({ id: o.id, slug: o.slug, name: o.name }))}
+      />
       {/* tabIndex={-1}：跳转链接把焦点送到这里，<main> 本身不可聚焦的话，
           浏览器只会滚动过去而焦点仍留在链接上，下一次 Tab 又回到导航。 */}
+      {/* 公司切换器已移进侧栏报头（见 components/shell/sidebar.tsx）。
+          它原来浮在正文最上面，每一页的标题都被一个下拉框压在下面——
+          切换公司是一个导航动作，属于导航区，不属于内容区。 */}
       <main id="app-main-content" className="app-main" tabIndex={-1}>
-        <OrgSwitcher
-          current={orgSlug}
-          orgs={allOrgs.map((o) => ({ id: o.id, slug: o.slug, name: o.name }))}
-        />
         {children}
       </main>
       <FloatingDock orgSlug={orgSlug} i18n={t} />

@@ -1,4 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
+import { toIsoDate } from '@/lib/format';
 
 export type ProjectRow = {
   id: string;
@@ -205,6 +206,21 @@ export async function getProjectProfitability(
   };
 }
 
+/*
+ * postgres.js 把 `date` 列解析成 JS Date，不是字符串。其余每一个
+ * repository 的 mapper 都走 toIsoDate / formatDateOnly 把它转成
+ * 'YYYY-MM-DD'（见 invoices.ts、bills.ts、payments.ts、fixed_assets.ts…），
+ * 只有这里直接 `as string` 断言了一下。
+ *
+ * TypeScript 的类型断言不做任何运行时检查——编译通过，类型看上去是
+ * string，运行时拿到的还是 Date。渲染到 JSX 里 React 就抛
+ * 「Objects are not valid as a React child (found: [object Date])」，
+ * 整页进 error boundary。
+ *
+ * 触发条件是「这条记录填了日期」，而此前的测试数据里没有一条填过，
+ * 所以 1246 个单元测试、tsc、eslint 全绿。是灌进一份带日期的真实数据
+ * 之后打开页面才看见的。
+ */
 function mapProject(row: Record<string, unknown>): ProjectRow {
   return {
     id: row.id as string,
@@ -215,8 +231,8 @@ function mapProject(row: Record<string, unknown>): ProjectRow {
     contactName: (row.contact_name as string | null) ?? null,
     status: row.status as 'active' | 'completed' | 'cancelled',
     budgetMinor: row.budget_minor ? BigInt(row.budget_minor as string) : null,
-    startDate: (row.start_date as string | null) ?? null,
-    endDate: (row.end_date as string | null) ?? null,
+    startDate: row.start_date ? toIsoDate(row.start_date as Date | string) : null,
+    endDate: row.end_date ? toIsoDate(row.end_date as Date | string) : null,
     isActive: row.is_active as boolean,
     createdAt: (row.created_at as string),
   };

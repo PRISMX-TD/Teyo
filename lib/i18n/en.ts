@@ -63,7 +63,10 @@ const en = {
     bankBalance: 'Bank balance',
     unpaidInvoices: 'Unpaid invoices',
     unpaidBills: 'Unpaid bills',
-    unpaidCount: '{count} unpaid ({overdue} overdue)',
+    // 占位符必须是 {unpaid}，与 components/dashboard/dashboard-view.tsx 的
+    // replace 对齐；而且两个值都是 formatMoney 的输出（金额），不是笔数。
+    // 原来写作 '{count} unpaid'，于是页面上原样渲染出 '{count} unpaid'。
+    unpaidCount: '{unpaid} outstanding ({overdue} overdue)',
     monthlyTrends: 'Monthly Trends',
     expenseBreakdown: 'Expense Breakdown',
     accountBalances: 'Money accounts',
@@ -138,8 +141,8 @@ const en = {
     buyStock: 'I bought stock to sell',
     moveMoney: 'I moved money between my own accounts',
     notSure: "I'm not sure what this was",
-    moneyInHint: 'Someone paid you — a sale, a refund, anything coming in.',
-    moneyOutHint: 'You paid for something — a bill, a supplier, an expense.',
+    moneyInHint: 'Someone paid you: a sale, a refund, anything coming in.',
+    moneyOutHint: 'You paid for something: a bill, a supplier, an expense.',
     buyStockHint: 'You bought goods to resell later.',
     moveMoneyHint: 'Moving cash between your own bank and cash accounts, not a sale or expense.',
     notSureHint: "Record it now, sort out the category later. The books won't be wrong for it.",
@@ -147,13 +150,13 @@ const en = {
     directionIn: 'Money came in',
     directionOut: 'Money went out',
     directionRequired: 'Choose whether the money came in or went out.',
-    useAdvanced: 'Skip this — I know which account and category to use',
+    useAdvanced: 'Skip this, I know which account and category to use',
   },
   uncertain: {
     title: 'Needs a decision',
     empty: 'Nothing waiting. Everything you have recorded is sorted.',
     badge: '{count} to sort',
-    explain: 'These are entries you were not sure about. Your books still balance — to give one a category, void it and re-enter it as a normal money in or money out.',
+    explain: 'These are entries you were not sure about. Your books still balance. To give one a category, void it and re-enter it as a normal money in or money out.',
     resolve: 'Void & re-enter',
   },
   filters: {
@@ -167,6 +170,11 @@ const en = {
     maxAmount: 'Max amount',
     keyword: 'Search notes',
     includeVoided: 'Include voided records',
+    // 四个筛选下拉的空值项原来写死一根「—」。用户看到一根破折号，分不清
+    // 它是「不限」「无」还是「没读出来」；读屏器把它念成「破折号」或者
+    // 干脆跳过，于是那个选项对读屏用户不存在。
+    any: 'Any',
+    activeHint: 'Filters are active',
     apply: 'Apply',
     reset: 'Reset',
     invalidIgnored: 'Some filters were not in a form we could read, so they were ignored. The list below is unfiltered on those.',
@@ -194,7 +202,7 @@ const en = {
     statusInvited: 'Invited',
     statusSuspended: 'Suspended',
     inviteLinkTitle: 'Invitation link for {email}',
-    inviteLinkHint: 'We do not send the email for you — copy this link and send it to them yourself (WhatsApp, email, however you normally reach them).',
+    inviteLinkHint: 'We do not send the email for you. Copy this link and send it to them yourself (WhatsApp, email, however you normally reach them).',
     inviteLinkOnce: 'This link is shown once. If you lose it, revoke the invitation and send a new one.',
     copyLink: 'Copy link',
     copied: 'Copied',
@@ -222,7 +230,7 @@ const en = {
     lockNone: 'No period is locked',
     lockRemove: 'Remove lock',
     lockWarning:
-      'Locking means nobody — including you — can add or change any record dated on or before this date, until the lock is removed.',
+      'Locking means nobody (including you) can add or change any record dated on or before this date, until the lock is removed.',
     name: 'Name',
     active: 'Active',
     inactive: 'Hidden',
@@ -297,7 +305,7 @@ const en = {
     alreadyClosedTitle: 'Already closed',
     alreadyClosed: 'The year {start} to {end} was closed with a profit of {amount}.',
     lockSuggestion:
-      'Now is a good moment to lock the books through the last day of that year, so nobody changes a figure you have already reported. Locking stays a separate, deliberate step — closing the year does not lock it for you.',
+      'Now is a good moment to lock the books through the last day of that year, so nobody changes a figure you have already reported. Locking stays a separate, deliberate step: closing the year does not lock it for you.',
     goToLock: 'Go to the lock setting',
     historyTitle: 'Closings so far',
     historyEmpty: 'No year has been closed yet.',
@@ -485,7 +493,7 @@ const en = {
     voidTitle: 'Void invoice {number}',
     voidReason: 'Why are you voiding it?',
     voidReasonHint: 'This is kept with the record. "Customer cancelled the order", "Wrong amount", and so on.',
-    voidReasonRequired: 'Write a reason first — a voided invoice has to say why.',
+    voidReasonRequired: 'Write a reason first. A voided invoice has to say why.',
     voidConfirm: 'Void this invoice',
     notFound: 'This invoice was not found in this company.',
     backToList: 'Back to invoices',
@@ -532,7 +540,7 @@ const en = {
     voidTitle: 'Void bill {number}',
     voidReason: 'Why are you voiding it?',
     voidReasonHint: 'This is kept with the record. "Vendor sent it twice", "Wrong amount", and so on.',
-    voidReasonRequired: 'Write a reason first — a voided bill has to say why.',
+    voidReasonRequired: 'Write a reason first. A voided bill has to say why.',
     voidConfirm: 'Void this bill',
     notFound: 'This bill was not found in this company.',
     backToList: 'Back to bills',
@@ -725,6 +733,13 @@ const en = {
     type: 'Type',
     all: 'All',
     method: 'Method',
+    // 五种收付方式原来在 components/payments/payment-form.tsx 里硬写成
+    // 英文常量（Cash / Bank Transfer / …），中文界面上这一个下拉是全英文的。
+    methodCash: 'Cash',
+    methodBankTransfer: 'Bank transfer',
+    methodCheque: 'Cheque',
+    methodOnline: 'Online',
+    methodOther: 'Other',
     reference: 'Reference',
     applyToInvoices: 'Apply to Invoices',
     applyToBills: 'Apply to Bills',
@@ -743,9 +758,9 @@ const en = {
     // 预收 / 预付
     onAccount: 'Leave on account for now',
     onAccountHintReceived:
-      'Money received before you have raised an invoice is held under Customer Deposits — that is money you owe the customer until you deliver, not income. Apply it to an invoice later.',
+      'Money received before you have raised an invoice is held under Customer Deposits. Until you deliver, that is money you owe the customer, not income. Apply it to an invoice later.',
     onAccountHintMade:
-      'Money paid before the supplier has billed you is held under Supplier Deposits — that is something the supplier owes you, not an expense yet. Apply it to a bill later.',
+      'Money paid before the supplier has billed you is held under Supplier Deposits. That is something the supplier owes you, not an expense yet. Apply it to a bill later.',
     onAccountAmount: 'Held on account: {amount}',
     unapplied: 'On account',
     apply: 'Apply',
@@ -847,6 +862,9 @@ const en = {
     match: 'Match',
     ignore: 'Ignore',
     reset: 'Reset',
+    // 组件里这一栏的标签原来硬写着英文 'Status'——中文界面上突然冒出
+    // 一个英文词，而这个仓库的双语是平权的，不是把中文当补丁。
+    status: 'Status',
     matched: 'Matched',
     ignored: 'Ignored',
     pending: 'Pending',
@@ -859,11 +877,11 @@ const en = {
     // 月和日对调，而金额全对——没有任何地方看得出来。
     dateFormat: 'Date order in this file',
     dateFormatAuto: 'Work it out from the file',
-    dateFormatIso: 'Year first — 2026-03-31',
-    dateFormatDmy: 'Day first — 31/03/2026',
-    dateFormatMdy: 'Month first — 03/31/2026',
+    dateFormatIso: 'Year first (2026-03-31)',
+    dateFormatDmy: 'Day first (31/03/2026)',
+    dateFormatMdy: 'Month first (03/31/2026)',
     dateFormatHint:
-      'Leave this on automatic. We only ask when the file itself cannot tell us — a file where every day is 12 or below reads the same either way. Most Malaysian banks put the day first.',
+      'Leave this on automatic. We only ask when the file itself cannot tell us: a file where every day is 12 or below reads the same either way. Most Malaysian banks put the day first.',
     // 从对账单行直接生成交易
     category: 'Category',
     categoryPrompt: 'Pick a category',

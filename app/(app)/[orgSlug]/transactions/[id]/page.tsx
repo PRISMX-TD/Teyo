@@ -244,7 +244,7 @@ function Layout({
 }) {
   return (
     <>
-      <Link href={`/${orgSlug}/transactions`}>&larr; {t.transaction.listTitle}</Link>
+      <Link href={`/${orgSlug}/transactions`} className="back-link">&larr; {t.transaction.listTitle}</Link>
       {children}
     </>
   );

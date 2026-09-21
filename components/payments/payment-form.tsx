@@ -70,13 +70,14 @@ function minorOrZero(value: string, exponent: number): bigint {
   }
 }
 
+/** 收付方式。文案走 catalog，不在这里写死——见 lib/i18n 里那几条注释。 */
 const METHODS = [
-  { value: 'cash', label: 'Cash' },
-  { value: 'bank_transfer', label: 'Bank Transfer' },
-  { value: 'cheque', label: 'Cheque' },
-  { value: 'online', label: 'Online' },
-  { value: 'other', label: 'Other' },
-];
+  { value: 'cash', key: 'methodCash' },
+  { value: 'bank_transfer', key: 'methodBankTransfer' },
+  { value: 'cheque', key: 'methodCheque' },
+  { value: 'online', key: 'methodOnline' },
+  { value: 'other', key: 'methodOther' },
+] as const;
 
 export function PaymentForm({
   orgSlug,
@@ -446,7 +447,7 @@ export function PaymentForm({
       <select id="method" value={method} onChange={(e) => setMethod(e.target.value)}>
         {METHODS.map((m) => (
           <option key={m.value} value={m.value}>
-            {m.label}
+            {i18n.payments[m.key]}
           </option>
         ))}
       </select>
@@ -490,7 +491,7 @@ export function PaymentForm({
                         }
                       />
                       <span>
-                        {inv.invoiceNumber} — {inv.customerName}{' '}
+                        {inv.invoiceNumber} · {inv.customerName}{' '}
                         {/* 金额一律由 formatMoney 格式化：Number(minor)/100
                             对零位小数的币种（JPY 等）直接差两个数量级。 */}
                         ({formatMoney(remainingMinor, inv.currency)})
@@ -522,7 +523,7 @@ export function PaymentForm({
                         onChange={() => toggleItem({ id: bill.id, kind: 'bill', remainingMinor })}
                       />
                       <span>
-                        {bill.billNumber} — {bill.vendorName} (
+                        {bill.billNumber} · {bill.vendorName} (
                         {formatMoney(remainingMinor, bill.currency)})
                       </span>
                       {isSelected ? (

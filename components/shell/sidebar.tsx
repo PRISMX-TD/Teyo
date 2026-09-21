@@ -1,13 +1,17 @@
 'use client';
 
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { useTheme } from './use-theme';
 
+type Org = { id: string; slug: string; name: string };
+
 type Props = {
   orgSlug: string;
   i18n: ReturnType<typeof getMessages>;
+  /** 当前公司与用户属于的全部公司。前者用于报头，后者决定是否渲染切换下拉。 */
+  orgs: Org[];
 };
 
 type NavGroup = {
@@ -15,9 +19,11 @@ type NavGroup = {
   items: { href: string; label: string }[];
 };
 
-export function Sidebar({ orgSlug, i18n }: Props) {
+export function Sidebar({ orgSlug, i18n, orgs }: Props) {
   const pathname = usePathname();
+  const router = useRouter();
   const { theme, toggle } = useTheme();
+  const currentOrg = orgs.find((o) => o.slug === orgSlug);
 
   const groups: NavGroup[] = [
     {
@@ -69,7 +75,40 @@ export function Sidebar({ orgSlug, i18n }: Props) {
 
   return (
     <aside className="sidebar">
-      <div className="sidebar-brand">{i18n.brand.name}</div>
+      {/* 报头。公司名以前只在「有两家以上公司」时才由 <select> 露出来
+          （OrgSwitcher 在 orgs.length <= 1 时 return null），于是单公司的
+          用户从头到尾不知道自己在哪家公司的账里——而这个应用的卖点恰恰是
+          「一个人可以管几套账」。现在公司名常驻，切换下拉只在真的有得切
+          的时候才追加在它下面。 */}
+      <div className="sidebar-masthead">
+        <span className="sidebar-brand">{i18n.brand.name}</span>
+        {currentOrg ? (
+          <span className="sidebar-org" title={currentOrg.name}>
+            {currentOrg.name}
+          </span>
+        ) : null}
+        {orgs.length > 1 ? (
+          <>
+            <label className="visually-hidden" htmlFor="sidebar-org-select">
+              {i18n.nav.switchCompany}
+            </label>
+            <select
+              id="sidebar-org-select"
+              className="sidebar-org-select"
+              value={orgSlug}
+              onChange={(e) => {
+                if (e.target.value !== orgSlug) router.push(`/${e.target.value}`);
+              }}
+            >
+              {orgs.map((org) => (
+                <option key={org.id} value={org.slug}>
+                  {org.name}
+                </option>
+              ))}
+            </select>
+          </>
+        ) : null}
+      </div>
 
       <Link href={`/${orgSlug}/transactions/new`} className="sidebar-action">
         {i18n.transaction.newTitle}

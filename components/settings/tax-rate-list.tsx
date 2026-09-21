@@ -125,18 +125,18 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
               <input
                 value={editNameEn}
                 onChange={(e) => setEditNameEn(e.target.value)}
-                placeholder={t.settings.nameEn}
+                placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
               />
               <input
                 value={editNameZh}
                 onChange={(e) => setEditNameZh(e.target.value)}
-                placeholder={t.settings.nameZh}
+                placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
               />
               <input
                 type="number"
                 value={editRateBps}
                 onChange={(e) => setEditRateBps(Number(e.target.value))}
-                placeholder={t.tax.rate}
+                placeholder={t.tax.rate} aria-label={t.tax.rate}
               />
               <label className="checkbox-label">
                 <input
@@ -198,18 +198,18 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
         <div className="add-form">
           <h3>{t.tax.addRate}</h3>
           <input
-            placeholder={t.settings.nameEn}
+            placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
             value={nameEn}
             onChange={(e) => setNameEn(e.target.value)}
           />
           <input
-            placeholder={t.settings.nameZh}
+            placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
             value={nameZh}
             onChange={(e) => setNameZh(e.target.value)}
           />
           <input
             type="number"
-            placeholder={t.tax.rate}
+            placeholder={t.tax.rate} aria-label={t.tax.rate}
             value={rateBps}
             onChange={(e) => setRateBps(Number(e.target.value))}
           />

@@ -159,39 +159,39 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
                     <input
                       value={editName}
                       onChange={(e) => setEditName(e.target.value)}
-                      placeholder={t.settings.name}
+                      placeholder={t.settings.name} aria-label={t.settings.name}
                     />
                     <input
                       value={editEmail}
                       onChange={(e) => setEditEmail(e.target.value)}
-                      placeholder={t.auth.email}
+                      placeholder={t.auth.email} aria-label={t.auth.email}
                     />
                     <input
                       value={editPhone}
                       onChange={(e) => setEditPhone(e.target.value)}
-                      placeholder={t.settings.phone}
+                      placeholder={t.settings.phone} aria-label={t.settings.phone}
                     />
                     <input
                       value={editAddress}
                       onChange={(e) => setEditAddress(e.target.value)}
-                      placeholder={t.settings.address}
+                      placeholder={t.settings.address} aria-label={t.settings.address}
                     />
                     <div className="inline-edit-row">
                       <input
                         value={editTaxId}
                         onChange={(e) => setEditTaxId(e.target.value)}
-                        placeholder={t.settings.taxId}
+                        placeholder={t.settings.taxId} aria-label={t.settings.taxId}
                       />
                       <input
                         value={editPaymentTerms}
                         onChange={(e) => setEditPaymentTerms(e.target.value)}
-                        placeholder={t.settings.paymentTerms}
+                        placeholder={t.settings.paymentTerms} aria-label={t.settings.paymentTerms}
                       />
                     </div>
                     <input
                       value={editNotes}
                       onChange={(e) => setEditNotes(e.target.value)}
-                      placeholder={t.settings.notes}
+                      placeholder={t.settings.notes} aria-label={t.settings.notes}
                     />
                     <button onClick={() => handleUpdate(item.id)} disabled={pending}>
                       {t.settings.save}
@@ -215,13 +215,13 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
                       ) : null}
                       {/* 第三层：操作按钮 */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
-                        <button onClick={() => startEdit(item)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                        <button onClick={() => startEdit(item)} className="btn-small">
                           {t.settings.rename ?? 'Edit'}
                         </button>
-                        <button onClick={() => setExpanded(expanded === item.id ? null : item.id)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                        <button onClick={() => setExpanded(expanded === item.id ? null : item.id)} className="btn-small">
                           {expanded === item.id ? '−' : '+'}
                         </button>
-                        <button onClick={() => onToggle(orgSlug, item.id, !item.isActive)} style={{ minHeight: 36, fontSize: 'var(--text-xs)' }}>
+                        <button onClick={() => onToggle(orgSlug, item.id, !item.isActive)} className="btn-small">
                           {t.settings.deactivate}
                         </button>
                       </div>
@@ -277,37 +277,37 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
           ))}
         </select>
         <input
-          placeholder={`${t.settings.name}*`}
+          placeholder={`${t.settings.name}*`} aria-label={`${t.settings.name}*`}
           value={name}
           onChange={(e) => setName(e.target.value)}
         />
         <input
-          placeholder={t.auth.email}
+          placeholder={t.auth.email} aria-label={t.auth.email}
           value={email}
           onChange={(e) => setEmail(e.target.value)}
         />
         <input
-          placeholder={t.settings.phone}
+          placeholder={t.settings.phone} aria-label={t.settings.phone}
           value={phone}
           onChange={(e) => setPhone(e.target.value)}
         />
         <input
-          placeholder={t.settings.address}
+          placeholder={t.settings.address} aria-label={t.settings.address}
           value={address}
           onChange={(e) => setAddress(e.target.value)}
         />
         <input
-          placeholder={t.settings.taxId}
+          placeholder={t.settings.taxId} aria-label={t.settings.taxId}
           value={taxId}
           onChange={(e) => setTaxId(e.target.value)}
         />
         <input
-          placeholder={t.settings.paymentTerms}
+          placeholder={t.settings.paymentTerms} aria-label={t.settings.paymentTerms}
           value={paymentTerms}
           onChange={(e) => setPaymentTerms(e.target.value)}
         />
         <input
-          placeholder={t.settings.notes}
+          placeholder={t.settings.notes} aria-label={t.settings.notes}
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
         />

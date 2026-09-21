@@ -28,7 +28,7 @@ export default async function FixedAssetDetailPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/fixed-assets`} style={{ display: 'inline-block', marginBottom: 'var(--space-4)', color: 'var(--text-secondary)', fontSize: 'var(--text-sm)' }}>
+      <Link href={`/${orgSlug}/fixed-assets`} className="back-link">
         &larr; {t.fixedAssets.title}
       </Link>
       <h1>{t.fixedAssets.title}</h1>
