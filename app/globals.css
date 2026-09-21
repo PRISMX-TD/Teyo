@@ -425,9 +425,23 @@ td.numeric, th.numeric,
 .org-switcher { display: flex; gap: var(--space-2); margin-bottom: var(--space-5); }
 .org-switcher select { min-height: 36px; font-size: var(--text-sm); }
 
+/* margin-inline: auto —— 内容区在侧栏右边的那块地里居中。
+
+   没有它的时候，.app-main 是一个 flex item：它先按 flex-grow 长大，长到
+   max-width(1240px) 就被卡住，剩下的空隙全部按 justify-content 的默认值
+   （flex-start）堆在**右**边。1920px 的屏幕上是 1920-248-1240 = 432px
+   的单边空白，整页看上去是偏的。
+
+   flex 的算法里，auto 外边距会在 flex-grow 之后、justify-content 之前把
+   剩余空间均分掉，所以这一行就够了，不需要包一层容器。窄屏下没有剩余
+   空间，auto 自动为 0，什么都不会变。
+
+   居中的是内容区，不是整个 shell：侧栏是应用的框，要一直贴着窗口左缘，
+   把它一起挪进来会在它左边露出一条页面底色，看着像布局塌了。 */
 .app-main {
   flex: 1 1 auto; min-width: 0;
   width: 100%; max-width: var(--content-max);
+  margin-inline: auto;
   padding: var(--space-8) var(--space-8) var(--space-16);
 }
 .app-main > h1:first-child, .app-main > .page-header:first-child { margin-top: 0; }
