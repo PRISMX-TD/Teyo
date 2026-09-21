@@ -34,7 +34,6 @@ let ownerId = '';
 let orgId = '';
 let orgSlug = '';
 let customerId = '';
-let accounts: Record<string, string> = {};
 
 /** 某个科目在本公司的余额（借正贷负，本位币）。 */
 async function balanceOf(code: string): Promise<bigint> {
@@ -56,11 +55,6 @@ beforeAll(async () => {
   orgSlug = org.slug;
   currentUserId = ownerId;
 
-  const rows = await admin`
-    select id, code from accounts where organization_id = ${orgId}
-      and code in ('bank', 'customer-deposits', 'accounts-receivable', 'sales')
-  `;
-  accounts = Object.fromEntries(rows.map((r) => [r.code as string, r.id as string]));
 
   const contact = await admin`
     insert into contacts (organization_id, type, name)

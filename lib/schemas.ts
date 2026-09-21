@@ -348,7 +348,10 @@ export const recurringEditSchema = z
     currency: currency.optional(),
     debitAccountId: uuid.optional(),
     creditAccountId: uuid.optional(),
-    categoryId: uuid.optional(),
+    // nullable：把分类清空是一个合法的编辑动作。原来只有 optional，于是
+    // 「不改分类」和「改成没有分类」在这道 schema 面前是同一件事——前者放行，
+    // 后者（传 null）被当成类型错误挡掉，而界面上那个下拉框第一项就是「--」。
+    categoryId: uuid.nullable().optional(),
     frequency: recurringFrequencySchema.optional(),
     interval: z.number().int().min(1, 'How often this repeats must be at least 1.').optional(),
     startDate: isoDate.optional(),

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
+import React, { useCallback, useMemo, useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -87,7 +87,9 @@ export function ReportsView({
 }: Props) {
   const [tab, setTab] = useState<Tab>('trial-balance');
 
-  const tabs: { key: Tab; label: string }[] = [
+  // memo 掉：下面 handleTabKeyDown 的 useCallback 依赖它，而一个每次渲染
+  // 都重建的数组会让那个 useCallback 每次都重建——包了等于没包。
+  const tabs: { key: Tab; label: string }[] = useMemo(() => [
     { key: 'trial-balance', label: t.reports.trialBalance },
     { key: 'profit-loss', label: t.reports.profitLoss },
     { key: 'balance-sheet', label: t.reports.balanceSheet },
@@ -96,7 +98,7 @@ export function ReportsView({
     { key: 'ap-aging', label: t.apAging.title },
     { key: 'customer-statement', label: t.customerStatement.title },
     { key: 'vendor-statement', label: t.vendorStatement.title },
-  ];
+  ], [t]);
 
   /**
    * 方向键在标签之间移动（WAI-ARIA tabs 模式）。
@@ -666,7 +668,7 @@ function StatementTab({
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const json = await res.json();
       setData(json);
-    } catch (e) {
+    } catch {
       // 原来的兜底文案是写死的英文。这里连 e.message 也一并换掉：
       // 上面抛的是 `HTTP 500`，把它直接摆给用户看，中文界面里会突然冒出
       // 一句英文技术缩写，而且他拿它什么也做不了。

@@ -4,7 +4,6 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listProjects, getProjectProfitability } from '@/server/repositories/projects';
-import { listContacts } from '@/server/repositories/contacts';
 import { ProjectList } from '@/components/projects/project-list';
 
 export default async function ProjectsListPage({

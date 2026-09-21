@@ -271,6 +271,12 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
               <th scope="col" className="numeric">{t.inventory.avgCost}</th>
               <th scope="col" className="numeric">{t.inventory.totalValue}</th>
               <th scope="col">{t.inventory.status}</th>
+              {/* 每件存货挂哪两个科目，原来只有点开「编辑」才看得到。
+                  getAccountName 这个函数早就写好了，却没有任何地方调用它——
+                  科目挂错时，每一次出库都会把成本记到错的地方，而列表上
+                  看不出任何异样。摆出来，错的那一行一眼就能认出来。 */}
+              <th scope="col">{t.inventory.cogsAccount}</th>
+              <th scope="col">{t.inventory.inventoryAccount}</th>
               {/* 这一列原来的表头是 t.common.cancel（「取消」）——它其实是
                   操作列，里面放的是编辑/记录出入库/隐藏三个按钮。 */}
               <th scope="col">{t.common.actions}</th>
@@ -287,7 +293,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
               if (editing === item.id) {
                 return (
                   <tr key={item.id}>
-                    <td colSpan={8}>
+                    <td colSpan={10}>
                       <div className="inline-edit">
                         <input
                           value={editSku}
@@ -387,6 +393,8 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                       <span className="badge badge-success">{t.settings.active}</span>
                     )}
                   </td>
+                  <td>{getAccountName(item.cogsAccountId)}</td>
+                  <td>{getAccountName(item.inventoryAccountId)}</td>
                   <td>
                     <button onClick={() => startEdit(item)}>{t.common.edit}</button>
                     <button onClick={() => setTxnItem(item)}>

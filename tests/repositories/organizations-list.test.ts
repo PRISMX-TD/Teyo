@@ -22,7 +22,7 @@ beforeAll(async () => {
   strangerId = await createTestUser(`test-stranger-${RUN}@example.com`, 'Stranger');
 
   const alpha = await createTestOrg(bossId, 'Alpha Trading', 'alpha-trading');
-  const beta = await createTestOrg(bossId, 'Beta Cafe', 'beta-cafe');
+  await createTestOrg(bossId, 'Beta Cafe', 'beta-cafe');
   await joinOrg(staffId, alpha, 'bookkeeper');
   await sql`update app_users set locale = 'zh' where id = ${staffId}`;
 });

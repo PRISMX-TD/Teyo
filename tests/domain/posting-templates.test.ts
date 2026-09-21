@@ -13,7 +13,7 @@ describe('posting-templates', () => {
     const lines = templateFor(event);
 
     expect(lines).toHaveLength(2);
-    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === 'debit' ? -1 : 1));
+    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === b.direction ? 0 : a.direction === 'debit' ? -1 : 1));
 
     expect(debitLine.direction).toBe('debit');
     expect(debitLine.accountId).toBe('checking');
@@ -35,7 +35,7 @@ describe('posting-templates', () => {
     const lines = templateFor(event);
 
     expect(lines).toHaveLength(2);
-    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === 'debit' ? -1 : 1));
+    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === b.direction ? 0 : a.direction === 'debit' ? -1 : 1));
 
     expect(debitLine.direction).toBe('debit');
     expect(debitLine.accountId).toBe('office-supplies');
@@ -57,7 +57,7 @@ describe('posting-templates', () => {
     const lines = templateFor(event);
 
     expect(lines).toHaveLength(2);
-    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === 'debit' ? -1 : 1));
+    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === b.direction ? 0 : a.direction === 'debit' ? -1 : 1));
 
     expect(debitLine.direction).toBe('debit');
     expect(debitLine.accountId).toBe('checking');
@@ -79,7 +79,7 @@ describe('posting-templates', () => {
     const lines = templateFor(event);
 
     expect(lines).toHaveLength(2);
-    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === 'debit' ? -1 : 1));
+    const [debitLine, creditLine] = lines.sort((a, b) => (a.direction === b.direction ? 0 : a.direction === 'debit' ? -1 : 1));
 
     expect(debitLine.direction).toBe('debit');
     expect(debitLine.accountId).toBe('inventory');

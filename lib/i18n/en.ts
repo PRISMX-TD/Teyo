@@ -571,6 +571,11 @@ const en = {
     cleared: 'Cleared',
     notCleared: 'Not cleared',
     adjustment: 'Adjustment',
+    priorBalance: 'Previously reconciled',
+    clearedTotal: 'Cleared on this statement',
+    expectedBalance: 'Expected statement balance',
+    mustBalance:
+      'Tick every transaction that appears on the statement. The difference has to reach zero before the reconciliation can be completed.',
     complete: 'Complete Reconciliation',
     empty: 'All transactions are reconciled.',
     reconciledAt: 'Reconciled on',
@@ -578,6 +583,8 @@ const en = {
   recurring: {
     title: 'Recurring Transactions',
     newTitle: 'New Recurring Entry',
+    editTitle: 'Edit Recurring Entry',
+    kindLocked: 'The type cannot be changed. Stop this rule and create a new one instead.',
     frequency: 'Frequency',
     daily: 'Daily',
     weekly: 'Weekly',

@@ -75,7 +75,6 @@ export function RateField({
         setSource('unavailable');
       }
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [currency, occurredOn, orgSlug]);
 
   const isForeign = currency !== baseCurrency;

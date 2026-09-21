@@ -4,16 +4,11 @@ import { useState, useCallback } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
+import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import type { UserEntryKind } from '@/server/domain/ledger';
 import type { RecurringEditFields, RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 import { todayLocalISO } from '@/lib/date';
-
-type MoneyAccountOption = {
-  id: string;
-  nameEn: string | null;
-  nameZh: string | null;
-};
 
 type AccountOption = {
   id: string;
@@ -73,8 +68,9 @@ type Props = {
   orgSlug: string;
   locale: Locale;
   t: Messages;
+  /** 公司本位币。新建规则时的默认币种——原来这里硬写 'USD'。 */
+  baseCurrency: string;
   entries: RecurringEntry[];
-  moneyAccounts: MoneyAccountOption[];
   allAccounts: AccountOption[];
   categories: CategoryOption[];
   createAction: (orgSlug: string, input: CreatePayload) => Promise<{ id: string }>;
@@ -110,12 +106,42 @@ function isDue(entry: RecurringEntry, today: string): boolean {
   );
 }
 
+type FormState = {
+  kind: UserEntryKind;
+  description: string;
+  amount: string;
+  currency: string;
+  debitAccountId: string;
+  creditAccountId: string;
+  categoryId: string;
+  frequency: RecurringFrequency;
+  interval: number;
+  startDate: string;
+  endDate: string;
+};
+
+function blankForm(baseCurrency: string): FormState {
+  return {
+    kind: 'expense',
+    description: '',
+    amount: '',
+    currency: baseCurrency,
+    debitAccountId: '',
+    creditAccountId: '',
+    categoryId: '',
+    frequency: 'monthly',
+    interval: 1,
+    startDate: todayLocalISO(),
+    endDate: '',
+  };
+}
+
 export function RecurringList({
   orgSlug,
   locale,
   t,
+  baseCurrency,
   entries,
-  moneyAccounts,
   allAccounts,
   categories,
   createAction,
@@ -124,19 +150,9 @@ export function RecurringList({
   generateAction,
 }: Props) {
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState({
-    kind: 'expense' as UserEntryKind,
-    description: '',
-    amount: '',
-    currency: moneyAccounts[0]?.id ? '' : 'USD',
-    debitAccountId: '',
-    creditAccountId: '',
-    categoryId: '',
-    frequency: 'monthly' as RecurringFrequency,
-    interval: 1,
-    startDate: todayLocalISO(),
-    endDate: '',
-  });
+  /** null = 这张表单在新建；否则是正在编辑的那条规则的 id。 */
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState<FormState>(() => blankForm(baseCurrency));
   const [submitting, setSubmitting] = useState(false);
   const [generating, setGenerating] = useState(false);
   // 生成结果必须显示出来。生成可以部分成功之后，「什么都不说」就有歧义了：
@@ -144,41 +160,79 @@ export function RecurringList({
   const [runReport, setRunReport] = useState<RecurringRunReport | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
 
-  const handleCreate = useCallback(async () => {
+  const closeForm = useCallback(() => {
+    setShowForm(false);
+    setEditingId(null);
+    setForm(blankForm(baseCurrency));
+  }, [baseCurrency]);
+
+  /**
+   * 打开这张表单去改一条已有的规则。
+   *
+   * editAction 之前是「页面传进来、组件解构出来、然后一次都没用过」——也就是
+   * 说编辑定期规则这件事在界面上根本没有入口，服务端那个 editRecurring
+   * （连同它那道 `.strict()` 白名单）从来没有被任何人调用过。这里把它接上。
+   */
+  const startEdit = useCallback((entry: RecurringEntry) => {
+    setEditingId(entry.id);
+    setForm({
+      // kind 不在 RecurringEditFields 里，改不了；带进表单只是为了让下面那些
+      // 按 kind 过滤的下拉框（分类）显示得对。
+      kind: entry.kind as UserEntryKind,
+      description: entry.description ?? '',
+      amount: entry.amount,
+      currency: entry.currency,
+      debitAccountId: entry.debitAccountId,
+      creditAccountId: entry.creditAccountId,
+      categoryId: entry.categoryId ?? '',
+      frequency: entry.frequency as RecurringFrequency,
+      interval: entry.interval,
+      startDate: entry.startDate,
+      endDate: entry.endDate ?? '',
+    });
+    setShowForm(true);
+  }, []);
+
+  const handleSubmit = useCallback(async () => {
     if (!form.amount || !form.debitAccountId || !form.creditAccountId) return;
     setSubmitting(true);
     try {
-      await createAction(orgSlug, {
-        kind: form.kind,
-        description: form.description,
-        amount: form.amount,
-        currency: form.currency,
-        debitAccountId: form.debitAccountId,
-        creditAccountId: form.creditAccountId,
-        categoryId: form.categoryId || undefined,
-        frequency: form.frequency,
-        interval: form.interval,
-        startDate: form.startDate,
-        endDate: form.endDate || undefined,
-      });
-      setShowForm(false);
-      setForm({
-        kind: 'expense',
-        description: '',
-        amount: '',
-        currency: 'USD',
-        debitAccountId: '',
-        creditAccountId: '',
-        categoryId: '',
-        frequency: 'monthly',
-        interval: 1,
-        startDate: todayLocalISO(),
-        endDate: '',
-      });
+      if (editingId) {
+        await editAction(orgSlug, editingId, {
+          description: form.description,
+          // amount 与 currency 必须成对传：服务端要靠币种决定按几位小数解析。
+          amount: form.amount,
+          currency: form.currency,
+          debitAccountId: form.debitAccountId,
+          creditAccountId: form.creditAccountId,
+          // 清空下拉框传 null（「这条规则不再归任何分类」），而不是 undefined
+          // （「这一次不动分类」）。两者在服务端是不同的意思。
+          categoryId: form.categoryId || null,
+          frequency: form.frequency,
+          interval: form.interval,
+          startDate: form.startDate,
+          endDate: form.endDate || null,
+        });
+      } else {
+        await createAction(orgSlug, {
+          kind: form.kind,
+          description: form.description,
+          amount: form.amount,
+          currency: form.currency,
+          debitAccountId: form.debitAccountId,
+          creditAccountId: form.creditAccountId,
+          categoryId: form.categoryId || undefined,
+          frequency: form.frequency,
+          interval: form.interval,
+          startDate: form.startDate,
+          endDate: form.endDate || undefined,
+        });
+      }
+      closeForm();
     } finally {
       setSubmitting(false);
     }
-  }, [form, orgSlug, createAction]);
+  }, [form, editingId, orgSlug, createAction, editAction, closeForm]);
 
   const handleGenerate = useCallback(async () => {
     // 数的是到期的规则条数，不是将要生成的分录笔数——补记会让后者更大。
@@ -200,13 +254,10 @@ export function RecurringList({
     }
   }, [entries, orgSlug, generateAction, t]);
 
-  const moneyAccount = moneyAccounts.find((a) => a.id === form.debitAccountId);
-  const defaultCurrency = moneyAccount?.id ? 'USD' : form.currency;
-
   return (
     <div className="recurring-list">
       <div className="recurring-toolbar">
-        <button onClick={() => setShowForm(!showForm)}>
+        <button onClick={() => (showForm ? closeForm() : setShowForm(true))}>
           {showForm ? t.common.cancel : t.recurring.newTitle}
         </button>
         <button
@@ -284,19 +335,29 @@ export function RecurringList({
           className="recurring-form"
           onSubmit={(e) => {
             e.preventDefault();
-            handleCreate();
+            handleSubmit();
           }}
         >
+          <h3>{editingId ? t.recurring.editTitle : t.recurring.newTitle}</h3>
+
+          {/*
+            编辑时类型锁住。类型决定了这条规则将来生成的是收入还是支出分录，
+            而已经按旧类型生成过的那些分录不会跟着改。允许中途改类型，会得到
+            一条前半年记支出、后半年记收入的规则，报表上没有任何地方说得清
+            这件事。RecurringEditFields 里本来也没有 kind 这个字段。
+          */}
           <label>
             {t.transaction.kind}
             <select
               value={form.kind}
               onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as UserEntryKind }))}
+              disabled={editingId !== null}
             >
               <option value="income">{t.transaction.income}</option>
               <option value="expense">{t.transaction.expense}</option>
               <option value="transfer">{t.transaction.transfer}</option>
             </select>
+            {editingId ? <span className="hint">{t.recurring.kindLocked}</span> : null}
           </label>
 
           <label>
@@ -448,6 +509,7 @@ export function RecurringList({
               <th>{t.recurring.frequency}</th>
               <th>{t.recurring.nextDue}</th>
               <th>{t.settings.active}</th>
+              <th>{t.common.actions}</th>
             </tr>
           </thead>
           <tbody>
@@ -457,9 +519,13 @@ export function RecurringList({
                 <td>{entry.description}</td>
                 <td className="numeric mono">
                   {(() => {
+                    // 原来这里是 BigInt(Math.round(parseFloat(amount) * 100))。
+                    // 两个毛病，和对账那一页当初一模一样：浮点，以及硬编码
+                    // ×100——一条 1,000,000 日元的规则会显示成 10,000 日元，
+                    // 因为 JPY 没有小数位（见 money.ts 的 ZERO_DECIMAL_CURRENCIES）。
                     try {
                       return formatMoney(
-                        BigInt(Math.round(parseFloat(entry.amount) * 100)),
+                        parseDecimalToMinor(entry.amount, currencyExponent(entry.currency)),
                         entry.currency,
                         locale,
                       );
@@ -478,6 +544,11 @@ export function RecurringList({
                     onClick={() => toggleAction(orgSlug, entry.id, !entry.isActive)}
                   >
                     {entry.isActive ? t.settings.active : t.settings.inactive}
+                  </button>
+                </td>
+                <td>
+                  <button type="button" onClick={() => startEdit(entry)}>
+                    {t.common.edit}
                   </button>
                 </td>
               </tr>

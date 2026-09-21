@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SCENARIOS, scenarioById } from '@/server/domain/scenario';
+import { scenarioById } from '@/server/domain/scenario';
 
 describe('scenario definitions', () => {
   it('money-in is income and requires category selection, not direction', () => {

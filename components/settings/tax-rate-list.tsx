@@ -2,7 +2,7 @@
 
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName, getMessages } from '@/lib/i18n';
+import { localizedName } from '@/lib/i18n';
 import { createTaxRate, updateTaxRateAction, setDefaultTaxRateAction, deleteTaxRateAction } from '@/server/actions/tax';
 
 type TaxRateItem = {

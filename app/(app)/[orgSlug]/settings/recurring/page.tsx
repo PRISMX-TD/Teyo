@@ -5,7 +5,7 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listRecurring } from '@/server/repositories/recurring';
-import { listMoneyAccounts, listAllAccounts } from '@/server/repositories/accounts';
+import { listAllAccounts } from '@/server/repositories/accounts';
 import { listSelectableCategories } from '@/server/repositories/categories';
 import {
   createRecurring,
@@ -24,12 +24,11 @@ export default async function RecurringSettingsPage({
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const [entries, moneyAccounts, allAccounts, incomeCategories, expenseCategories] =
+  const [entries, allAccounts, incomeCategories, expenseCategories] =
     await withTransaction(context.userId, async (tx) => {
-      const [entries, moneyAccounts, allAccounts, incomeCategories, expenseCategories] =
+      const [entries, allAccounts, incomeCategories, expenseCategories] =
         await Promise.all([
           listRecurring(tx, context.organizationId),
-          listMoneyAccounts(tx, context.organizationId),
           listAllAccounts(tx, context.organizationId),
           // 只取可由用户选的分类（排除折旧/摊销这类只应由系统过账的），
           // 理由同 transactions/[id]/page.tsx：定期规则每月自动生成交易，
@@ -37,7 +36,7 @@ export default async function RecurringSettingsPage({
           listSelectableCategories(tx, context.organizationId, 'income'),
           listSelectableCategories(tx, context.organizationId, 'expense'),
         ]);
-      return [entries, moneyAccounts, allAccounts, incomeCategories, expenseCategories] as const;
+      return [entries, allAccounts, incomeCategories, expenseCategories] as const;
     });
   const categories = [...incomeCategories, ...expenseCategories].map((c) => ({
     id: c.id,
@@ -56,6 +55,7 @@ export default async function RecurringSettingsPage({
         orgSlug={orgSlug}
         locale={locale}
         t={t}
+        baseCurrency={context.baseCurrency}
         entries={entries.map((e) => ({
           id: e.id,
           kind: e.kind,
@@ -72,7 +72,6 @@ export default async function RecurringSettingsPage({
           nextDueDate: e.nextDueDate,
           isActive: e.isActive,
         }))}
-        moneyAccounts={moneyAccounts}
         allAccounts={allAccounts.map((a) => ({
           id: a.id,
           code: a.code,

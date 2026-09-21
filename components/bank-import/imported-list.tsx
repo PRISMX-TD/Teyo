@@ -81,7 +81,10 @@ export function ImportedList({
   const [postError, setPostError] = useState<string | null>(null);
   const [postNotice, setPostNotice] = useState<string | null>(null);
 
-  const categoryOptions = categories ?? [];
+  // `categories ?? []` 每次渲染都产生一个**新数组**，于是下面两个 useMemo
+  // 的依赖每次都变，缓存从来没有命中过——写了 useMemo 却等于没写。
+  // 把这一步本身也 memo 掉，缓存才真的成立。
+  const categoryOptions = useMemo(() => categories ?? [], [categories]);
   const canPost = categoryOptions.length > 0;
 
   // 一行流水的方向由**金额的正负**决定，不由用户再选一次：对账单上的符号

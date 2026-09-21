@@ -34,6 +34,7 @@ export default async function CreditNotesListPage({
       <CreditNoteList
         orgSlug={orgSlug}
         locale={locale}
+        baseCurrency={context.baseCurrency}
         i18n={t}
         creditNotes={creditNotes}
       />

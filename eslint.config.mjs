@@ -67,6 +67,25 @@ const eslintConfig = [
   {
     files: ["**/*.{ts,tsx}"],
     rules: {
+      // 下划线前缀 = "我知道它没被用，这是有意的"。
+      //
+      // next/typescript 把 no-unused-vars 设成 warn 而没给任何 ignore pattern，
+      // 于是唯一能让一个刻意保留的参数不报警的办法是在它头上贴一行 disable
+      // 注释——而 disable 注释是会过期的：等哪天那个参数真的用上了，注释还在，
+      // 下一个不该留的未使用变量就从此无声无息。改用命名约定：名字里带下划线
+      // 前缀的放行，其余一个都不放，这样 0 warnings 才是一条能守住的线。
+      //
+      // 现在靠它的只有 lib/format.ts 的 formatMoney(_locale)：这个项目的金额
+      // 一律走自己那套定点格式化，不按 locale 分组分隔符，但参数留在签名里
+      // ——几十个调用点都在传，而且将来真要按地区分组时它就是入口。
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+        },
+      ],
       // 第一层：按 import 说明符的字面文本匹配，只认 @/ 别名这一种写法。
       // 挡得住的场景是最常见的那种，而且挡下来的诊断信息最好读——
       // no-restricted-imports 允许每条限制自带一句 message，import/no-restricted-paths

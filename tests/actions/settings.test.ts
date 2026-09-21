@@ -34,7 +34,6 @@ let categoriesByAccountCode: Record<string, string>;
 // 第二家公司，owner 与第一家相同。跨公司测试必须这样搭：换成「别人的公司」
 // RLS 就会替应用层挡掉，测试变成假阳性。
 let otherOrgId: string;
-let otherSlug: string;
 let otherAccounts: Record<string, string>;
 
 const suffix = randomUUID().slice(0, 8);
@@ -59,7 +58,6 @@ beforeAll(async () => {
 
   const other = await createTestOrgWithSeed(ownerId, 'Other Set', `other-set-${suffix}`, 'MYR');
   otherOrgId = other.id;
-  otherSlug = other.slug;
   otherAccounts = other.accountsByCode;
 });
 

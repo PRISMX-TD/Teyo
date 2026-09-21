@@ -131,6 +131,12 @@ export function AttachmentPanel({
           {/* alt="" 是「这张图纯装饰，跳过它」的意思。凭证图片恰恰相反——
               它是这笔账的证据，读屏用户至少要知道自己打开的是哪一张。
               图片内容本身我们读不出来，所以退而给出文件名。 */}
+          {/* 这里不能用 next/image：previewUrl 是一个 blob: URL（签名 URL
+              取回后在浏览器里生成的），next/image 的优化管线只认得 http(s)
+              与 public/ 下的静态文件，blob: 会直接报错。
+              明确关掉这条规则，而不是让它作为一条常驻告警——常驻的告警
+              等于没有告警。 */}
+          {/* eslint-disable-next-line @next/next/no-img-element */}
           <img
             src={previewUrl}
             alt={interpolate(t.transaction.receiptImageAlt, {

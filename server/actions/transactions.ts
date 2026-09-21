@@ -9,7 +9,7 @@ import {
 } from '@/lib/schemas';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission } from '@/server/auth/guard';
-import { LedgerError, type TransactionKind, type UserEntryKind } from '@/server/domain/ledger';
+import { LedgerError, type UserEntryKind } from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import type { PostingEvent } from '@/server/domain/posting-templates';
 import { assertPeriodOpen } from '@/server/domain/period-lock';

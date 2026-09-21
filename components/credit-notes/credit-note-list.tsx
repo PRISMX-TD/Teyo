@@ -1,10 +1,8 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
-import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { CreditNoteListRow } from '@/server/repositories/credit_notes';
 import {
@@ -16,6 +14,8 @@ import {
 type Props = {
   orgSlug: string;
   locale: Locale;
+  /** 公司本位币。列表里那一栏金额记的是本位币，不是单据自己的币种。 */
+  baseCurrency: string;
   i18n: Messages;
   creditNotes: CreditNoteListRow[];
 };
@@ -27,8 +27,7 @@ const STATUS_CLASS: Record<string, string> = {
   voided: 'badge badge-voided',
 };
 
-export function CreditNoteList({ orgSlug, locale, i18n, creditNotes }: Props) {
-  const t = getMessages(locale);
+export function CreditNoteList({ orgSlug, locale, baseCurrency, i18n, creditNotes }: Props) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -90,8 +89,15 @@ export function CreditNoteList({ orgSlug, locale, i18n, creditNotes }: Props) {
             <td>{cn.contactName}</td>
             <td>{cn.invoiceId ? `#${cn.invoiceId.slice(0, 8)}...` : '-'}</td>
             <td>{cn.issueDate}</td>
+            {/*
+              原来是 formatMoney(cn.baseAmountMinor, cn.currency)：拿本位币的
+              金额套单据自己的币种。createCreditNote 修过 base_amount_minor 之后
+              那一列装的确实是本位币（见 server/actions/credit_notes.ts 的 B2），
+              于是一张 1,000 美元、汇率 4.7 的贷项通知单在马币公司的列表上会
+              显示成「US$4,700.00」——币种错，而且零小数币种连数字都会差 100 倍。
+            */}
             <td className="numeric">
-              {formatMoney(cn.baseAmountMinor, cn.currency)}
+              {formatMoney(cn.baseAmountMinor, baseCurrency, locale)}
             </td>
             <td>
               <span className={STATUS_CLASS[cn.status] ?? 'badge'}>

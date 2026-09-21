@@ -240,8 +240,22 @@ export type UnreconciledTransaction = {
   occurredOn: string;
   description: string;
   kind: string;
-  amountMinor: bigint;
-  currency: string;
+  /**
+   * 这笔交易对该资金账户的**净影响**，本位币最小单位，带符号：
+   * 进账为正、出账为负。
+   *
+   * 这里刻意不是 transactions.amount_minor。那一列是分录的借方合计，永远为
+   * 正，而且是按原币记的。把它摆在对账界面上有两个后果：
+   *
+   *   1. 一笔 500 的收款和一笔 500 的付款长得一模一样。对账恰恰是唯一一个
+   *      「钱是进是出」就是全部意义的界面。
+   *   2. 一家马币公司收到的一笔美元款项会以「500」参与合计，而旁边的账面
+   *      余额是马币——两个刻度的数字相加减。
+   *
+   * 改成按 journal_lines 聚合 base_amount_minor 并按借贷定号，与
+   * getBookBalance 用同一把尺，两者才能真的相减。
+   */
+  effectMinor: bigint;
 };
 
 export async function listUnreconciledTransactions(
@@ -249,8 +263,21 @@ export async function listUnreconciledTransactions(
   orgId: string,
   moneyAccountId: string,
 ): Promise<UnreconciledTransaction[]> {
+  // group by 不只是为了求和：一笔交易在同一个资金账户上完全可以有多条分录
+  // （比如一笔转账里银行手续费单独走一行）。原来这里是直接 join，于是这种
+  // 交易在列表里出现两次——同一个 id 两行，React 的 key 撞号，勾选其中一行
+  // 另一行跟着动，而合计会把它算两遍。
   const rows = await tx`
-    select t.id, t.occurred_on, t.description, t.kind, t.amount_minor, t.currency
+    select
+      t.id,
+      t.occurred_on,
+      t.description,
+      t.kind,
+      t.created_at,
+      sum(
+        case when l.direction = 'debit' then l.base_amount_minor::bigint
+             else -l.base_amount_minor::bigint end
+      ) as effect_minor
     from transactions t
     join journal_lines l on l.transaction_id = t.id and l.organization_id = ${orgId}
     where t.organization_id = ${orgId}
@@ -263,6 +290,7 @@ export async function listUnreconciledTransactions(
         where br.organization_id = ${orgId}
           and br.money_account_id = ${moneyAccountId}
       )
+    group by t.id, t.occurred_on, t.description, t.kind, t.created_at
     order by t.occurred_on desc, t.created_at desc
   `;
   return rows.map((r) => ({
@@ -270,12 +298,21 @@ export async function listUnreconciledTransactions(
     occurredOn: formatDate(r.occurred_on as Date | string),
     description: r.description as string,
     kind: r.kind as string,
-    amountMinor: BigInt(r.amount_minor as string),
-    currency: r.currency as string,
+    effectMinor: BigInt(r.effect_minor as string),
   }));
 }
 
-/** 计算指定资金账户的账面余额（未清帐的所有交易净额）。 */
+/**
+ * 该资金账户的账面余额：所有未作废分录在本位币下的净额。
+ *
+ * 原注释写的是「未清帐的所有交易净额」，但 where 子句里从来没有对账状态这一
+ * 项——它算的是全部，已对过账的也在内。对账那一页正需要这个口径（本期已清
+ * 的 + 以前各期已对完的 = 银行现在该有的余额），只是注释和实现说的不是一回事。
+ *
+ * 求和用的是 base_amount_minor 而不是 amount_minor。amount_minor 是原币：
+ * 一家马币公司的银行账户上如果有一笔美元收款，把它原样加进来等于把美元和
+ * 马币相加，而界面上那个数字挂的是本位币的货币符号。
+ */
 export async function getBookBalance(
   tx: Tx,
   orgId: string,
@@ -283,8 +320,8 @@ export async function getBookBalance(
 ): Promise<bigint> {
   const [row] = await tx`
     select coalesce(sum(
-      case when l.direction = 'debit' then l.amount_minor::bigint
-           else -l.amount_minor::bigint end
+      case when l.direction = 'debit' then l.base_amount_minor::bigint
+           else -l.base_amount_minor::bigint end
     ), 0) as balance
     from journal_lines l
     join transactions t on t.id = l.transaction_id

@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { admin, createTestUser, deleteTestUser, deleteTestOrganizations } from '@/tests/helpers/db';
 import { createTestOrgWithSeed, type SeededOrg } from '@/tests/helpers/test-db';
-import { withTransaction, type Tx } from '@/server/db/transaction';
+import { withTransaction } from '@/server/db/transaction';
 import type { OrgContext } from '@/server/auth/guard';
 import {
   buildClosingPlan,

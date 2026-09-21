@@ -6,6 +6,7 @@ import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { todayLocalISO } from '@/lib/date';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
+import { reconciliationSummary } from '@/server/domain/reconciliation';
 
 type MoneyAccountOption = {
   id: string;
@@ -18,8 +19,8 @@ type UnreconciledTxn = {
   occurredOn: string;
   description: string;
   kind: string;
-  amountMinor: string;
-  currency: string;
+  /** 对该资金账户的净影响，本位币最小单位，进账为正、出账为负。 */
+  effectMinor: string;
 };
 
 type PastReconciliation = {
@@ -169,21 +170,28 @@ export function ReconciliationView({
     }
   })();
 
-  const clearedSum = txns
-    .filter((t) => checked.has(t.id))
-    .reduce((sum, t) => {
-      try {
-        return sum + BigInt(t.amountMinor);
-      } catch {
-        return sum;
-      }
-    }, 0n);
+  const effectOf = (txn: UnreconciledTxn): bigint => {
+    try {
+      return BigInt(txn.effectMinor);
+    } catch {
+      return 0n;
+    }
+  };
 
-  const adjSum = Object.entries(adjustments)
-    .filter(([id]) => checked.has(id))
-    .reduce((sum, [, val]) => sum + toMinor(val), 0n);
-
-  const difference = statementBalanceMinor - (bookBalanceBig + adjSum);
+  /**
+   * 对账的算式在 server/domain/reconciliation.ts，那里有它为什么长这样的
+   * 完整说明，以及一组不需要浏览器就能跑的测试。这里只负责把数据喂进去。
+   */
+  const { priorBalanceMinor, clearedMinor, expectedBalanceMinor, differenceMinor } =
+    reconciliationSummary({
+      bookBalanceMinor: bookBalanceBig,
+      unreconciledEffects: txns.map(effectOf),
+      clearedEffects: txns.filter((t) => checked.has(t.id)).map(effectOf),
+      adjustmentMinor: Object.entries(adjustments)
+        .filter(([id]) => checked.has(id))
+        .reduce((sum, [, val]) => sum + toMinor(val), 0n),
+      statementBalanceMinor,
+    });
 
   const handleSubmit = async () => {
     if (!selectedAccount || !statementDate || !statementBalance) return;
@@ -256,16 +264,35 @@ export function ReconciliationView({
             </div>
 
             <div>
+              <span>{t.reconciliation.priorBalance}: </span>
+              <span className="mono">{formatMoney(priorBalanceMinor, baseCurrency, locale)}</span>
+            </div>
+
+            <div>
+              <span>{t.reconciliation.clearedTotal}: </span>
+              <span className="mono">{formatMoney(clearedMinor, baseCurrency, locale)}</span>
+            </div>
+
+            <div>
+              <span>{t.reconciliation.expectedBalance}: </span>
+              <span className="mono">{formatMoney(expectedBalanceMinor, baseCurrency, locale)}</span>
+            </div>
+
+            <div>
               <span>{t.reconciliation.difference}: </span>
-              <span className={`mono ${difference > 0n ? 'positive' : difference < 0n ? 'negative' : ''}`}>
-                {formatMoney(difference, baseCurrency, locale)}
+              <span className={`mono ${differenceMinor > 0n ? 'positive' : differenceMinor < 0n ? 'negative' : ''}`}>
+                {formatMoney(differenceMinor, baseCurrency, locale)}
               </span>
             </div>
           </div>
 
+          {differenceMinor !== 0n && txns.length > 0 && (
+            <p className="hint">{t.reconciliation.mustBalance}</p>
+          )}
+
           <button
             onClick={handleSubmit}
-            disabled={submitting || checked.size === 0 || difference !== 0n}
+            disabled={submitting || checked.size === 0 || differenceMinor !== 0n}
           >
             {submitting ? t.common.loading : t.reconciliation.complete}
           </button>
@@ -297,8 +324,12 @@ export function ReconciliationView({
                     <td>{txn.occurredOn}</td>
                     <td>{txn.description}</td>
                     <td>{txn.kind}</td>
-                    <td className="numeric mono">
-                      {formatMoney(BigInt(txn.amountMinor), txn.currency, locale)}
+                    <td
+                      className={`numeric mono ${
+                        effectOf(txn) > 0n ? 'positive' : effectOf(txn) < 0n ? 'negative' : ''
+                      }`}
+                    >
+                      {formatMoney(effectOf(txn), baseCurrency, locale)}
                     </td>
                     <td>
                       <input

@@ -47,7 +47,7 @@ export default async function ReconciliationPage({
               getBookBalance(tx, ctx.organizationId, moneyAccountId),
             ]);
             return {
-              txns: txns.map((t) => ({ ...t, amountMinor: String(t.amountMinor) })),
+              txns: txns.map((t) => ({ ...t, effectMinor: String(t.effectMinor) })),
               past: past.map((p) => ({
                 id: p.id,
                 statementDate: p.statementDate,

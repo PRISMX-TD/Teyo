@@ -133,7 +133,7 @@ export type RecurringEditFields = {
   description?: string;
   debitAccountId?: string;
   creditAccountId?: string;
-  categoryId?: string;
+  categoryId?: string | null;
   frequency?: RecurringTransactionRow['frequency'];
   interval?: number;
   startDate?: string;
