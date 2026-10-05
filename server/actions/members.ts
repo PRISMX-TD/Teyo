@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { inviteMemberSchema, memberRoleSchema } from '@/lib/schemas';
 import { AuthError, requirePermission, requireUserId } from '@/server/auth/guard';
-import { withTransaction } from '@/server/db/transaction';
+import { withTransaction, withoutUserContext } from '@/server/db/transaction';
 import type { MembershipStatus, Role } from '@/server/domain/permissions';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
@@ -18,12 +18,59 @@ import {
 } from '@/server/repositories/invitations';
 import {
   findMembership,
-  findOwnerMembershipId,
   listMembershipsByOrg,
   updateMembershipRole,
   updateMembershipStatus,
   type MemberRow,
 } from '@/server/repositories/memberships';
+
+/**
+ * 成员管理的层级：owner 管所有人；admin 只能管理 bookkeeper / viewer，
+ * 不能授予、撤销或修改 admin 角色——否则一个 admin 就能把其他 admin 全部
+ * 暂停或降级，或把任何人提成 admin。任何人都不能修改自己的成员记录。
+ */
+function assertCanManage(
+  context: { userId: string; role: Role },
+  target: { userId: string; role: Role },
+  nextRole?: Role,
+): void {
+  if (target.userId === context.userId) {
+    throw new AuthError('forbidden', 'You cannot change your own membership.');
+  }
+  if (context.role === 'owner') return;
+  if (target.role === 'admin' || nextRole === 'admin') {
+    throw new AuthError('forbidden', 'Only the owner can manage admins.');
+  }
+}
+
+/** app_accept_invitation / app_transfer_ownership / 触发器抛出的错误码 → 可读提示。 */
+const DB_ERROR_MESSAGES: Record<string, string> = {
+  invitation_already_member: 'You are already a member of this company.',
+  invitation_email_mismatch:
+    'This invitation was sent to a different email address. Sign in with that email to accept it.',
+  invitation_member_suspended:
+    'Your membership in this company is suspended. Ask the owner to reinstate you.',
+  invitation_revoked: 'This invitation was revoked.',
+  invitation_already_accepted: 'This invitation was already accepted.',
+  invitation_expired: 'This invitation has expired.',
+  invitation_not_found: 'This invitation link is not valid.',
+  owner_membership_protected: 'The owner cannot be changed this way. Use ownership transfer.',
+  ownership_transfer_forbidden: 'Only the owner can transfer ownership.',
+  ownership_transfer_target_not_found: 'That member does not exist.',
+  ownership_transfer_target_inactive: 'Only an active member can become the owner.',
+  ownership_transfer_target_is_owner: 'That member is already the owner.',
+};
+
+function translateDbError(error: unknown): never {
+  if (error instanceof Error) {
+    for (const [code, message] of Object.entries(DB_ERROR_MESSAGES)) {
+      if (error.message.includes(code)) {
+        throw new AuthError(code.endsWith('not_found') ? 'not_found' : 'forbidden', message);
+      }
+    }
+  }
+  throw error;
+}
 
 export async function listMembers(orgSlug: string): Promise<MemberRow[]> {
   const context = await requirePermission(orgSlug, 'member:manage');
@@ -43,6 +90,9 @@ export async function inviteMember(
 ): Promise<{ token: string }> {
   const data = inviteMemberSchema.parse(input);
   const context = await requirePermission(orgSlug, 'member:manage');
+  if (data.role === 'admin' && context.role !== 'owner') {
+    throw new AuthError('forbidden', 'Only the owner can invite admins.');
+  }
   const { token, tokenHash } = generateInvitationToken();
 
   await withTransaction(context.userId, async (tx) => {
@@ -116,16 +166,7 @@ export async function acceptInvitation(token: string): Promise<{ orgSlug: string
 
     // 上面的检查是为了给出可读的错误信息；
     // app_accept_invitation 内部会在行锁下重新校验一遍，是真正的权威判断。
-    let membershipId: string;
-    try {
-      membershipId = await acceptInvitationByToken(tx, token, userId);
-    } catch (error) {
-      // 已是成员时接受邀请曾会覆盖原角色——owner 点开自己的邀请就被降级了。
-      if (error instanceof Error && error.message.includes('invitation_already_member')) {
-        throw new AuthError('forbidden', 'You are already a member of this company.');
-      }
-      throw error;
-    }
+    const membershipId = await acceptInvitationByToken(tx, token, userId).catch(translateDbError);
 
     await recordAudit(tx, {
       organizationId: invitation.organizationId,
@@ -137,6 +178,92 @@ export async function acceptInvitation(token: string): Promise<{ orgSlug: string
     });
 
     return { orgSlug: invitation.organizationSlug };
+  });
+}
+
+export type MyInvitation = { id: string; organizationName: string; role: Role };
+
+/**
+ * 发给当前登录邮箱、仍待处理的邀请。onboarding 用它让「弄丢了邀请链接」的人
+ * 也能加入公司，而不是只能新建一家。
+ *
+ * 走 withoutUserContext 的理由与 getInvitationPreview 相同：此刻还不是成员，
+ * 任何按成员关系过滤的策略都查不到。收窄靠 where 里的邮箱等值匹配。
+ */
+export async function listMyPendingInvitations(): Promise<MyInvitation[]> {
+  const userId = await requireUserId();
+  const rows = await withoutUserContext(
+    (tx) => tx`
+      select i.id, o.name as organization_name, i.role
+      from invitations i
+      join organizations o on o.id = i.organization_id
+      join app_users u on lower(u.email) = lower(i.email)
+      where u.id = ${userId}
+        and i.accepted_at is null
+        and i.revoked_at is null
+        and i.expires_at > now()
+        and not exists (
+          select 1 from memberships m
+          where m.organization_id = i.organization_id and m.user_id = u.id
+        )
+      order by i.created_at desc
+    `,
+  );
+  return rows.map((r) => ({
+    id: r.id as string,
+    organizationName: r.organization_name as string,
+    role: r.role as Role,
+  }));
+}
+
+/** 当前账号被暂停的公司名称，给 onboarding / 首页解释「为什么我的公司不见了」。 */
+export async function listMySuspendedCompanies(): Promise<string[]> {
+  const userId = await requireUserId();
+  const rows = await withoutUserContext(
+    (tx) => tx`
+      select o.name from memberships m
+      join organizations o on o.id = m.organization_id
+      where m.user_id = ${userId} and m.status = 'suspended'
+      order by o.name
+    `,
+  );
+  return rows.map((r) => r.name as string);
+}
+
+/**
+ * 按邀请 id 接受，只对发给当前登录邮箱的邀请有效。
+ * 邀请 token 只以哈希存储，onboarding 拿不到原文链接，所以这里查出哈希交给
+ * app_accept_invitation——后者仍会在行锁下重新校验状态与邮箱。
+ */
+export async function acceptInvitationById(invitationId: string): Promise<{ orgSlug: string }> {
+  const userId = await requireUserId();
+
+  const [invitation] = await withoutUserContext(
+    (tx) => tx`
+      select i.token_hash, i.organization_id, i.role, o.slug
+      from invitations i
+      join organizations o on o.id = i.organization_id
+      join app_users u on lower(u.email) = lower(i.email)
+      where i.id = ${invitationId} and u.id = ${userId}
+    `,
+  );
+  if (!invitation) throw new AuthError('not_found', 'This invitation link is not valid.');
+
+  return withTransaction(userId, async (tx) => {
+    const rows = await tx`
+      select app_accept_invitation(${invitation.token_hash as string}, ${userId}) as membership_id
+    `.catch(translateDbError);
+
+    await recordAudit(tx, {
+      organizationId: invitation.organization_id as string,
+      actorUserId: userId,
+      action: 'membership.accepted',
+      entityType: 'membership',
+      entityId: rows[0].membership_id as string,
+      after: { role: invitation.role },
+    });
+
+    return { orgSlug: invitation.slug as string };
   });
 }
 
@@ -156,6 +283,7 @@ export async function changeMemberRole(
     if (member.role === 'owner') {
       throw new AuthError('forbidden', 'Use ownership transfer to change the owner.');
     }
+    assertCanManage(context, member, data.role);
 
     await updateMembershipRole(tx, data.membershipId, data.role);
     await recordAudit(tx, {
@@ -186,6 +314,7 @@ export async function setMemberStatus(
       // 允许暂停 owner 会把公司锁死：没人能再改成员或转让所有权。
       throw new AuthError('forbidden', 'The owner cannot be suspended.');
     }
+    assertCanManage(context, member);
 
     await updateMembershipStatus(tx, membershipId, status as MembershipStatus);
     await recordAudit(tx, {
@@ -218,14 +347,10 @@ export async function transferOwnership(
       throw new AuthError('forbidden', 'That member is already the owner.');
     }
 
-    const currentOwnerId = await findOwnerMembershipId(tx, context.organizationId);
-    if (!currentOwnerId) {
-      throw new AuthError('not_found', 'This company has no owner to transfer from.');
-    }
-
-    // 唯一索引 memberships_single_owner 要求先腾出 owner 位置，顺序不能颠倒。
-    await updateMembershipRole(tx, currentOwnerId, 'admin');
-    await updateMembershipRole(tx, targetMembershipId, 'owner');
+    // 降级与提升在数据库函数里原子完成；owner 行的保护触发器只放行这条路径。
+    await tx`select app_transfer_ownership(${context.organizationId}, ${targetMembershipId})`.catch(
+      translateDbError,
+    );
 
     await recordAudit(tx, {
       organizationId: context.organizationId,

@@ -51,6 +51,15 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
 
   const currentMember = members.find((m) => m.userId === currentUserId);
   const isOwner = currentMember?.role === 'owner';
+  // 页面要求 member:manage，owner 与 admin 都有；之前控件只对 owner 显示，
+  // admin 进来只看到一张只读名单。层级规则与 server/actions/members.ts 的
+  // assertCanManage 一致：admin 只能管理 bookkeeper / viewer，谁都不能改自己。
+  const canManage = isOwner || currentMember?.role === 'admin';
+  const canManageMember = (m: { userId: string; role: string }) =>
+    canManage &&
+    m.userId !== currentUserId &&
+    m.role !== 'owner' &&
+    (isOwner || m.role !== 'admin');
 
   const roleLabels: Record<string, string> = {
     owner: t.members.roleOwner,
@@ -105,7 +114,7 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                 {statusLabels[m.status] ?? m.status}
               </span>
 
-              {isOwner && m.userId !== currentUserId ? (
+              {canManageMember(m) ? (
                 <>
                   <select
                     aria-describedby={`role-hint-${m.membershipId}`}
@@ -116,7 +125,7 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                       try { await changeMemberRole(orgSlug, m.membershipId, next as import('@/server/domain/permissions').Role); } catch (err) { setError((err as Error).message); }
                     }}
                   >
-                    <option value="admin">{t.members.roleAdmin}</option>
+                    {isOwner ? <option value="admin">{t.members.roleAdmin}</option> : null}
                     <option value="bookkeeper">{t.members.roleBookkeeper}</option>
                     <option value="viewer">{t.members.roleViewer}</option>
                   </select>
@@ -132,7 +141,7 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                     {m.status === 'active' ? t.members.suspend : t.members.reactivate}
                   </button>
 
-                  {m.role !== 'owner' ? (
+                  {isOwner && m.status === 'active' ? (
                     <button onClick={async () => {
                       if (!confirm(t.members.transferConfirm)) return;
                       try { await transferOwnership(orgSlug, m.membershipId); } catch (err) { setError((err as Error).message); }
@@ -147,7 +156,7 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
         </ul>
       </section>
 
-      {isOwner ? (
+      {canManage ? (
         <section>
           <h2>{t.members.invite}</h2>
           {/* 原来邮箱框只有 placeholder 没有 <label>，角色下拉连 placeholder
@@ -172,7 +181,7 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                 value={role}
                 onChange={(e) => setRole(e.target.value)}
               >
-                <option value="admin">{t.members.roleAdmin}</option>
+                {isOwner ? <option value="admin">{t.members.roleAdmin}</option> : null}
                 <option value="bookkeeper">{t.members.roleBookkeeper}</option>
                 <option value="viewer">{t.members.roleViewer}</option>
               </select>
@@ -256,7 +265,7 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                     一份带标一份不带，看起来像是漏渲染而不是「这一整节都是待接受」。
                     每行标一次，两份列表读起来才是同一套词汇。 */}
                 <span className={statusClasses.invited}>{t.members.statusInvited}</span>
-                {isOwner ? (
+                {canManage && (isOwner || inv.role !== 'admin') ? (
                   <button onClick={async () => {
                     try { await revokeInvitation(orgSlug, inv.id); } catch (err) { setError((err as Error).message); }
                   }}>
