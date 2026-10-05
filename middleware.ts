@@ -1,5 +1,6 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
+import { safeNextPath } from '@/lib/safe-next-path';
 
 const PUBLIC_PATHS = [
   '/login',
@@ -59,9 +60,9 @@ export async function middleware(request: NextRequest) {
   }
 
   if (user && (pathname === '/login' || pathname === '/signup')) {
-    const url = request.nextUrl.clone();
-    url.pathname = '/';
-    return NextResponse.redirect(url);
+    // 已登录的人点开带 next 的登录链接（比如邀请）时，直接送去 next。
+    const next = safeNextPath(request.nextUrl.searchParams.get('next'));
+    return NextResponse.redirect(new URL(next, request.url));
   }
 
   return response;

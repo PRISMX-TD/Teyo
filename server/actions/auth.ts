@@ -14,6 +14,7 @@ import { getMessages } from '@/lib/i18n';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
 import { createServerClient } from '@/lib/supabase/server';
 import { ensureAppUser } from '@/server/auth/ensure-app-user';
+import { safeNextPath } from '@/lib/safe-next-path';
 
 /**
  * 「这次登录失败是因为凭据不对」还是「根本没问到服务」。
@@ -59,6 +60,8 @@ export async function signUp(input: {
   password: string;
   displayName: string;
   locale: Locale;
+  /** 注册完要回到的站内路径，比如邀请链接 /invite/xxx。 */
+  next?: string;
 }): Promise<AuthResult> {
   // safeParse 而不是 parse：这个模块的约定是把错误**返回**给表单
   // （见上面 AuthResult 的注释），而 .parse() 抛出的 ZodError 会在生产构建
@@ -69,12 +72,16 @@ export async function signUp(input: {
 
   const supabase = await createServerClient();
   const origin = (await headers()).get('origin') ?? '';
+  const next = input.next ? safeNextPath(input.next) : null;
 
   const { data, error } = await supabase.auth.signUp({
     email: parsed.email,
     password: parsed.password,
     options: {
-      emailRedirectTo: `${origin}/auth/callback`,
+      // 确认邮件点开后经 /auth/callback 回到 next，否则受邀者会落到 /onboarding。
+      emailRedirectTo: next
+        ? `${origin}/auth/callback?next=${encodeURIComponent(next)}`
+        : `${origin}/auth/callback`,
       data: { display_name: parsed.displayName, locale: parsed.locale },
     },
   });
@@ -88,12 +95,14 @@ export async function signUp(input: {
     await ensureAppUser(data.user.id, parsed.email, parsed.displayName, parsed.locale);
   }
 
-  redirect(data.session ? '/onboarding' : '/login?checkEmail=1');
+  if (data.session) redirect(next ?? '/onboarding');
+  redirect(next ? `/login?checkEmail=1&next=${encodeURIComponent(next)}` : '/login?checkEmail=1');
 }
 
 export async function signIn(input: {
   email: string;
   password: string;
+  next?: string;
 }): Promise<AuthResult> {
   const result = signInSchema.safeParse(input);
   if (!result.success) return { error: firstIssueMessage(result.error) };
@@ -128,7 +137,7 @@ export async function signIn(input: {
     );
   }
 
-  redirect('/');
+  redirect(safeNextPath(input.next ?? null));
 }
 
 export async function signOut(): Promise<void> {

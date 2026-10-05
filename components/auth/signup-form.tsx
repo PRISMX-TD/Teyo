@@ -20,7 +20,14 @@ import { signUp } from '@/server/actions/auth';
  * app/(auth)/signup/page.tsx）。它只是**默认值**——用户改了就以用户为准，
  * 而那个选择才是写进 app_users.locale 的东西。
  */
-export function SignupForm({ initialLocale = 'en' }: { initialLocale?: Locale }) {
+export function SignupForm({
+  initialLocale = 'en',
+  next,
+}: {
+  initialLocale?: Locale;
+  /** 注册后回到的站内路径（如邀请链接），由服务端 safeNextPath 校验。 */
+  next?: string;
+}) {
   const [locale, setLocale] = useState<Locale>(initialLocale);
   const t = getMessages(locale);
 
@@ -30,6 +37,7 @@ export function SignupForm({ initialLocale = 'en' }: { initialLocale?: Locale })
       password: String(formData.get('password') ?? ''),
       displayName: String(formData.get('displayName') ?? ''),
       locale,
+      next,
     });
   }
 
@@ -40,7 +48,7 @@ export function SignupForm({ initialLocale = 'en' }: { initialLocale?: Locale })
       action={action}
       footer={
         <p>
-          <Link href="/login">{t.auth.signIn}</Link>
+          <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
         </p>
       }
     >

@@ -1,7 +1,8 @@
 import { getInvitationPreview } from '@/server/actions/profile';
 import { acceptInvitation } from '@/server/actions/members';
 import { getMessages } from '@/lib/i18n';
-import { requireUserId } from '@/server/auth/guard';
+import { redirect } from 'next/navigation';
+import { getCurrentUserId } from '@/server/auth/session';
 import { getUserLocale } from '@/server/repositories/organizations';
 
 export default async function InvitePage({
@@ -10,7 +11,10 @@ export default async function InvitePage({
   params: Promise<{ token: string }>;
 }) {
   const { token } = await params;
-  const userId = await requireUserId();
+  const userId = await getCurrentUserId();
+  // 未登录时带着邀请地址去登录/注册，登录后才能回到这里点「接受」，
+  // 否则新用户会被一路带到 /onboarding 去建公司。
+  if (!userId) redirect(`/login?next=${encodeURIComponent(`/invite/${token}`)}`);
   const locale = (await getUserLocale(userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
@@ -39,7 +43,8 @@ export default async function InvitePage({
           <form
             action={async () => {
               'use server';
-              await acceptInvitation(token);
+              const { orgSlug } = await acceptInvitation(token);
+              redirect(`/${orgSlug}`);
             }}
           >
             <button type="submit">{t.invite.accept}</button>

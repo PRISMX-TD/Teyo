@@ -1,7 +1,12 @@
 import { SignupForm } from '@/components/auth/signup-form';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
 
-export default async function SignupPage() {
+export default async function SignupPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next } = await searchParams;
   /**
    * 语言选择器的**初始值**取自浏览器的 Accept-Language。
    *
@@ -13,5 +18,5 @@ export default async function SignupPage() {
    * 登录、忘记密码、重设密码三页已经按 Accept-Language 协商了，注册页
    * 不跟上的话，同一个未登录用户在四个页面之间会看到语言来回跳。
    */
-  return <SignupForm initialLocale={await resolveAnonymousLocale()} />;
+  return <SignupForm initialLocale={await resolveAnonymousLocale()} next={next} />;
 }

@@ -7,16 +7,18 @@ import { signIn } from '@/server/actions/auth';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checkEmail?: string }>;
+  searchParams: Promise<{ checkEmail?: string; next?: string }>;
 }) {
   const t = getMessages(await resolveAnonymousLocale());
-  const { checkEmail } = await searchParams;
+  const { checkEmail, next } = await searchParams;
+  const signupHref = next ? `/signup?next=${encodeURIComponent(next)}` : '/signup';
 
   async function action(formData: FormData) {
     'use server';
     return signIn({
       email: String(formData.get('email') ?? ''),
       password: String(formData.get('password') ?? ''),
+      next,
     });
   }
 
@@ -29,7 +31,7 @@ export default async function LoginPage({
         <p>
           <Link href="/forgot-password">{t.auth.forgotPassword}</Link>
           {' · '}
-          <Link href="/signup">{t.auth.signUp}</Link>
+          <Link href={signupHref}>{t.auth.signUp}</Link>
         </p>
       }
     >
