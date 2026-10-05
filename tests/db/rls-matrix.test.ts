@@ -629,6 +629,8 @@ describe('前提：探针真的受 RLS 约束', () => {
       from pg_class c
       join pg_namespace n on n.oid = c.relnamespace
       where n.nspname = 'public' and c.relkind = 'r' and c.relrowsecurity
+        -- 迁移记录表开 RLS 只为挡住 PostgREST（0030），它不属于应用，没有策略可断言。
+        and c.relname <> 'schema_migrations'
       order by c.relname
     `;
     const live = rows.map((r) => r.relname as string);
