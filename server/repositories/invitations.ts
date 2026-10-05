@@ -79,6 +79,23 @@ export async function insertInvitation(
   return id;
 }
 
+/** 该邮箱是否已是公司的活跃成员——这种邀请即使发出去也只会被 app_accept_invitation 拒绝。 */
+export async function isActiveMemberEmail(
+  tx: Tx,
+  organizationId: string,
+  email: string,
+): Promise<boolean> {
+  const rows = await tx`
+    select 1
+    from memberships m
+    join app_users u on u.id = m.user_id
+    where m.organization_id = ${organizationId}
+      and m.status = 'active'
+      and lower(u.email) = ${email.toLowerCase()}
+  `;
+  return rows.length > 0;
+}
+
 export async function listPendingInvitations(
   tx: Tx,
   organizationId: string,

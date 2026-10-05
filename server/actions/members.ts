@@ -11,6 +11,7 @@ import {
   findInvitationByToken,
   generateInvitationToken,
   insertInvitation,
+  isActiveMemberEmail,
   listPendingInvitations,
   markInvitationRevoked,
   type InvitationRow,
@@ -45,6 +46,10 @@ export async function inviteMember(
   const { token, tokenHash } = generateInvitationToken();
 
   await withTransaction(context.userId, async (tx) => {
+    if (await isActiveMemberEmail(tx, context.organizationId, data.email)) {
+      throw new AuthError('forbidden', 'That person is already a member of this company.');
+    }
+
     const invitationId = await insertInvitation(tx, {
       organizationId: context.organizationId,
       email: data.email,
@@ -111,7 +116,16 @@ export async function acceptInvitation(token: string): Promise<{ orgSlug: string
 
     // 上面的检查是为了给出可读的错误信息；
     // app_accept_invitation 内部会在行锁下重新校验一遍，是真正的权威判断。
-    const membershipId = await acceptInvitationByToken(tx, token, userId);
+    let membershipId: string;
+    try {
+      membershipId = await acceptInvitationByToken(tx, token, userId);
+    } catch (error) {
+      // 已是成员时接受邀请曾会覆盖原角色——owner 点开自己的邀请就被降级了。
+      if (error instanceof Error && error.message.includes('invitation_already_member')) {
+        throw new AuthError('forbidden', 'You are already a member of this company.');
+      }
+      throw error;
+    }
 
     await recordAudit(tx, {
       organizationId: invitation.organizationId,

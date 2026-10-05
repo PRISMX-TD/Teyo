@@ -11,6 +11,7 @@ vi.mock('@/server/auth/session', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
 const { createOrganization } = await import('@/server/actions/organizations');
+const { generateInvitationToken } = await import('@/server/repositories/invitations');
 const {
   acceptInvitation,
   changeMemberRole,
@@ -141,6 +142,34 @@ describe('acceptInvitation', () => {
       where organization_id = ${orgId} and email = ${staffEmail}
     `;
     expect(invitation.accepted_at).not.toBeNull();
+  });
+
+  it('refuses to invite someone who is already an active member', async () => {
+    user.id = ownerId;
+    const [owner] = await admin`select email from app_users where id = ${ownerId}`;
+    await expect(
+      inviteMember(orgSlug, { email: owner.email, role: 'bookkeeper' }),
+    ).rejects.toThrow(/already a member/i);
+  });
+
+  it('never lets an invitation demote the owner', async () => {
+    // 绕过 inviteMember 的前置检查，直接造一封发给 owner 的邀请，验证数据库这道防线。
+    const { token, tokenHash } = generateInvitationToken();
+    const [owner] = await admin`select email from app_users where id = ${ownerId}`;
+    await admin`
+      insert into invitations (organization_id, email, role, token_hash, expires_at, invited_by)
+      values (${orgId}, ${owner.email}, 'bookkeeper', ${tokenHash}, now() + interval '1 day', ${ownerId})
+    `;
+
+    user.id = ownerId;
+    await expect(acceptInvitation(token)).rejects.toThrow(/already a member/i);
+
+    const [membership] = await admin`
+      select role from memberships where organization_id = ${orgId} and user_id = ${ownerId}
+    `;
+    expect(membership.role).toBe('owner');
+    const [invitation] = await admin`select accepted_at from invitations where token_hash = ${tokenHash}`;
+    expect(invitation.accepted_at).toBeNull();
   });
 
   it('rejects reusing a token that was already accepted', async () => {
