@@ -72,18 +72,42 @@ describe('getInvitationPreview', () => {
   it('describes a valid invitation without requiring membership', async () => {
     currentUserId = ownerId;
     const { token } = await inviteMember(orgSlug, {
-      email: 'profile@example.com',
+      email: `test-profile-${RUN}@example.com`,
       role: 'bookkeeper',
     });
 
     // 受邀者还不是成员，也必须能看到邀请内容
     currentUserId = userId;
     const preview = await getInvitationPreview(token);
-    expect(preview).toEqual({
+    expect(preview).toMatchObject({
       organizationName: 'Preview Co',
       role: 'bookkeeper',
       state: 'valid',
     });
+  });
+
+  it('tells a different signed-in account that the invitation is not theirs', async () => {
+    currentUserId = ownerId;
+    const { token } = await inviteMember(orgSlug, {
+      email: 'someone-else@example.com',
+      role: 'viewer',
+    });
+
+    currentUserId = userId;
+    const preview = await getInvitationPreview(token);
+    expect(preview.state).toBe('wrongAccount');
+    expect(preview.signedInEmail).toBe(`test-profile-${RUN}@example.com`);
+  });
+
+  it('recognises an existing member instead of offering to accept again', async () => {
+    currentUserId = ownerId;
+    const { token } = await inviteMember(orgSlug, {
+      email: 'member-check@example.com',
+      role: 'viewer',
+    });
+    // owner 本人打开这封邀请：他已经是成员，应直接得到「进入公司」。
+    const preview = await getInvitationPreview(token);
+    expect(preview.state).toBe('member');
   });
 
   it('reports an invalid token without leaking whether the company exists', async () => {

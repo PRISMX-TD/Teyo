@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { safeNextPath } from '@/lib/safe-next-path';
 import { AuthForm } from '@/components/auth/auth-form';
 import { getMessages } from '@/lib/i18n';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
@@ -10,7 +11,9 @@ export default async function LoginPage({
   searchParams: Promise<{ checkEmail?: string; next?: string }>;
 }) {
   const t = getMessages(await resolveAnonymousLocale());
-  const { checkEmail, next } = await searchParams;
+  const { checkEmail, next: rawNext } = await searchParams;
+  // 入口处就收窄成站内路径，拼进链接的值和最终跳转用的值是同一个。
+  const next = rawNext ? safeNextPath(rawNext) : undefined;
   const signupHref = next ? `/signup?next=${encodeURIComponent(next)}` : '/signup';
 
   async function action(formData: FormData) {
@@ -29,7 +32,7 @@ export default async function LoginPage({
       action={action}
       footer={
         <p>
-          <Link href="/forgot-password">{t.auth.forgotPassword}</Link>
+          <Link href={next ? `/forgot-password?next=${encodeURIComponent(next)}` : '/forgot-password'}>{t.auth.forgotPassword}</Link>
           {' · '}
           <Link href={signupHref}>{t.auth.signUp}</Link>
         </p>

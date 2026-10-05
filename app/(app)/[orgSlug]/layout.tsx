@@ -20,7 +20,8 @@ export default async function AppLayout({
   const isMember = allOrgs.some((o) => o.slug === orgSlug);
   if (!isMember) {
     const { redirect } = await import('next/navigation');
-    redirect('/');
+    // 带上原因：被暂停或移除的人不该被一声不响地丢到建公司页。
+    redirect('/?notice=no_access');
   }
 
   resolveOrgContext(orgSlug);

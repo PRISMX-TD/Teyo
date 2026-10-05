@@ -28,6 +28,13 @@ const en = {
     industry: 'Industry',
     submit: 'Create company',
     nameTooShort: 'Enter a company name of at least 2 characters.',
+    pendingTitle: 'Invitations waiting for you',
+    pendingItem: '{org} invited you to join as {role}.',
+    join: 'Join',
+    orCreate: 'Or set up your own company',
+    suspended: 'Your access to {orgs} is suspended. Ask the owner to reinstate you.',
+    noAccess: 'You no longer have access to that company.',
+    joinFailed: 'That invitation could not be accepted. It may have expired or been revoked.',
   },
   nav: {
     overview: 'Overview',
@@ -214,6 +221,12 @@ const en = {
     expired: 'This invitation has expired. Ask for a new one.',
     invalid: 'This invitation link is not valid.',
     alreadyMember: 'You are already part of this company.',
+    goToCompany: 'Go to {org}',
+    wrongAccount:
+      'This invitation was sent to a different email address. You are signed in as {email}.',
+    switchAccount: 'Sign in with another account',
+    suspended: 'Your access to {org} is suspended. Ask the owner to reinstate you.',
+    acceptFailed: 'This invitation could not be accepted. Please try again.',
   },
   settings: {
     general: 'Company',

@@ -5,12 +5,17 @@ import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 
 /** 有公司就跳第一家公司，没有就跳 /onboarding，只有一家则展示链接。 */
-export default async function HomePage() {
+export default async function HomePage({
+  searchParams,
+}: {
+  searchParams: Promise<{ notice?: string }>;
+}) {
+  const { notice } = await searchParams;
   const userId = await requireUserId();
   const orgs = await listUserOrganizations(userId);
 
   if (orgs.length === 0) {
-    redirect('/onboarding');
+    redirect(notice === 'no_access' ? '/onboarding?notice=no_access' : '/onboarding');
   }
 
   if (orgs.length === 1) {
@@ -24,6 +29,11 @@ export default async function HomePage() {
     <main className="landing">
       <h1>{t.brand.name}</h1>
       <p>{t.brand.tagline}</p>
+      {notice === 'no_access' ? (
+        <p role="status" className="form-error">
+          {t.onboarding.noAccess}
+        </p>
+      ) : null}
       <nav>
         <ul>
           {orgs.map((org) => (

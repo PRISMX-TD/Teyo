@@ -140,10 +140,11 @@ export async function signIn(input: {
   redirect(safeNextPath(input.next ?? null));
 }
 
-export async function signOut(): Promise<void> {
+/** next：登出后带去登录页的回跳地址，比如邀请页的「换一个账号登录」。 */
+export async function signOut(next?: string): Promise<void> {
   const supabase = await createServerClient();
   await supabase.auth.signOut();
-  redirect('/login');
+  redirect(next ? `/login?next=${encodeURIComponent(safeNextPath(next))}` : '/login');
 }
 
 /**
@@ -158,7 +159,7 @@ export async function signOut(): Promise<void> {
  * 会把这个端点变成一台账号枚举机。只有「格式都不对」这一种才回错，
  * 因为它完全不涉及「这个邮箱在不在库里」。
  */
-export async function requestPasswordReset(email: string): Promise<AuthResult> {
+export async function requestPasswordReset(email: string, next?: string): Promise<AuthResult> {
   const parsed = resetRequestSchema.safeParse(email);
   if (!parsed.success) {
     return { error: 'That does not look like an email address.' };
@@ -166,9 +167,15 @@ export async function requestPasswordReset(email: string): Promise<AuthResult> {
 
   const supabase = await createServerClient();
   const origin = (await headers()).get('origin') ?? '';
+  // 重设完密码要回到原来的去处（比如邀请链接），否则又会落到 /onboarding。
+  const resetPath = next
+    ? `/reset-password?next=${encodeURIComponent(safeNextPath(next))}`
+    : '/reset-password';
 
   await supabase.auth.resetPasswordForEmail(parsed.data, {
-    redirectTo: `${origin}/reset-password`,
+    // 必须经过 /auth/callback：PKCE 流程下邮件链接带的是 ?code=，只有回调会
+    // exchangeCodeForSession。直接落到 /reset-password 时没有会话，updateUser 会失败。
+    redirectTo: `${origin}/auth/callback?next=${encodeURIComponent(resetPath)}`,
   });
 }
 
@@ -180,7 +187,7 @@ export async function requestPasswordReset(email: string): Promise<AuthResult> {
  * 任意字符串直接交给 Supabase——包括空串。表单上的 minLength={8} 是 HTML
  * 属性，绕过表单直接调 Server Action 时它不存在。
  */
-export async function updatePassword(newPassword: string): Promise<AuthResult> {
+export async function updatePassword(newPassword: string, next?: string): Promise<AuthResult> {
   const parsed = newPasswordSchema.safeParse(newPassword);
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? 'That password cannot be used.' };
@@ -189,5 +196,5 @@ export async function updatePassword(newPassword: string): Promise<AuthResult> {
   const supabase = await createServerClient();
   const { error } = await supabase.auth.updateUser({ password: parsed.data });
   if (error) return { error: error.message };
-  redirect('/');
+  redirect(safeNextPath(next ?? null));
 }

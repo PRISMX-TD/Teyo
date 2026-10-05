@@ -1,4 +1,5 @@
 import { SignupForm } from '@/components/auth/signup-form';
+import { safeNextPath } from '@/lib/safe-next-path';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
 
 export default async function SignupPage({
@@ -6,7 +7,9 @@ export default async function SignupPage({
 }: {
   searchParams: Promise<{ next?: string }>;
 }) {
-  const { next } = await searchParams;
+  const { next: rawNext } = await searchParams;
+  // 入口处就收窄成站内路径，拼进链接的值和最终跳转用的值是同一个。
+  const next = rawNext ? safeNextPath(rawNext) : undefined;
   /**
    * 语言选择器的**初始值**取自浏览器的 Accept-Language。
    *

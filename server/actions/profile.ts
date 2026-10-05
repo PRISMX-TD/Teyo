@@ -67,7 +67,22 @@ export async function updateLocale(locale: string): Promise<void> {
 export type InvitationPreview = {
   organizationName: string;
   role: Role | 'viewer';
-  state: 'valid' | 'expired' | 'revoked' | 'accepted' | 'invalid';
+  /**
+   * wrongAccount：邀请发给了别的邮箱。只回传当前登录的邮箱，不回传邀请邮箱——
+   * 拿着转发链接的人不该因此得知被邀请者是谁。
+   * member：当前账号已是这家公司的活跃成员；suspended：已被暂停。
+   */
+  state:
+    | 'valid'
+    | 'expired'
+    | 'revoked'
+    | 'accepted'
+    | 'invalid'
+    | 'wrongAccount'
+    | 'member'
+    | 'suspended';
+  signedInEmail?: string;
+  organizationSlug?: string;
 };
 
 /**
@@ -88,7 +103,7 @@ export type InvitationPreview = {
  * app_find_invitation 也只返回预览需要的那几列。
  */
 export async function getInvitationPreview(token: string): Promise<InvitationPreview> {
-  await requireUserId();
+  const userId = await requireUserId();
 
   const tokenHash = createHash('sha256').update(token).digest('hex');
 
@@ -101,6 +116,26 @@ export async function getInvitationPreview(token: string): Promise<InvitationPre
   }
 
   const invitation = rows[0];
+  const base = {
+    organizationName: (invitation.organization_name as string) ?? '',
+    role: ((invitation.role as Role) ?? 'viewer') as Role | 'viewer',
+    organizationSlug: invitation.organization_slug as string,
+  };
+
+  // 先看「这个账号与这家公司的关系」，再看邀请本身的状态：已是成员的人点开
+  // 一封已接受的邀请，该看到的是「进入公司」，而不是一句含糊的「已接受」。
+  const [me] = await withoutUserContext(
+    (tx) => tx`
+      select u.email, m.status
+      from app_users u
+      left join memberships m
+        on m.user_id = u.id and m.organization_id = ${invitation.organization_id as string}
+      where u.id = ${userId}
+    `,
+  );
+  if (me?.status === 'active') return { ...base, state: 'member' };
+  if (me?.status === 'suspended') return { ...base, state: 'suspended' };
+
   const state = invitation.revoked_at
     ? 'revoked'
     : invitation.accepted_at
@@ -109,9 +144,12 @@ export async function getInvitationPreview(token: string): Promise<InvitationPre
         ? 'expired'
         : 'valid';
 
-  return {
-    organizationName: (invitation.organization_name as string) ?? '',
-    role: (invitation.role as Role) ?? 'viewer',
-    state,
-  };
+  if (
+    state === 'valid' &&
+    String(me?.email ?? '').toLowerCase() !== String(invitation.email ?? '').toLowerCase()
+  ) {
+    return { ...base, state: 'wrongAccount', signedInEmail: (me?.email as string) ?? '' };
+  }
+
+  return { ...base, state };
 }

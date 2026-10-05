@@ -1,14 +1,22 @@
 import { AuthForm } from '@/components/auth/auth-form';
+import { safeNextPath } from '@/lib/safe-next-path';
 import { getMessages } from '@/lib/i18n';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
 import { updatePassword } from '@/server/actions/auth';
 
-export default async function ResetPasswordPage() {
+export default async function ResetPasswordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next: rawNext } = await searchParams;
+  // 入口处就收窄成站内路径，拼进链接的值和最终跳转用的值是同一个。
+  const next = rawNext ? safeNextPath(rawNext) : undefined;
   const t = getMessages(await resolveAnonymousLocale());
 
   async function action(formData: FormData) {
     'use server';
-    return updatePassword(String(formData.get('password') ?? ''));
+    return updatePassword(String(formData.get('password') ?? ''), next);
   }
 
   return (

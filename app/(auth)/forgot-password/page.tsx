@@ -1,10 +1,18 @@
 import Link from 'next/link';
+import { safeNextPath } from '@/lib/safe-next-path';
 import { AuthForm } from '@/components/auth/auth-form';
 import { getMessages } from '@/lib/i18n';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
 import { requestPasswordReset } from '@/server/actions/auth';
 
-export default async function ForgotPasswordPage() {
+export default async function ForgotPasswordPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ next?: string }>;
+}) {
+  const { next: rawNext } = await searchParams;
+  // 入口处就收窄成站内路径，拼进链接的值和最终跳转用的值是同一个。
+  const next = rawNext ? safeNextPath(rawNext) : undefined;
   const t = getMessages(await resolveAnonymousLocale());
 
   async function action(formData: FormData) {
@@ -13,7 +21,7 @@ export default async function ForgotPasswordPage() {
     // 返回 { error }，而 AuthForm 是靠这个返回值来渲染错误的——把它
     // await 掉再返回 undefined，等于那句校验永远不会显示给用户。
     // reset-password/page.tsx 一直是 return 的写法。
-    return requestPasswordReset(String(formData.get('email') ?? ''));
+    return requestPasswordReset(String(formData.get('email') ?? ''), next);
   }
 
   return (
@@ -24,7 +32,7 @@ export default async function ForgotPasswordPage() {
       successMessage={t.auth.resetLinkSent}
       footer={
         <p>
-          <Link href="/login">{t.auth.signIn}</Link>
+          <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
         </p>
       }
     >

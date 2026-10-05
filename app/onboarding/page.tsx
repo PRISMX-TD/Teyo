@@ -3,6 +3,12 @@ import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 import { createOrganization } from '@/server/actions/organizations';
+import {
+  acceptInvitationById,
+  listMyPendingInvitations,
+  listMySuspendedCompanies,
+} from '@/server/actions/members';
+import { AuthError } from '@/server/auth/guard';
 
 export default async function OnboardingPage({
   searchParams,
@@ -19,10 +25,68 @@ export default async function OnboardingPage({
 
   const locale = (await getUserLocale(userId)) as 'en' | 'zh';
   const t = getMessages(locale);
-  const nameRejected = (await searchParams).error === 'name';
+  const query = await searchParams;
+  const nameRejected = query.error === 'name';
+  const joinFailed = query.error === 'join';
+  const noAccess = query.notice === 'no_access';
+  // 没有公司不等于该去建公司：可能有一封邀请在等他（链接弄丢了，或者登录
+  // 绕过了邀请页），也可能他唯一的公司把他暂停了。两种都要说清楚。
+  const [invitations, suspended] = await Promise.all([
+    listMyPendingInvitations(),
+    listMySuspendedCompanies(),
+  ]);
 
   return (
     <main className="onboarding-page">
+      {noAccess ? (
+        <p role="status" className="form-error">
+          {t.onboarding.noAccess}
+        </p>
+      ) : null}
+      {suspended.length > 0 ? (
+        <p role="status" className="form-error">
+          {t.onboarding.suspended.replace('{orgs}', suspended.join(', '))}
+        </p>
+      ) : null}
+      {joinFailed ? (
+        <p role="alert" className="form-error">
+          {t.onboarding.joinFailed}
+        </p>
+      ) : null}
+
+      {invitations.length > 0 ? (
+        <section aria-labelledby="pending-invitations">
+          <h2 id="pending-invitations">{t.onboarding.pendingTitle}</h2>
+          <ul>
+            {invitations.map((invitation) => (
+              <li key={invitation.id}>
+                <form
+                  action={async () => {
+                    'use server';
+                    let orgSlug: string;
+                    try {
+                      ({ orgSlug } = await acceptInvitationById(invitation.id));
+                    } catch (err) {
+                      if (err instanceof AuthError) redirect('/onboarding?error=join');
+                      throw err;
+                    }
+                    redirect(`/${orgSlug}`);
+                  }}
+                >
+                  <span>
+                    {t.onboarding.pendingItem
+                      .replace('{org}', invitation.organizationName)
+                      .replace('{role}', invitation.role)}
+                  </span>{' '}
+                  <button type="submit">{t.onboarding.join}</button>
+                </form>
+              </li>
+            ))}
+          </ul>
+          <h2>{t.onboarding.orCreate}</h2>
+        </section>
+      ) : null}
+
       <h1>{t.onboarding.title}</h1>
       <p>{t.onboarding.subtitle}</p>
 
