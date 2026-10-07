@@ -6,7 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint app components lib server tests middleware.ts",
+    "lint": "eslint app components lib server tests scripts middleware.ts next.config.ts vitest.config.mts eslint.config.mjs",
     "typecheck": "tsc --noEmit",
     "migrate": "node scripts/migrate.mjs up",
     "migrate:status": "node scripts/migrate.mjs status",

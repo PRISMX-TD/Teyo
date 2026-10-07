@@ -26,7 +26,7 @@ export default defineConfig({
     // 默认的 5s/10s 是按「测试跑在本机」定的。这套测试连的是远端 Supabase
     // （vercel.json 把函数固定在 sin1，数据库在 ap-southeast-1），一次往返
     // 动辄几百毫秒，而 beforeAll 里往往要建公司 + 灌 34 个科目 + 13 个分类。
-    // 用默认值时 tests/repositories/overview.test.ts 的 beforeAll 与
+    // 用默认值时 tests/repositories/ 下造数据较重的 beforeAll 与
     // dashboard.test.ts 里造数据最多的那条会间歇性超时——失败的文件每轮
     // 都不一样，看起来像数据污染，实际只是网络慢。
     //

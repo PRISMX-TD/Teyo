@@ -2,9 +2,9 @@
 /**
  * 给一个一次性测试账号换出一份可用的浏览器会话 cookie。
  *
- * 用途与 scripts/dev-login-link.mjs 相同——在本地跑起来的应用上做界面
- * 验收——但走的是另一条路：那个脚本给出的 magic link 指向 Supabase 的
- * 域名，而验收用的浏览器面板只允许访问 localhost。
+ * 用途：在本地跑起来的应用上做界面验收。不直接用 magic link，是因为那条
+ * 链接指向 Supabase 的域名，而验收用的浏览器面板只允许访问 localhost。
+ * （注释里曾提到的 scripts/dev-login-link.mjs 从未入库，已不存在。）
  *
  * 这个脚本在**服务端**把一次性 token 换成 session，然后把它编码成
  * @supabase/ssr 在浏览器里用的那个 cookie，打印出来由调用方 set 进去。
@@ -20,8 +20,11 @@
  * 版本升级把这三样中的任何一样改掉，这个脚本就会失效——它是验收工具，
  * 不是产品代码，失效时表现为「登不进去」，不会影响任何线上行为。
  *
- * 安全边界与 dev-login-link.mjs 相同：拒绝 production、拒绝非
- * @example.com 的邮箱。
+ * 安全边界：拒绝 production、拒绝非 @example.com 的邮箱。
+ *
+ * 输出里带着一份真实可用的会话 token。scripts/dev-route-sweep.mjs 默认从
+ * 仓库根的 ._sess.json 读它（`npm run dev:session --silent > ._sess.json`），
+ * 那个文件已列进 .gitignore——别把它改存到会被提交的路径。
  */
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';

@@ -80,7 +80,8 @@ jobs:
       #
       # supabase/migrations/ 假设 auth 与 storage 这两个 schema 已经存在：
       # 0001 的 app_users.id 外键指向 auth.users，0006 往 storage.buckets 插
-      # 记录并在 storage.objects 上建策略。这两个 schema 在真实项目里由
+      # 记录并在 storage.objects 上建策略；0030 还假设 anon / authenticated
+      # 两个 API 角色存在。这两个 schema 在真实项目里由
       # Supabase 的 Auth 与 Storage 服务各自的迁移建出来，不在本仓库里。
       #
       # 这里建的是「够跑通迁移与测试的最小形状」，不是它们的复制品：
@@ -152,6 +153,22 @@ jobs:
           grant usage on schema storage to teyo_app;
           grant select, insert, update, delete on storage.objects to teyo_app;
           grant select on storage.buckets to teyo_app;
+
+          -- Supabase 给 PostgREST 用的两个 API 角色。0030 对它们做
+          -- `revoke execute ... from anon, authenticated` 与
+          -- `alter default privileges ... revoke ... from anon, authenticated`，
+          -- 角色不存在时这两句直接报 42704，整批迁移停在 0030。
+          -- 这里只建出空角色（nologin、无任何权限），够 revoke 有对象可作用即可。
+          do $$
+          begin
+            if not exists (select 1 from pg_roles where rolname = 'anon') then
+              create role anon nologin;
+            end if;
+            if not exists (select 1 from pg_roles where rolname = 'authenticated') then
+              create role authenticated nologin;
+            end if;
+          end
+          $$;
           SQL
 
       # 空库从 0001 跑到最后一条。任何一条迁移写坏了，这里就红。

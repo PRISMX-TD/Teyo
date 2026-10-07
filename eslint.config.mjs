@@ -34,18 +34,19 @@ const compat = new FlatCompat({
 // `npx next lint` 照样 exit 0、0 errors——它测量的范围恰好把这两条规则
 // 保护的每个文件都排除了。所以 next lint 的绿色对这条边界毫无信息量。
 //
-// 也没有把 server/ 加进 eslint.dirs：那会让 `next build` 一并去 lint
-// server/，而仓库里现有 3 个与记账边界无关的既有错误就在那儿
-// （server/repositories/bank_import.ts、server/services/bank_import_parser.ts），
-// 构建会因此永久变红——用一个永远红的门禁换一个永远绿的门禁，还是没人看。
+// 也没有把 server/ 加进 eslint.dirs：当初那里有 3 个与记账边界无关的既有
+// 错误（server/repositories/bank-import.ts、server/services/bank-import-parser.ts），
+// 加进去会让 `next build` 永久变红。那 3 个错误后来已经修掉，`npm run lint`
+// 现在是 0 errors / 0 warnings；但 CI 跑的就是 `npm run lint`，没有必要再让
+// `next build` 重复 lint 一遍同样的范围。
 //
 // 真正跑这两条规则的是两处：
-//   1. `npm run lint` —— 已显式列出 server 与 tests。它今天是红的：上面那
-//      3 个既有错误不属于本分支，没有一并修，也没有用 disable 注释盖掉。
-//   2. tests/posting/boundary-lint.test.ts —— 在 `npx vitest run`（这个项目
-//      里唯一每次都会跑的门禁）里用 ESLint 的 Node API 加载**本文件**，
-//      既证明规则本身有效，也扫一遍全仓。它只按 ruleId 过滤边界规则，
-//      因此不会被那 3 个既有错误染红，也不替它们遮掩。
+//   1. `npm run lint` —— 已显式列出 app components lib server tests scripts、
+//      middleware.ts 与几个根目录配置文件，.github/workflows/ci.yml 的 Lint
+//      步骤跑的就是它。
+//   2. tests/posting/boundary-lint.test.ts —— 在 `npx vitest run` 里用
+//      ESLint 的 Node API 加载**本文件**，既证明规则本身有效，也扫一遍全仓。
+//      它只按 ruleId 过滤边界规则，不会被无关的 lint 错误染红，也不替它们遮掩。
 //      改动本文件时那个测试会跟着红——那是它该有的样子。
 const boundaryMessage =
   "记账写入必须经过 server/posting/post-journal.ts 里的 postJournal / repostJournal，" +

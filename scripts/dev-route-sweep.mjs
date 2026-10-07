@@ -47,7 +47,20 @@ if (!slug) {
   process.exit(1);
 }
 
-const session = JSON.parse(fs.readFileSync(path.join(rootDir, cookieFile), 'utf8').trim());
+// 只取最后一行以 { 开头的 JSON：`npm run dev:session > ._sess.json` 不带
+// --silent 时，npm 会在前面多打两行 "> teyo@0.1.0 dev:session" 横幅，
+// 整个文件直接 JSON.parse 会失败。
+const sessionLine = fs
+  .readFileSync(path.join(rootDir, cookieFile), 'utf8')
+  .split(/\r?\n/)
+  .map((line) => line.trim())
+  .filter((line) => line.startsWith('{'))
+  .at(-1);
+if (!sessionLine) {
+  console.error(`${cookieFile} 里没有 scripts/dev-session-cookie.mjs 的 JSON 输出。`);
+  process.exit(1);
+}
+const session = JSON.parse(sessionLine);
 const cookieHeader = session.cookies.map(([n, v]) => `${n}=${v}`).join('; ');
 
 /** 从 app/ 目录扫出所有 page.tsx，转成可请求的路径。 */

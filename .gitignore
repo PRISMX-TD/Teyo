@@ -11,10 +11,21 @@ coverage/
 *.tsbuildinfo
 next-env.d.ts
 
-# 文档只保留本地，不入库
-*.md
+# 文档只保留本地，不入库。
+# 以前写的是 `*.md`，那会连根目录的 README.md 也一并挡掉；改成逐个点名，
+# 现有这几份本地文档的行为不变，而将来要入库的 README.md 不受影响。
+/DESIGN.md
+/PRODUCT.md
 docs/
 .superpowers/
+
+# 本机工具状态，不入库
+.claude/settings.local.json
+.impeccable/
+.uicheck/
+
+# scripts/dev-session-cookie.mjs 的输出：一份真实可用的会话 token
+._sess.json
 
 # Serwist PWA 产物不入库——构建时生成
 public/sw.js
@@ -24,4 +35,3 @@ public/swe-worker-*.js
 public/swe-worker-*.js.map
 public/workbox-*.js
 public/workbox-*.js.map
-.uicheck/
