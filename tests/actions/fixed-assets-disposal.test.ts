@@ -113,7 +113,7 @@ async function linesFor(transactionId: string) {
     select a.code, l.direction, l.amount_minor, l.base_amount_minor
     from journal_lines l join accounts a on a.id = l.account_id
     where l.transaction_id = ${transactionId}
-    order by l.direction desc, a.code
+    order by l.direction::text desc, a.code
   `;
 }
 
