@@ -1,5 +1,5 @@
 import type { PrecacheEntry, SerwistGlobalConfig } from 'serwist';
-import { Serwist, CacheFirst, StaleWhileRevalidate, ExpirationPlugin } from 'serwist';
+import { Serwist, CacheFirst, NetworkOnly, StaleWhileRevalidate, ExpirationPlugin } from 'serwist';
 
 declare global {
   interface WorkerGlobalScope extends SerwistGlobalConfig {
@@ -19,6 +19,16 @@ const serwist = new Serwist({
   // 绝不碰 HTML 导航和 RSC payload。HTML 让服务端正常渲染，
   // RSC 由 Next.js router 自行管理，SW 拦截只会引入延迟和缓存不一致。
   runtimeCaching: [
+    // HTML 导航：NetworkOnly，照样不缓存任何页面——但必须有这一条。
+    // Serwist 的 fallbacks 只是把一个 handlerDidError 插件挂到 runtimeCaching
+    // 里**已有**的策略上；原来没有任何一条匹配导航请求，SW 根本不接管导航，
+    // 离线时浏览器直接显示自己的断网页，/offline 兜底一次都没生效过。
+    // 同时它也让 navigationPreload 有了消费者（StrategyHandler 会用
+    // event.preloadResponse），不再是每次导航白发一个预加载请求。
+    {
+      matcher: ({ request }) => request.mode === 'navigate',
+      handler: new NetworkOnly(),
+    },
     // 字体（Google Fonts / 自托管）
     {
       matcher: /^https:\/\/fonts\.(?:gstatic)\.com\/.*/i,

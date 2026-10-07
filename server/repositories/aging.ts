@@ -272,15 +272,22 @@ export async function getArAging(
     credited as (
       select
         cn.invoice_id,
-        -- credit_notes.base_amount_minor 这个列名是历史遗留的误称：
-        -- server/actions/credit_notes.ts 直接把明细行金额相加写进去，
-        -- 一次汇率都没应用过，所以它装的其实是**原币**总额。这里正是
-        -- 需要原币的地方，用它是对的；但绝不能因为列名叫 base 就把它
-        -- 当本位币用（getCustomerStatement 以前就是这么用的）。
-        sum(cn.base_amount_minor) as credited_minor,
+        -- 这里要的是**原币**冲减额。原来取的是 cn.base_amount_minor，那时
+        -- createCreditNote 确实把原币合计误写进了这一列；B2 修好之后它装的
+        -- 是真正的本位币金额，于是一张 USD 100 @ 4.20 的贷项通知单会从 USD
+        -- 发票上冲掉 420。改成由明细现算：行金额 + 逐行 half-up 税额，与
+        -- creditNoteAmountsMinor 同一个整数公式 (a·bps·2 + 10000) / 20000。
+        sum(
+          cni.amount_minor
+          + (cni.amount_minor * coalesce(tr.rate_bps, 0) * 2 + 10000) / 20000
+        ) as credited_minor,
         bool_or(cn.currency <> i.currency) as currency_mismatch
       from credit_notes cn
       join invoices i on i.id = cn.invoice_id
+      join credit_note_items cni on cni.credit_note_id = cn.id
+      left join tax_rates tr
+        on tr.id = cni.tax_rate_id
+       and tr.organization_id = ${organizationId}
       where cn.organization_id = ${organizationId}
         and cn.voided_at is null
         and cn.status in ('issued', 'applied')
@@ -658,8 +665,39 @@ export async function getCustomerStatement(
       join payments p on p.id = pi.payment_id
       where p.organization_id = ${organizationId}
         and p.contact_id = ${contactId}
+        and p.type = 'received'
         and p.voided_at is null
         and pi.invoice_id is not null
+
+      union all
+
+      -- 还没核销到任何发票的那一截（预收 / 定金）。原来对账单只列
+      -- payment_items，于是客户付的定金在核销之前完全不出现——客户手里的
+      -- 流水上明明付过钱，对账单却说他一分没付。剩余 = 收款总额 − 已核销，
+      -- 按同一比例换成本位币；日后核销时这一截缩小、上面那一支相应长出来，
+      -- 两者之和始终是整笔收款。
+      select
+        p.payment_date as event_date,
+        'Payment on account' as description,
+        p.reference,
+        p.currency::text as currency,
+        true as measurable,
+        (-round(
+          (p.amount_minor - coalesce(ap.applied_minor, 0))::numeric
+          * p.base_amount_minor::numeric
+          / nullif(p.amount_minor, 0)::numeric
+        ))::bigint as base_amount
+      from payments p
+      left join (
+        select payment_id, sum(amount_minor) as applied_minor
+        from payment_items
+        group by payment_id
+      ) ap on ap.payment_id = p.id
+      where p.organization_id = ${organizationId}
+        and p.contact_id = ${contactId}
+        and p.type = 'received'
+        and p.voided_at is null
+        and p.amount_minor > coalesce(ap.applied_minor, 0)
 
       union all
 
@@ -670,8 +708,7 @@ export async function getCustomerStatement(
         cn.currency::text as currency,
         (cn.currency = (select base_currency from base) or t.id is not null) as measurable,
         case
-          -- 见 getArAging 里的注释：cn.base_amount_minor 装的是原币总额，
-          -- 只有在币种 = 本位币时它才同时也是本位币金额。
+          -- 币种 = 本位币时，单据上的 base_amount_minor 就是本位币金额。
           when cn.currency = (select base_currency from base) then -cn.base_amount_minor
           when t.id is not null then -t.base_amount_minor
           else 0::bigint
@@ -747,8 +784,35 @@ export async function getVendorStatement(
       join payments p on p.id = pi.payment_id
       where p.organization_id = ${organizationId}
         and p.contact_id = ${contactId}
+        and p.type = 'made'
         and p.voided_at is null
         and pi.bill_id is not null
+
+      union all
+
+      -- 预付给供应商、还没核销到账单的那一截。理由见 getCustomerStatement。
+      select
+        p.payment_date as event_date,
+        'Payment on account' as description,
+        p.reference,
+        p.currency::text as currency,
+        true as measurable,
+        (-round(
+          (p.amount_minor - coalesce(ap.applied_minor, 0))::numeric
+          * p.base_amount_minor::numeric
+          / nullif(p.amount_minor, 0)::numeric
+        ))::bigint as base_amount
+      from payments p
+      left join (
+        select payment_id, sum(amount_minor) as applied_minor
+        from payment_items
+        group by payment_id
+      ) ap on ap.payment_id = p.id
+      where p.organization_id = ${organizationId}
+        and p.contact_id = ${contactId}
+        and p.type = 'made'
+        and p.voided_at is null
+        and p.amount_minor > coalesce(ap.applied_minor, 0)
     )
     select event_date, description, reference, currency, measurable, base_amount
     from ev

@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { listPurchaseOrders } from '@/server/repositories/purchase_orders';
+import { listPurchaseOrders } from '@/server/repositories/purchase-orders';
 import { PoList } from '@/components/purchase-orders/po-list';
 
 export default async function PurchaseOrdersListPage({
@@ -45,6 +46,8 @@ export default async function PurchaseOrdersListPage({
         orgSlug={orgSlug}
         locale={locale}
         purchaseOrders={purchaseOrders}
+        baseCurrency={context.baseCurrency}
+        canChangeStatus={can(context.role, 'transaction:edit:any')}
       />
     </>
   );

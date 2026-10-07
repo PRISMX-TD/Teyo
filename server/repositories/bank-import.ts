@@ -226,6 +226,36 @@ export function importedTransactionClientUuid(importedTransactionId: string): st
   ].join('-');
 }
 
+/**
+ * 这一次「生成交易」该用的 client_uuid。
+ *
+ * 通常就是 importedTransactionClientUuid(id)。例外是：这一行以前生成过一笔
+ * 交易、那笔交易后来被作废、用户又把这一行「重置」回待处理想重新记一次
+ * （比如当初选错了分类）。这时派生出来的 uuid 仍然指着那笔作废的交易，
+ * postJournal 的幂等短路会把它原样返回——什么都没记，这一行却被标成
+ * 「已匹配」到一笔作废的记录上，界面上看起来一切正常。
+ *
+ * 所以命中的是作废交易时，从「这一行 id + 那笔作废交易的 id」再派生下一个。
+ * 仍然是确定性的：同一次重记的重放必然得到同一个 uuid，幂等不受影响。
+ */
+export async function importedTransactionPostingUuid(
+  tx: Tx,
+  organizationId: string,
+  importedTransactionId: string,
+): Promise<string> {
+  let clientUuid = importedTransactionClientUuid(importedTransactionId);
+
+  for (;;) {
+    const rows = await tx`
+      select id, voided_at from transactions
+      where organization_id = ${organizationId} and client_uuid = ${clientUuid}
+    `;
+    const existing = rows.at(0);
+    if (!existing || existing.voided_at === null) return clientUuid;
+    clientUuid = importedTransactionClientUuid(`${importedTransactionId}:${existing.id as string}`);
+  }
+}
+
 export async function matchImportedTransaction(
   tx: Tx,
   organizationId: string,
@@ -260,18 +290,5 @@ export async function resetImportedTransaction(
     update imported_transactions
     set status = 'pending', matched_transaction_id = null
     where id = ${id} and organization_id = ${organizationId}
-  `;
-}
-
-export async function deleteImportedTransactions(
-  tx: Tx,
-  organizationId: string,
-  ids: string[],
-): Promise<void> {
-  if (ids.length === 0) return;
-
-  await tx`
-    delete from imported_transactions
-    where organization_id = ${organizationId} and id = any(${ids}::uuid[])
   `;
 }

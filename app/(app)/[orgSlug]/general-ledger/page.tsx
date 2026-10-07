@@ -7,6 +7,16 @@ import { fiscalYearFor } from '@/server/services/year-end-close';
 import { listAllAccounts } from '@/server/repositories/accounts';
 import { getGeneralLedger } from '@/server/repositories/reports';
 
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function isIsoDate(value: string | undefined): value is string {
+  if (value === undefined || !ISO_DATE.test(value)) return false;
+  // 往返一遍挡住 2026-02-30 这种格式对、日历上不存在的日期（Postgres 会拒绝）。
+  const parsed = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
 export default async function GeneralLedgerPage({
   params,
   searchParams,
@@ -22,8 +32,11 @@ export default async function GeneralLedgerPage({
 
   // 按公司时区，不是服务端 UTC（见 server/auth/guard.ts 的 todayInOrg）。
   const today = todayInOrg(context);
-  const to = sp.to ?? today;
-  const accountId = sp.account;
+  // 查询串是用户可以随手改的地址栏：一个不像日期的 from/to、或者不像 uuid
+  // 的 account，原样进 SQL 只会让 Postgres 抛类型错误、整页 500。不合法的
+  // 当作没传，退回默认值。
+  const to = isIsoDate(sp.to) ? sp.to : today;
+  const accountId = sp.account && UUID.test(sp.account) ? sp.account : undefined;
 
   const { accounts, ledger, from } = await withTransaction(context.userId, async (tx) => {
     // 默认起点是**本财年**的第一天，不再是 `${year}-01-01`。总账最常被打开
@@ -32,15 +45,19 @@ export default async function GeneralLedgerPage({
     // 默认区间正好把上一次年结排除在外，那个科目的余额没有任何一行解释得了。
     const startMonth = await getFiscalYearStartMonth(tx, context.organizationId);
     const defaultFrom = fiscalYearFor(today, startMonth).start;
-    const resolvedFrom = sp.from ?? defaultFrom;
+    const resolvedFrom = isIsoDate(sp.from) ? sp.from : defaultFrom;
 
     const allAccts = await listAllAccounts(tx, context.organizationId);
-    const active = allAccts.filter((a) => a.isActive);
+    // 当前选中的科目即便已归档也留在下拉里：归档科目照样有历史分录可查，
+    // 选项里没有它的话，下拉显示的是「选择科目…」，与下面那张账对不上。
+    const options = allAccts.filter((a) => a.isActive || a.id === accountId);
     let l = null;
-    if (accountId) {
+    // 只有确实属于本公司的科目才去查；否则 getGeneralLedger 抛
+    // 'Account not found'，整页 500。
+    if (accountId && allAccts.some((a) => a.id === accountId)) {
       l = await getGeneralLedger(tx, context.organizationId, accountId, resolvedFrom, to);
     }
-    return { accounts: active, ledger: l, from: resolvedFrom };
+    return { accounts: options, ledger: l, from: resolvedFrom };
   });
 
   return (

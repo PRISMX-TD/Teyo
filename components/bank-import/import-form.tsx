@@ -3,7 +3,7 @@
 import { useState, useRef, useId } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
-import { uploadBankStatement } from '@/server/actions/bank_import';
+import { uploadBankStatement } from '@/server/actions/bank-import';
 
 type MoneyAccountOption = {
   id: string;
@@ -68,7 +68,7 @@ export function ImportForm({ orgSlug, locale, i18n, moneyAccounts }: Props) {
       formData.set('file', file);
       formData.set('moneyAccountId', moneyAccountId);
       // 空串不发：服务端只在收到非空值时才覆盖自动推导（见
-      // server/actions/bank_import.ts 里读 dateFormat 的那一段）。
+      // server/actions/bank-import.ts 里读 dateFormat 的那一段）。
       if (dateFormat) formData.set('dateFormat', dateFormat);
 
       const result = await uploadBankStatement(orgSlug, formData);

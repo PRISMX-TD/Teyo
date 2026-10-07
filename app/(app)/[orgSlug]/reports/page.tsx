@@ -4,7 +4,13 @@ import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getFiscalYearStartMonth, getUserLocale } from '@/server/repositories/organizations';
 import { fiscalYearFor } from '@/server/services/year-end-close';
-import { getTrialBalance, getProfitLoss, getBalanceSheet, getCashFlow } from '@/server/repositories/reports';
+import {
+  getTrialBalance,
+  getProfitLoss,
+  getBalanceSheet,
+  getCashFlow,
+  getUnclosedEarnings,
+} from '@/server/repositories/reports';
 import { getArAging, getApAging } from '@/server/repositories/aging';
 import { listContacts } from '@/server/repositories/contacts';
 
@@ -37,14 +43,18 @@ export default async function ReportsPage({
       const fiscalYear = fiscalYearFor(today, startMonth);
       const yearStart = fiscalYear.start;
 
-      const [trial, pl, ar, ap, contactList] = await Promise.all([
+      const [trial, pl, ar, ap, contactList, unclosedEarnings] = await Promise.all([
         getTrialBalance(tx, context.organizationId, today),
         getProfitLoss(tx, context.organizationId, yearStart, today),
         getArAging(tx, context.organizationId, today),
         getApAging(tx, context.organizationId, today),
         listContacts(tx, context.organizationId),
+        getUnclosedEarnings(tx, context.organizationId, today),
       ]);
-      const bs = await getBalanceSheet(tx, context.organizationId, today, pl.netIncome);
+      // 「本年利润」那一行用全部未结转损益，而不是 pl.netIncome：上一财年
+      // 还没做年结时，去年的利润既不在留存收益里、也不在本财年损益里，
+      // 资产负债表会恰好少一整年利润。见 getUnclosedEarnings。
+      const bs = await getBalanceSheet(tx, context.organizationId, today, unclosedEarnings);
       const cf = await getCashFlow(tx, context.organizationId, yearStart, today);
       return {
         trialBalance: trial,

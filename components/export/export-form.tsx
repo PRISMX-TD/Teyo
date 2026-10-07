@@ -31,8 +31,12 @@ export function ExportForm({ orgSlug, locale }: Props) {
       const link = document.createElement('a');
       link.href = url;
       link.download = result.fileName;
+      // 先挂进文档再点（Firefox 对游离的 <a> 不触发下载），并且推迟释放
+      // blob URL：同步 revoke 会在部分浏览器里把刚开始的下载掐掉。
+      document.body.appendChild(link);
       link.click();
-      URL.revokeObjectURL(url);
+      link.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
       setError((e as Error).message);
     } finally {

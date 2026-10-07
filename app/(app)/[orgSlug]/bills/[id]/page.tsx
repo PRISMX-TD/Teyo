@@ -4,6 +4,7 @@ import { BillForm } from '@/components/bills/bill-form';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getBill } from '@/server/repositories/bills';
 import { listTaxRates } from '@/server/repositories/tax';
@@ -50,6 +51,16 @@ export default async function BillDetailPage({
       <div className="page-header">
         <h1>{interpolate(t.bills.editTitle, { number: bill.billNumber ?? '—' })}</h1>
         <div className="page-header-actions">
+          {bill.purchaseOrderId ? (
+            <Link
+              href={`/${orgSlug}/purchase-orders/${bill.purchaseOrderId}`}
+              className="text-button"
+            >
+              {interpolate(t.bills.fromPurchaseOrder, {
+                number: bill.purchaseOrderNumber ?? '—',
+              })}
+            </Link>
+          ) : null}
           <Link href={`/${orgSlug}/bills`} className="text-button">
             {t.bills.backToList}
           </Link>
@@ -68,6 +79,8 @@ export default async function BillDetailPage({
           rateBps: rate.rateBps,
         }))}
         bill={bill}
+        // updateBill 要 transaction:edit:any，这一页只要 transaction:read。
+        readOnly={!can(context.role, 'transaction:edit:any')}
       />
     </>
   );

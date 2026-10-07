@@ -27,14 +27,14 @@ vi.mock('@/server/auth/session', () => ({
 }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const { closeFiscalYear, undoYearEndClose } = await import('@/server/actions/year_end');
+const { closeFiscalYear, undoYearEndClose } = await import('@/server/actions/year-end');
 
 const suffix = randomUUID().slice(0, 8);
 /**
  * 要结的财年。
  *
  * 必须是**上一个**财年：closeFiscalYear 只接受 previousFiscalYear(today)
- * 那一个，不允许跳年去结更早的（见 server/actions/year_end.ts 的
+ * 那一个，不允许跳年去结更早的（见 server/actions/year-end.ts 的
  * resolveRequestedFiscalYear）。跳年结转会让中间那些年的损益永远留在
  * 损益科目上，而资产负债表看起来完全正常。
  */

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { getAccount } from '@/server/repositories/accounts';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
   setBudget,
@@ -49,6 +50,10 @@ export async function updateBudget(
   const budgetMinor = parseDecimalToMinor(parsed.amount, currencyExponent(context.baseCurrency));
 
   await withTransaction(context.userId, async (tx) => {
+    // budgets.account_id 只有外键，没有「同一家公司」的约束：不先确认科目
+    // 属于本公司，就能把预算挂到别家公司的科目 id 上。
+    await getAccount(tx, context.organizationId, parsed.accountId);
+
     await setBudget(
       tx,
       context.organizationId,

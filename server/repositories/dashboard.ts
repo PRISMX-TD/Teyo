@@ -279,9 +279,7 @@ export async function getMonthlyTrends(
  *
  * 期间由调用方传入（year/month），这个函数不自己假设「今天」——报表函数
  * 一律接受传入的期间，是这个项目的既有约定。调用方
- * （app/(app)/[orgSlug]/page.tsx）目前用 `new Date()` 算 year/month，
- * 也就是服务端 UTC 的年月，在 UTC+8 每月 1 号的头八小时会传成上个月；
- * 那一处不在本次可改范围内，已写进交付报告。
+ * （app/(app)/[orgSlug]/page.tsx）按 todayInOrg 取公司时区下的年月。
  */
 export async function getExpenseByCategory(
   tx: Tx,

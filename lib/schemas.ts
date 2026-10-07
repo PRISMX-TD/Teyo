@@ -79,7 +79,7 @@ export const updateOrgSchema = z.object({
  * periodStart 是幂等键（fiscal_year_closings 的唯一约束建在它上面），
  * 由服务端按财年起始月算出来再交给表单，不是用户手填的——但它会经由表单
  * 回到服务端，所以仍然要校验格式。真正的防线是服务端拿到之后**重新**算
- * 一遍财年并比对：见 server/actions/year_end.ts。
+ * 一遍财年并比对：见 server/actions/year-end.ts。
  */
 export const closeFiscalYearSchema = z.object({
   periodStart: isoDate,
@@ -196,7 +196,9 @@ function refineKindShape<T extends z.ZodTypeAny>(schema: T) {
         ctx.addIssue({
           code: z.ZodIssueCode.custom,
           path: ['counterAccountId'],
-          message: 'Choose the account to transfer into',
+          // counterAccountId 是转出方（表单标签 transaction.sourceAccount），
+          // 不是转入方——见 server/actions/transactions.ts 的 toPostingEvent。
+          message: 'Choose the account to transfer from',
         });
       }
       if (data.categoryId) {
@@ -247,6 +249,24 @@ export const updateTransactionSchema = refineKindShape(
   }),
 );
 
+/**
+ * 手工凭证（createJournal）的入参。
+ *
+ * 借贷两科目「不能相同」不在这里判：那条由 action 在查完科目之后说，
+ * 文案点名是哪两个字段，比 zod 的笼统报错清楚。这里只管形状——此前
+ * createJournal 一个字段都不验，日期、金额、描述长度全靠下游碰运气。
+ */
+export const createJournalSchema = z.object({
+  occurredOn: isoDate,
+  amount: positiveAmount,
+  currency: currency.optional(),
+  debitAccountId: uuid,
+  creditAccountId: uuid,
+  projectId: uuid.optional(),
+  description: z.string().trim().max(500).default(''),
+  clientUuid: uuid,
+});
+
 export const voidTransactionSchema = z.object({
   id: uuid,
   reason: z
@@ -259,7 +279,9 @@ export const voidTransactionSchema = z.object({
 export const transactionFilterSchema = z.object({
   from: isoDate.optional(),
   to: isoDate.optional(),
-  kind: z.enum(['income', 'expense', 'transfer']).optional(),
+  // 筛选下拉里有「凭证」这一项（transaction-filters.tsx），这里原来只收三种，
+  // 选了它整组筛选就被判成非法、退回不筛选。
+  kind: z.enum(['income', 'expense', 'transfer', 'journal']).optional(),
   categoryId: uuid.optional(),
   moneyAccountId: uuid.optional(),
   createdBy: uuid.optional(),

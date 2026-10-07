@@ -28,6 +28,9 @@ export type QueuedTransactionPayload = {
   moneyAccountId: string;
   counterAccountId?: string;
   categoryId?: string;
+  // 表单会带上它（transaction-form.tsx）；类型里没写，离线重放时它照样在
+  // IndexedDB 里——这里只是把运行时已有的形状说实话。
+  projectId?: string;
   description: string;
   // 本币交易不带汇率字段（见 rate-field.tsx），留空让服务端按 source 'auto' 处理。
   exchangeRate?: string;
@@ -47,6 +50,7 @@ export type QueuedJournalPayload = {
   currency?: string;
   debitAccountId: string;
   creditAccountId: string;
+  projectId?: string;
   description: string;
   clientUuid: string;
 };

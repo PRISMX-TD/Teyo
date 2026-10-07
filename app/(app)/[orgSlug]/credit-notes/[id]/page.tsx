@@ -10,7 +10,7 @@ import { can } from '@/server/domain/permissions';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import { formatScaledRate } from '@/server/domain/exchange-rate';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { creditNoteAmountsMinor, getCreditNote } from '@/server/repositories/credit_notes';
+import { creditNoteAmountsMinor, getCreditNote } from '@/server/repositories/credit-notes';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
 /**
@@ -56,12 +56,15 @@ export default async function CreditNoteDetailPage({
       // 关联发票就被静默清空了——「这一次不动它」与「解除关联」在服务端
       // 是不同的意思，而表单只能提交它看得见的那个值。
       const invoiceRows = (await tx`
-        select id, invoice_number, total_minor
+        select id, invoice_number, contact_id, currency
         from invoices
         where organization_id = ${context.organizationId}
-          and (status not in ('voided', 'paid') or id = ${found.invoiceId}::uuid)
+          and (
+            (voided_at is null and status not in ('draft', 'voided', 'paid'))
+            or id = ${found.invoiceId}::uuid
+          )
         order by invoice_number
-      `) as { id: string; invoice_number: string; total_minor: bigint }[];
+      `) as { id: string; invoice_number: string; contact_id: string; currency: string }[];
 
       return { creditNote: found, contacts: contactRows, invoices: invoiceRows };
     },
@@ -154,8 +157,7 @@ export default async function CreditNoteDetailPage({
             <dd>
               {creditNote.invoiceId ? (
                 <Link href={`/${orgSlug}/invoices/${creditNote.invoiceId}`}>
-                  {invoices.find((inv) => inv.id === creditNote.invoiceId)?.invoice_number ??
-                    t.common.viewDetails}
+                  {creditNote.invoiceNumber ?? t.common.viewDetails}
                 </Link>
               ) : (
                 t.creditNotes.standalone

@@ -71,12 +71,12 @@ export async function updateContact(
     update contacts set
       type = coalesce(${fields.type ?? null}::contact_type, type),
       name = coalesce(${fields.name ?? null}, name),
-      email = ${fields.email ?? null},
-      phone = ${fields.phone ?? null},
-      address = ${fields.address ?? null},
-      tax_id = ${fields.taxId ?? null},
-      payment_terms = ${fields.paymentTerms ?? null},
-      notes = ${fields.notes ?? null},
+      email = ${fields.email?.trim() || null},
+      phone = ${fields.phone?.trim() || null},
+      address = ${fields.address?.trim() || null},
+      tax_id = ${fields.taxId?.trim() || null},
+      payment_terms = ${fields.paymentTerms?.trim() || null},
+      notes = ${fields.notes?.trim() || null},
       updated_at = now()
     where id = ${id} and organization_id = ${organizationId}
   `;

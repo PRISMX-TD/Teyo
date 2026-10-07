@@ -293,6 +293,9 @@ export type BalanceSheetResult = {
  * 这也是为什么调用方必须用财年而不是日历年取 currentYearEarnings：财年
  * 7 月起的公司，如果拿 1 月 1 日当起点，1–6 月那半年的损益会被同时算进
  * 留存收益（已结转）与本年利润（期间覆盖），资产负债表恰好多出半年利润。
+ *
+ * 但「本财年至今的 netIncome」只在之前每一年都已年结时才对；报表页现在传的
+ * 是 getUnclosedEarnings(asOf)——上一年没结、或本年已结的情况见那个函数的注释。
  */
 export async function getBalanceSheet(
   tx: Tx,
@@ -369,6 +372,41 @@ export async function getBalanceSheet(
     equityTotal,
     currentYearEarnings,
   };
+}
+
+/**
+ * 截至 asOf 尚未结转进留存收益的累计损益（收入 − 费用，本位币）。
+ *
+ * 资产负债表那一行「本年利润」要的就是这个数，而不是「本财年至今的
+ * getProfitLoss().netIncome」。两者只在「之前每一个财年都已年结」时才相等：
+ *   - 上一财年**没结**（新公司第二年最常见）：去年的损益还挂在收入/费用科目
+ *     上，既不在 equityTotal（留存收益里没有它）也不在本财年损益里——资产
+ *     负债表恰好少一整年利润，I5 当场变红。
+ *   - 本财年已结（年结分录记在财年最后一天，asOf 恰好是那天）：getProfitLoss
+ *     排除年结分录，于是这一年的利润同时出现在留存收益与「本年利润」里，
+ *     多算一遍。
+ * 这里**包含** kind = 'closing' 的分录、且不设期间下界：结过的年度被年结分录
+ * 冲成零，没结的年度原样留着，加起来恰好是「还没进留存收益的那部分」，
+ * 结转前后、结没结都配平。
+ */
+export async function getUnclosedEarnings(
+  tx: Tx,
+  organizationId: string,
+  asOf: string,
+): Promise<bigint> {
+  const rows = await tx`
+    select
+      coalesce(sum(case when l.direction = 'credit' then l.base_amount_minor
+                        else -l.base_amount_minor end), 0) as net
+    from journal_lines l
+    join transactions t on t.id = l.transaction_id
+    join accounts a on a.id = l.account_id
+    where l.organization_id = ${organizationId}
+      and t.voided_at is null
+      and t.occurred_on <= ${asOf}::date
+      and (a.type = 'revenue' or a.type = 'expense')
+  `;
+  return BigInt(rows[0].net as string);
 }
 
 /* =========================================================================
@@ -578,6 +616,13 @@ export async function getCashFlow(
   const taxPayableChange = -(await netFlow('tax-payable'));
   const taxReceivableChange = -(await netFlow('tax-receivable'));
 
+  // 预收/预付账款（server/services/prepayment.ts 过账用）与上面的税科目是
+  // 同一种情况：种子里打了 'operating' 标签，却没有任何一项读它们，收到的
+  // 订金、付出去的订金整笔落进 unclassified 残差行。符号规则同样按科目类型：
+  // customer-deposits 是负债（与 AP 同侧），supplier-deposits 是资产（与 AR 同侧）。
+  const customerDepositsChange = -(await netFlow('customer-deposits'));
+  const supplierDepositsChange = -(await netFlow('supplier-deposits'));
+
   const operatingTotal = netIncome
     + depreciation
     + amortization
@@ -587,7 +632,9 @@ export async function getCashFlow(
     + deferredRevChange
     + prepaidChange
     + taxPayableChange
-    + taxReceivableChange;
+    + taxReceivableChange
+    + customerDepositsChange
+    + supplierDepositsChange;
 
   const operating: CashFlowSection = {
     label: 'Operating',
@@ -602,6 +649,8 @@ export async function getCashFlow(
       { label: 'prepaidChange', amountMinor: prepaidChange },
       { label: 'taxPayableChange', amountMinor: taxPayableChange },
       { label: 'taxReceivableChange', amountMinor: taxReceivableChange },
+      { label: 'customerDepositsChange', amountMinor: customerDepositsChange },
+      { label: 'supplierDepositsChange', amountMinor: supplierDepositsChange },
     ],
   };
 

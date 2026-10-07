@@ -159,9 +159,9 @@ export type TableAccess = {
  *
  *   server/repositories/invoices.ts:246        delete from invoice_items
  *   server/repositories/bills.ts:215           delete from bill_items
- *   server/repositories/purchase_orders.ts:180 delete from po_items
- *   server/repositories/credit_notes.ts:248    delete from credit_note_items
- *   server/repositories/bank_import.ts:157     delete from imported_transactions
+ *   server/repositories/purchase-orders.ts:180 delete from po_items
+ *   server/repositories/credit-notes.ts:248    delete from credit_note_items
+ *   server/repositories/bank-import.ts:157     delete from imported_transactions
  *
  * 前四处是同一个模式：改单据时把明细整批删掉再重写。第五处是清理未匹配的
  * 导入暂存行。除此之外，这批表全部走软删除：
@@ -218,7 +218,7 @@ export const TABLE_ACCESS: Readonly<Record<string, TableAccess>> = {
     delete: 'document:delete',
   },
   // 折旧表是从固定资产派生出来的，不是用户直接录入的。
-  // server/repositories/fixed_assets.ts:331 用 `insert ... on conflict do update`
+  // server/repositories/fixed-assets.ts:331 用 `insert ... on conflict do update`
   // 重算，所以重新生成不需要 delete。
   depreciation_schedules: {
     select: 'document:read',

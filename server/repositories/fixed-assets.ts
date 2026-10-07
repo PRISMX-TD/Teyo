@@ -43,6 +43,10 @@ export type FixedAssetRow = {
   originalCurrency: string | null;
   originalCostMinor: bigint | null;
   purchaseExchangeRate: string | null;
+  /** 处置分录（0031 迁移）。null = 未处置，或 0031 之前只停用、没出分录的旧处置。 */
+  disposalTransactionId: string | null;
+  /** 处置收入，本位币最小单位；0 = 报废。 */
+  disposalProceedsMinor: bigint | null;
 };
 
 export type FixedAssetDetail = FixedAssetRow & {
@@ -100,6 +104,9 @@ function mapAsset(row: Record<string, unknown>): FixedAssetDetail {
       row.original_cost_minor == null ? null : BigInt(row.original_cost_minor as string),
     purchaseExchangeRate:
       row.purchase_exchange_rate == null ? null : String(row.purchase_exchange_rate),
+    disposalTransactionId: (row.disposal_transaction_id as string | null) ?? null,
+    disposalProceedsMinor:
+      row.disposal_proceeds_minor == null ? null : BigInt(row.disposal_proceeds_minor as string),
     assetAccountName: row.asset_account_name as string,
     depnExpenseAccountName: row.depn_expense_account_name as string,
     depnAccumAccountName: row.depn_accum_account_name as string,
@@ -118,6 +125,7 @@ export async function listFixedAssets(
       fa.asset_account_id, fa.depn_expense_account_id, fa.depn_accum_account_id,
       fa.is_active, fa.disposed_at, fa.created_at,
       fa.original_currency, fa.original_cost_minor, fa.purchase_exchange_rate,
+      fa.disposal_transaction_id, fa.disposal_proceeds_minor,
       aa.name_en as asset_account_name,
       dea.name_en as depn_expense_account_name,
       daa.name_en as depn_accum_account_name
@@ -144,6 +152,7 @@ export async function getFixedAsset(
       fa.asset_account_id, fa.depn_expense_account_id, fa.depn_accum_account_id,
       fa.is_active, fa.disposed_at, fa.created_at,
       fa.original_currency, fa.original_cost_minor, fa.purchase_exchange_rate,
+      fa.disposal_transaction_id, fa.disposal_proceeds_minor,
       aa.name_en as asset_account_name,
       dea.name_en as depn_expense_account_name,
       daa.name_en as depn_accum_account_name
@@ -253,16 +262,224 @@ export async function updateFixedAsset(
   `;
 }
 
-export async function disposeFixedAsset(
+/** 处置一条资产所需的全部内容，读自库并已校验完毕。 */
+export type PendingDisposal = {
+  assetName: string;
+  costMinor: bigint;
+  /** 截至处置日、真正入了账（排程已过账且那笔交易未作废）的累计折旧。 */
+  accumulatedMinor: bigint;
+  assetAccountId: string;
+  depnAccumAccountId: string;
+};
+
+/**
+ * 读出并校验一次处置，分录由调用方交给 postJournal 去写——与
+ * loadDepreciationPosting 同一种分工。
+ *
+ * 累计折旧取的是「真正入了账」的那部分，不是排程表上 accumulated_minor
+ * 那一列：排程表是计划，账上有多少要看分录。一期折旧过账之后若在交易详情
+ * 页被作废，is_posted 仍是 true，而那笔贷方已经不在账上了——按排程冲销
+ * 就会把累计折旧科目冲成借方余额。所以这里按 transaction_id 连回交易表，
+ * 只数未作废的。
+ *
+ * 处置日之后已经入账的期间直接拒绝，不去猜：那几期的折旧确实记在账上，
+ * 冲掉它们（多冲累计折旧）等于承认一台已经卖掉的机器又折旧了几个月；
+ * 不冲它们，累计折旧科目就会给这台资产留一个永远消不掉的余额。两种都
+ * 不对，只能让用户先作废那几期，或者把处置日挪后。
+ *
+ * for update 锁住资产行：is_active 是这条路径的幂等键（clientUuid 每次
+ * 随机），两个标签页同时点「处置」时，第二次停在锁上，等第一次提交后
+ * 读到 is_active = false，随即抛错——与折旧过账用排程行锁是同一个道理。
+ */
+export async function loadDisposalPosting(
+  tx: Tx,
+  organizationId: string,
+  assetId: string,
+  disposalDate: string,
+): Promise<PendingDisposal> {
+  const assetRows = await tx`
+    select name, cost_minor, purchase_date, is_active,
+           asset_account_id, depn_accum_account_id
+    from fixed_assets
+    where id = ${assetId} and organization_id = ${organizationId}
+    for update
+  `;
+  const asset = assetRows.at(0);
+  if (!asset) throw new Error('Fixed asset not found.');
+  if (asset.is_active === false) throw new Error('Asset is already disposed.');
+
+  const purchaseDate = formatDateOnly(asset.purchase_date as Date | string);
+  // 'YYYY-MM-DD' 按字典序比较就是按时间比较。
+  if (disposalDate < purchaseDate) {
+    throw new Error(`The disposal date cannot be before the purchase date (${purchaseDate}).`);
+  }
+
+  const postedRows = await tx`
+    select ds.period, ds.depreciation_minor
+    from depreciation_schedules ds
+    join transactions t on t.id = ds.transaction_id
+    where ds.fixed_asset_id = ${assetId}
+      and ds.is_posted = true
+      and t.organization_id = ${organizationId}
+      and t.voided_at is null
+  `;
+
+  let accumulatedMinor = 0n;
+  const postedAfter: string[] = [];
+  for (const row of postedRows) {
+    const period = formatDateOnly(row.period as Date | string);
+    if (period > disposalDate) {
+      postedAfter.push(period);
+    } else {
+      accumulatedMinor += BigInt(row.depreciation_minor as string);
+    }
+  }
+
+  if (postedAfter.length > 0) {
+    throw new Error(
+      `Depreciation is already in your books for period(s) after the disposal date (${postedAfter.sort().join(', ')}). ` +
+        'Void those entries first, or choose a later disposal date.',
+    );
+  }
+
+  return {
+    assetName: asset.name as string,
+    costMinor: BigInt(asset.cost_minor as string),
+    accumulatedMinor,
+    assetAccountId: asset.asset_account_id as string,
+    depnAccumAccountId: asset.depn_accum_account_id as string,
+  };
+}
+
+/**
+ * 处置收入进的那个账户必须是本公司的资金账户。
+ *
+ * 外键只保证科目存在，不管它属于哪家公司（insertJournalLines 会再拦一次
+ * 归属，但那时报的是一串 uuid）；「是不是资金账户」则没有任何一道校验管
+ * ——一笔卖资产的钱记进「销售收入」科目照样配平。
+ */
+export async function assertMoneyAccountInOrg(
+  tx: Tx,
+  organizationId: string,
+  accountId: string,
+): Promise<void> {
+  const rows = await tx`
+    select id from accounts
+    where id = ${accountId}
+      and organization_id = ${organizationId}
+      and is_money_account = true
+  `;
+  if (rows.length === 0) {
+    throw new Error('The account receiving the proceeds was not found among this company’s money accounts.');
+  }
+}
+
+/**
+ * 把资产标为已处置并记下处置分录。
+ *
+ * where 带 is_active = true，且必须恰好改到一行——走到这一步时分录已经
+ * 写完了，一个静默的空更新会留下「分录在账上、资产仍是在用」，再点一次
+ * 处置就是第二笔。fail closed，让整个事务连同分录一起回滚
+ * （同 markDepreciationPosted）。
+ */
+export async function markAssetDisposed(
+  tx: Tx,
+  organizationId: string,
+  id: string,
+  disposal: { transactionId: string; proceedsMinor: bigint },
+): Promise<void> {
+  const updated = await tx`
+    update fixed_assets
+    set disposed_at = now(),
+        is_active = false,
+        disposal_transaction_id = ${disposal.transactionId},
+        disposal_proceeds_minor = ${disposal.proceedsMinor.toString()}
+    where id = ${id} and organization_id = ${organizationId} and is_active = true
+    returning id
+  `;
+  if (updated.length !== 1) {
+    throw new Error(`Could not mark fixed asset ${id} as disposed (${updated.length} rows matched).`);
+  }
+}
+
+/**
+ * 撤销处置：资产回到在用状态，四个处置字段一并清空。
+ *
+ * 处置分录本身由调用方先作废（voidDocumentPosting），这里只管资产这一行。
+ * 同样必须恰好改到一行：分录已作废而资产仍是已处置，资产负债表上这台
+ * 机器就凭空消失了。
+ */
+export async function reactivateDisposedAsset(
   tx: Tx,
   organizationId: string,
   id: string,
 ): Promise<void> {
-  await tx`
+  const updated = await tx`
     update fixed_assets
-    set disposed_at = now(), is_active = false
-    where id = ${id} and organization_id = ${organizationId}
+    set disposed_at = null,
+        is_active = true,
+        disposal_transaction_id = null,
+        disposal_proceeds_minor = null
+    where id = ${id} and organization_id = ${organizationId} and is_active = false
+    returning id
   `;
+  if (updated.length !== 1) {
+    throw new Error(`Could not reactivate fixed asset ${id} (${updated.length} rows matched).`);
+  }
+}
+
+/** 详情页上的处置摘要，全部取自处置分录本身。 */
+export type DisposalSummary = {
+  transactionId: string;
+  disposalDate: string;
+  proceedsMinor: bigint;
+  /** 正数为收益，负数为损失。 */
+  gainLossMinor: bigint;
+  voided: boolean;
+};
+
+/**
+ * 处置日与损益不另存列：日期就是分录的 occurred_on，损益就是分录里那条
+ * 收益/损失行。存第二份只会多出一种「两边对不上」的状态。
+ *
+ * 损益按 收入 + 累计折旧借方 - 资产原值贷方 反推，只看这笔分录里挂在资产
+ * 自己两个科目上的那两行，不依赖收益/损失科目的 code——科目改名、换代码
+ * 都不影响这里。
+ */
+export async function getDisposalSummary(
+  tx: Tx,
+  organizationId: string,
+  asset: Pick<FixedAssetRow, 'disposalTransactionId' | 'disposalProceedsMinor' | 'assetAccountId' | 'depnAccumAccountId'>,
+): Promise<DisposalSummary | null> {
+  if (!asset.disposalTransactionId) return null;
+
+  const rows = await tx`
+    select t.occurred_on, t.voided_at,
+      coalesce(sum(l.base_amount_minor) filter (
+        where l.account_id = ${asset.assetAccountId} and l.direction = 'credit'
+      ), 0) as cost_credited,
+      coalesce(sum(l.base_amount_minor) filter (
+        where l.account_id = ${asset.depnAccumAccountId} and l.direction = 'debit'
+      ), 0) as accum_debited
+    from transactions t
+    left join journal_lines l on l.transaction_id = t.id
+    where t.id = ${asset.disposalTransactionId} and t.organization_id = ${organizationId}
+    group by t.id, t.occurred_on, t.voided_at
+  `;
+  const row = rows.at(0);
+  if (!row) return null;
+
+  const proceedsMinor = asset.disposalProceedsMinor ?? 0n;
+  const costCredited = BigInt(row.cost_credited as string);
+  const accumDebited = BigInt(row.accum_debited as string);
+
+  return {
+    transactionId: asset.disposalTransactionId,
+    disposalDate: formatDateOnly(row.occurred_on as Date | string),
+    proceedsMinor,
+    gainLossMinor: proceedsMinor - (costCredited - accumDebited),
+    voided: row.voided_at != null,
+  };
 }
 
 /** 重算一次排程的结果。 */
@@ -584,12 +801,17 @@ export async function loadDepreciationPosting(
   period: string,
 ): Promise<PendingDepreciation> {
   const assetRows = await tx`
-    select name, depn_expense_account_id, depn_accum_account_id
+    select name, depn_expense_account_id, depn_accum_account_id, is_active
     from fixed_assets
     where id = ${assetId} and organization_id = ${organizationId}
   `;
   const asset = assetRows.at(0);
   if (!asset) throw new Error('Fixed asset not found.');
+  // 处置之后不再计提：排程里余下的那几期仍是 is_posted = false，详情页原来
+  // 照样给它们画「过账」按钮，一台已经卖掉的机器可以继续折旧下去。
+  if (asset.is_active === false) {
+    throw new Error('This asset has been disposed and no longer depreciates.');
+  }
 
   const scheduleRows = await tx`
     select id, depreciation_minor, is_posted

@@ -21,6 +21,7 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 const { createInvoice, issueInvoice, updateInvoice, voidInvoice } = await import(
   '@/server/actions/invoices'
 );
+const { createPayment } = await import('@/server/actions/payments');
 
 let ownerId: string;
 let viewerId: string;
@@ -59,6 +60,8 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
+  // payment_items.invoice_id 没有 on delete cascade，先删收款，删公司才做得下去。
+  await admin`delete from payments where organization_id = ${orgId}`;
   await resetTestData();
   await admin.end();
 });
@@ -586,6 +589,50 @@ describe('voidInvoice - 作废连带作废分录', () => {
     await voidInvoice(orgSlug, id, 'Wrong customer');
 
     await expect(updateInvoice(orgSlug, id, invoiceInput())).rejects.toThrow(/voided/i);
+  });
+});
+
+describe('已经收过钱的发票', () => {
+  async function paidInPart(): Promise<string> {
+    currentUserId = ownerId;
+    const { id } = await createInvoice(orgSlug, invoiceInput({ issue: true }));
+    await createPayment(orgSlug, {
+      contactId: customerId,
+      type: 'received',
+      amount: '60.00',
+      currency: 'MYR',
+      paymentDate: DAY,
+      method: 'bank_transfer',
+      items: [{ invoiceId: id, amount: '60.00' }],
+    });
+    return id;
+  }
+
+  it('refuses to void it while a payment is still applied', async () => {
+    const id = await paidInPart();
+    await expect(voidInvoice(orgSlug, id, 'Wrong amount')).rejects.toThrow(/Void those first/);
+    expect((await invoiceRow(id)).status).toBe('partially_paid');
+  });
+
+  it('refuses to cut the total below what has already been received', async () => {
+    const id = await paidInPart();
+    await expect(
+      updateInvoice(
+        orgSlug,
+        id,
+        invoiceInput({ items: [{ description: 'Consulting', quantity: '1', unitPrice: '50.00' }] }),
+      ),
+    ).rejects.toThrow(/more than the new total/);
+  });
+
+  it('marks it paid when the total is corrected down to what was received', async () => {
+    const id = await paidInPart();
+    await updateInvoice(
+      orgSlug,
+      id,
+      invoiceInput({ items: [{ description: 'Consulting', quantity: '1', unitPrice: '60.00' }] }),
+    );
+    expect((await invoiceRow(id)).status).toBe('paid');
   });
 });
 

@@ -29,10 +29,11 @@ export default async function SettingsIndexPage({
     { href: 'inventory', label: t.nav.inventory, action: 'account:manage' },
     { href: 'tax', label: t.nav.tax, action: 'account:manage' },
     // 年结用 period:lock，与 0024 迁移里 fiscal_year_closings 的 owner-only
-    // 策略对齐——理由见 server/actions/year_end.ts 顶部。这里必须用同一个
+    // 策略对齐——理由见 server/actions/year-end.ts 顶部。这里必须用同一个
     // Action，否则 admin 会看到一个点进去就 403 的入口。
     { href: 'year-end', label: t.settings.yearEnd, action: 'period:lock' },
-    { href: 'audit', label: t.settings.audit, action: 'report:export' },
+    // 与审计页的 requirePermission('audit:read') 对齐（audit_logs 的 RLS 只放行 owner/admin）。
+    { href: 'audit', label: t.settings.audit, action: 'audit:read' },
   ];
 
   const visible = sections.filter((section) => can(context.role, section.action));

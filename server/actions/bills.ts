@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission, AuthError, type OrgContext } from '@/server/auth/guard';
 import { LedgerError } from '@/server/domain/ledger';
@@ -20,6 +21,7 @@ import {
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
   deleteBillItems,
+  findActiveBillForPurchaseOrder,
   getBill,
   getNextBillNumber,
   insertBill,
@@ -31,6 +33,18 @@ import {
   type BillDetail,
   type NewBillItemRow,
 } from '@/server/repositories/bills';
+import {
+  setSettlementStatus,
+  settlementStatusFor,
+  sumSettledByDocument,
+} from '@/server/repositories/payments';
+import {
+  PO_BILLABLE_STATUSES,
+  isPoBillable,
+  lockPurchaseOrder,
+  setPoStatus,
+  type PoStatus,
+} from '@/server/repositories/purchase-orders';
 
 /**
  * 供应商账单的记账生命周期。
@@ -82,9 +96,20 @@ export type CreateBillInput = {
   items: BillItemInput[];
   /** 默认 'received'（已收到，直接入账）。'draft' 只存底稿，不进总账。 */
   status?: 'draft' | 'received';
+  /**
+   * 从哪张采购单转来（采购单详情页的「转为账单」-> bills/new?fromPo=<id>）。
+   *
+   * 账单号由 getNextBillNumber 生成、到期日要用户照供应商的账单填，所以
+   * 「转账单」不是一个一步到位的按钮，而是一张按采购单预填好的新建表单，
+   * 提交时带上这个 id。服务端在建账单的同一个事务里核对这张采购单、写
+   * bills.purchase_order_id、把采购单推到 billed——过账走的仍是下面同一条
+   * createBill 路径，与手工录入的账单分毫不差。
+   */
+  purchaseOrderId?: string | null;
 };
 
-export type UpdateBillInput = CreateBillInput;
+/** 编辑不改来源采购单：转出来的账单作废后重转，而不是把链接改到别处。 */
+export type UpdateBillInput = Omit<CreateBillInput, 'purchaseOrderId'>;
 
 /**
  * 一张账单的三个数。与发票同一套整数 + half-up 口径
@@ -211,6 +236,122 @@ async function assertTaxRateBelongsToOrg(
   }
 }
 
+/**
+ * 核对一张采购单此刻能不能转成这张账单，并锁住它的表头。
+ *
+ * 逐条：
+ * - 必须是本公司的（外键不受 RLS 约束，id 又是从表单来的）；
+ * - 状态必须是 sent / received（isPoBillable）——草稿还没发给供应商，
+ *   billed 已经转过，closed / voided 是终态；
+ * - 名下不能已有一张未作废的账单。状态是 billed 时上一条已经挡下，这一条
+ *   兜的是状态与链接不一致的情形；
+ * - 供应商与币种必须与采购单一致。表单上这两个下拉在转账单时是锁住的，
+ *   但 Server Action 是网络端点，一张 USD 的采购单转出一张 MYR 的账单，
+ *   金额就全错了。明细行可以改（分批到货、只开了一部分账单都是常事）。
+ */
+async function assertPurchaseOrderBillable(
+  tx: Tx,
+  organizationId: string,
+  purchaseOrderId: string,
+  bill: { contactId: string; currency: string },
+): Promise<{ poNumber: string; status: PoStatus }> {
+  const po = await lockPurchaseOrder(tx, organizationId, purchaseOrderId);
+  if (!po) {
+    throw new AuthError('not_found', 'That purchase order was not found in this company.');
+  }
+  if (!isPoBillable(po.status)) {
+    throw new LedgerError(
+      `Purchase order ${po.poNumber} is ${po.status}; only a purchase order that is ` +
+        `${PO_BILLABLE_STATUSES.join(' or ')} can be converted into a bill.`,
+    );
+  }
+  const existing = await findActiveBillForPurchaseOrder(tx, organizationId, purchaseOrderId);
+  if (existing) {
+    throw new LedgerError(
+      `Purchase order ${po.poNumber} has already been converted into bill ` +
+        `${existing.billNumber ?? existing.id}. Void that bill first to bill it again.`,
+    );
+  }
+  if (po.contactId !== bill.contactId) {
+    throw new LedgerError(
+      `A bill converted from ${po.poNumber} must be for the same vendor as the purchase order.`,
+    );
+  }
+  if (po.currency !== bill.currency) {
+    throw new LedgerError(
+      `A bill converted from ${po.poNumber} must be in ${po.currency}, the purchase order's currency.`,
+    );
+  }
+  return { poNumber: po.poNumber, status: po.status };
+}
+
+/**
+ * 采购单转账单之前是什么状态。
+ *
+ * 转账单时 purchase_order.billed 那条审计记下了 before.status，作废账单时
+ * 照它还原——sent 的回到 sent，received 的回到 received，不替用户臆造一个
+ * 「已收货」。voidBill 要 transaction:edit:any（owner/admin），正是
+ * audit_logs 的 RLS 允许读的那两个角色；万一读不到，退回 sent：采购单状态
+ * 只能往前走，从 sent 还能再标成 received，反过来就回不去了。
+ */
+async function statusBeforeBilling(
+  tx: Tx,
+  organizationId: string,
+  purchaseOrderId: string,
+): Promise<PoStatus> {
+  const rows = await tx`
+    select before->>'status' as status
+    from audit_logs
+    where organization_id = ${organizationId}
+      and entity_type = 'purchase_order'
+      and entity_id = ${purchaseOrderId}
+      and action = 'purchase_order.billed'
+    order by created_at desc
+    limit 1
+  `;
+  const status = rows.at(0)?.status as PoStatus | null | undefined;
+  return status && isPoBillable(status) ? status : 'sent';
+}
+
+/**
+ * 转出来的账单被作废之后，让采购单可以再转一次。
+ *
+ * 只在采购单仍是 billed 时还原：已经关单或作废的采购单是终态，不因为一张
+ * 账单作废就被重新打开。名下若还有另一张未作废的账单（转换时就挡掉了，
+ * 理论上不会有），也不动。这里直接调 setPoStatus 而不是 setPoStatusAction：
+ * 后者的状态只许往前走，而「账单作废、采购单退回待开账单」是唯一一条合法
+ * 的回退，它属于账单作废这件事本身，不是用户手里的一个状态按钮。
+ *
+ * bills.purchase_order_id 不清：作废的那张确实是从这张采购单转出来的，
+ * 审计上要查得到。「已经转过」的判断（findActiveBillForPurchaseOrder）
+ * 本来就不认作废的账单。
+ */
+async function reopenPurchaseOrderAfterBillVoid(
+  tx: Tx,
+  context: OrgContext,
+  purchaseOrderId: string,
+  billId: string,
+): Promise<void> {
+  const po = await lockPurchaseOrder(tx, context.organizationId, purchaseOrderId);
+  if (!po || po.status !== 'billed') return;
+
+  const other = await findActiveBillForPurchaseOrder(tx, context.organizationId, purchaseOrderId);
+  if (other) return;
+
+  const restored = await statusBeforeBilling(tx, context.organizationId, purchaseOrderId);
+  await setPoStatus(tx, context.organizationId, purchaseOrderId, restored);
+
+  await recordAudit(tx, {
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    action: 'purchase_order.reopened',
+    entityType: 'purchase_order',
+    entityId: purchaseOrderId,
+    before: { status: po.status },
+    after: { status: restored, voidedBillId: billId },
+  });
+}
+
 function amountsOf(bill: BillDetail): DocumentAmounts {
   return {
     subtotalMinor: bill.subtotalMinor,
@@ -237,6 +378,10 @@ export async function createBill(
 
   const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
   const status = input.status ?? 'received';
+  const purchaseOrderId =
+    input.purchaseOrderId == null || input.purchaseOrderId === ''
+      ? null
+      : z.string().uuid().parse(input.purchaseOrderId);
 
   // 单号是「读最大号 + 1」，两个并发创建会算出同一个号。冲突时整笔重来——
   // 失败的那一次已经整体回滚，一个字节都没写，重跑会读到新的最大号。
@@ -245,6 +390,13 @@ export async function createBill(
     withTransaction(context.userId, async (tx) => {
       const billNumber = await getNextBillNumber(tx, context.organizationId);
       await assertTaxRateBelongsToOrg(tx, context.organizationId, input.taxRateId);
+      // 先核对采购单再写任何东西：被拒的转换不该留下半张账单。
+      const sourcePo = purchaseOrderId
+        ? await assertPurchaseOrderBillable(tx, context.organizationId, purchaseOrderId, {
+            contactId: input.contactId,
+            currency,
+          })
+        : null;
       const { taxRateBps, amounts, items } = computeBillAmounts({ ...input, currency });
 
       const { id } = await insertBill(tx, {
@@ -261,6 +413,7 @@ export async function createBill(
         totalMinor: amounts.totalMinor,
         taxRateId: input.taxRateId ?? null,
         notes: input.notes?.trim() || null,
+        purchaseOrderId,
       });
 
       await insertBillItems(
@@ -298,11 +451,26 @@ export async function createBill(
         }),
       });
 
+      if (purchaseOrderId && sourcePo) {
+        await setPoStatus(tx, context.organizationId, purchaseOrderId, 'billed');
+        // before.status 是作废账单时还原采购单状态的依据，见 statusBeforeBilling。
+        await recordAudit(tx, {
+          organizationId: context.organizationId,
+          actorUserId: context.userId,
+          action: 'purchase_order.billed',
+          entityType: 'purchase_order',
+          entityId: purchaseOrderId,
+          before: { status: sourcePo.status },
+          after: { status: 'billed', billId: id, billNumber },
+        });
+      }
+
       return { id, transactionId };
     }),
   );
 
   revalidateBillPaths(orgSlug, result.transactionId !== null);
+  if (purchaseOrderId) revalidatePurchaseOrderPaths(orgSlug, purchaseOrderId);
   return result;
 }
 
@@ -387,8 +555,41 @@ export async function updateBill(
       throw new AuthError('forbidden', 'This bill is voided and can no longer be edited.');
     }
 
+    // 从采购单转来的账单，供应商与币种跟着采购单走，理由见
+    // assertPurchaseOrderBillable。要换就作废这张、改了采购单再转。
+    if (
+      existing.purchaseOrderId &&
+      (input.contactId !== existing.contactId || currency !== existing.currency)
+    ) {
+      throw new LedgerError(
+        `This bill was converted from purchase order ${existing.purchaseOrderNumber ?? ''}; ` +
+          'its vendor and currency follow the purchase order.',
+      );
+    }
+
     await assertTaxRateBelongsToOrg(tx, context.organizationId, input.taxRateId);
     const { taxRateBps, amounts, items } = computeBillAmounts({ ...input, currency });
+
+    // 已经付过款的账单：付款核销的是原币金额，换币种之后那几笔付款的数就
+    // 对不上这张账单了；把总额改到已付金额之下，则会留下一笔永远冲不掉的
+    // 多付——应付科目变成借方余额，而账单状态照样显示「已付清」。两种都
+    // 当场拒绝，要改就先作废那几笔付款。
+    const settled =
+      (await sumSettledByDocument(tx, context.organizationId, 'bill', [id])).get(id) ?? 0n;
+    if (settled > 0n) {
+      if (currency !== existing.currency) {
+        throw new LedgerError(
+          'This bill already has payments against it, so its currency cannot be changed. ' +
+            'Void those payments first.',
+        );
+      }
+      if (amounts.totalMinor < settled) {
+        throw new LedgerError(
+          'The new total is less than what has already been paid on this bill. ' +
+            'Void or reduce those payments first.',
+        );
+      }
+    }
 
     await updateBillRow(tx, context.organizationId, id, {
       contactId: input.contactId,
@@ -458,6 +659,18 @@ export async function updateBill(
       }),
     });
 
+    // 总额变了，「已付清 / 部分付款 / 未付」也可能跟着变：一张付清的账单
+    // 加了一行，就不再是付清的了。与收付款那一侧共用同一个推导。
+    const nextStatus = settlementStatusFor({
+      kind: 'bill',
+      currentStatus: existing.status,
+      totalMinor: amounts.totalMinor,
+      settledMinor: settled,
+    });
+    if (nextStatus !== null) {
+      await setSettlementStatus(tx, context.organizationId, 'bill', id, nextStatus);
+    }
+
     return existing.transactionId !== null;
   });
 
@@ -483,11 +696,22 @@ export async function voidBill(
 
   const context = await requirePermission(orgSlug, 'transaction:edit:any');
 
-  const hadTransaction = await withTransaction(context.userId, async (tx) => {
+  const voided = await withTransaction(context.userId, async (tx) => {
     const bill = await requireBill(tx, context, id);
 
     if (bill.status === 'voided' || bill.voidedAt) {
       throw new AuthError('forbidden', 'This bill is already voided.');
+    }
+
+    // 还挂着有效付款的账单不能直接作废：账单的分录作废了，付款那笔「借应付
+    // / 贷银行」还在，应付科目上就剩一个对不上任何账单的借方余额。先作废
+    // 付款，再作废账单。
+    const settled =
+      (await sumSettledByDocument(tx, context.organizationId, 'bill', [id])).get(id) ?? 0n;
+    if (settled > 0n) {
+      throw new LedgerError(
+        'This bill has payments against it. Void those payments before voiding the bill.',
+      );
     }
 
     // 先作废分录：那一步会查期间锁定，封账月份的账单必须在任何写入之前
@@ -500,6 +724,10 @@ export async function voidBill(
     }
 
     await markBillVoided(tx, context.organizationId, id);
+
+    if (bill.purchaseOrderId) {
+      await reopenPurchaseOrderAfterBillVoid(tx, context, bill.purchaseOrderId, id);
+    }
 
     await recordAudit(tx, {
       organizationId: context.organizationId,
@@ -516,11 +744,12 @@ export async function voidBill(
       },
     });
 
-    return bill.transactionId !== null;
+    return { posted: bill.transactionId !== null, purchaseOrderId: bill.purchaseOrderId };
   });
 
-  revalidateBillPaths(orgSlug, hadTransaction);
+  revalidateBillPaths(orgSlug, voided.posted);
   revalidatePath(`/${orgSlug}/bills/${id}`);
+  if (voided.purchaseOrderId) revalidatePurchaseOrderPaths(orgSlug, voided.purchaseOrderId);
 }
 
 /** 取不到就抛 not_found。理由见 invoices.ts 的 requireInvoice。 */
@@ -542,4 +771,10 @@ function revalidateBillPaths(orgSlug: string, posted: boolean): void {
   revalidatePath(`/${orgSlug}`);
   revalidatePath(`/${orgSlug}/transactions`);
   revalidatePath(`/${orgSlug}/reports`);
+}
+
+/** 转账单与作废转出的账单都会改采购单状态。路由段叫 purchase-orders。 */
+function revalidatePurchaseOrderPaths(orgSlug: string, purchaseOrderId: string): void {
+  revalidatePath(`/${orgSlug}/purchase-orders`);
+  revalidatePath(`/${orgSlug}/purchase-orders/${purchaseOrderId}`);
 }

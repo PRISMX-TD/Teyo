@@ -8,7 +8,7 @@ import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { admin } from '@/tests/helpers/db';
 import { createTestOrgWithSeed, createTestUser, resetTestData } from '@/tests/helpers/test-db';
-import { MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from '@/server/repositories/bank_import';
+import { MAX_IMPORT_BYTES, MAX_IMPORT_ROWS } from '@/server/repositories/bank-import';
 
 let currentUserId: string | null = null;
 
@@ -19,7 +19,7 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
 const { createTransaction } = await import('@/server/actions/transactions');
 const { reconcile, updateItem, complete } = await import('@/server/actions/reconciliation');
-const { uploadBankStatement, matchTransaction } = await import('@/server/actions/bank_import');
+const { uploadBankStatement, matchTransaction } = await import('@/server/actions/bank-import');
 const { getInvitationPreview } = await import('@/server/actions/profile');
 
 const suffix = randomUUID().slice(0, 8);
@@ -134,7 +134,9 @@ describe('reconciliation is bound to one company', () => {
     const { id } = await reconcile(orgA.slug, {
       moneyAccountId: orgA.cash,
       statementDate: '2026-09-30',
-      statementBalance: '1000.00',
+      // 对账单余额必须真的对得上：reconcile 现在会在服务端重算差额。
+      // 公司 A 的现金账户此前没有任何流水，勾上这一笔 250 的支出后应为 -250。
+      statementBalance: '-250.00',
       itemIds: [own],
       // 界面把每一个输入框的当前值都放进这张表，包括空的那些。
       adjustments: { [own]: '', [randomUUID()]: '' },
@@ -145,6 +147,31 @@ describe('reconciliation is bound to one company', () => {
     `;
     expect(row.organization_id).toBe(orgA.id);
     expect(row.reconciled_at).not.toBeNull();
+
+    // 同一笔已经对进上一张对账单，不能再对一次（两个标签页各交一次的情形）。
+    await expect(
+      reconcile(orgA.slug, {
+        moneyAccountId: orgA.cash,
+        statementDate: '2026-09-30',
+        statementBalance: '-250.00',
+        itemIds: [own],
+        adjustments: {},
+      }),
+    ).rejects.toThrow(/not waiting to be reconciled/i);
+  });
+
+  it('refuses to complete a reconciliation that does not balance', async () => {
+    // 差额原来只由界面上禁用的按钮守着，直接调 Action 就能交一张对不平的。
+    const own = await newTransaction(orgA);
+    await expect(
+      reconcile(orgA.slug, {
+        moneyAccountId: orgA.cash,
+        statementDate: '2026-10-31',
+        statementBalance: '1000.00',
+        itemIds: [own],
+        adjustments: {},
+      }),
+    ).rejects.toThrow(/does not match/i);
   });
 
   describe('with a reconciliation that belongs to company B', () => {
@@ -156,7 +183,8 @@ describe('reconciliation is bound to one company', () => {
       const { id } = await reconcile(orgB.slug, {
         moneyAccountId: orgB.cash,
         statementDate: '2026-09-30',
-        statementBalance: '900.00',
+        // 以前各期已对完的余额是 0（公司 B 的流水都还没对过），只勾这一笔 -250。
+        statementBalance: '-250.00',
         itemIds: [own],
         adjustments: {},
       });

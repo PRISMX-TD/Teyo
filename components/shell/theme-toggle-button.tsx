@@ -17,7 +17,7 @@ export function ThemeToggleButton({ label }: Props) {
   const { theme, toggle } = useTheme();
 
   return (
-    <button type="button" onClick={toggle}>
+    <button type="button" aria-pressed={theme === 'dark'} onClick={toggle}>
       <span>{label}</span>
       <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
     </button>

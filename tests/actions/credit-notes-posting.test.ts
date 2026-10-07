@@ -4,7 +4,7 @@ import { admin } from '@/tests/helpers/db';
 import { withTransaction } from '@/server/db/transaction';
 import type { OrgContext } from '@/server/auth/guard';
 import { postJournal } from '@/server/posting/post-journal';
-import { creditNoteAmountsMinor } from '@/server/repositories/credit_notes';
+import { creditNoteAmountsMinor } from '@/server/repositories/credit-notes';
 import {
   createTestOrgWithSeed,
   createTestUser,
@@ -26,7 +26,7 @@ const {
   applyCreditNote,
   updateCreditNoteAction,
   voidCreditNote,
-} = await import('@/server/actions/credit_notes');
+} = await import('@/server/actions/credit-notes');
 
 /**
  * 迁移 0021 给 credit_notes 加 transaction_id，没有它这张单据即便过账了也
@@ -419,6 +419,45 @@ describeIfMigrated('生命周期守卫', () => {
     expect(row.currency.trim()).toBe('USD');
     // 10.00 USD @ 4.50 = 45.00 MYR。若误用本位币的小数位/汇率，这里会是 1000。
     expect(row.base_amount_minor).toBe('4500');
+  });
+
+  it('挂的发票币种不同时直接拒绝', async () => {
+    const invoiceId = await createPostedInvoice({
+      number: `INV-CNCCY-${suffix}`,
+      currency: 'USD',
+      totalMinor: 10_000n,
+      rate: '4.20',
+    });
+
+    await expect(
+      createCreditNote(org.slug, {
+        contactId: customerId,
+        invoiceId,
+        issueDate: DAY,
+        currency: 'MYR',
+        items: [{ description: 'Wrong ccy', quantity: '1', unitPrice: '10.00' }],
+      }),
+    ).rejects.toThrow(/same currency/);
+  });
+
+  it('冲减额超过发票还欠的钱时拒绝签发', async () => {
+    const invoiceId = await createPostedInvoice({
+      number: `INV-CNOVER-${suffix}`,
+      currency: 'MYR',
+      totalMinor: 10_000n,
+      rate: '1',
+    });
+
+    const { id } = await createCreditNote(org.slug, {
+      contactId: customerId,
+      invoiceId,
+      issueDate: DAY,
+      currency: 'MYR',
+      items: [{ description: 'Too much', quantity: '1', unitPrice: '150.00' }],
+    });
+
+    await expect(issueCreditNote(org.slug, id)).rejects.toThrow(/more than invoice/);
+    expect((await creditNoteRow(id)).status).toBe('draft');
   });
 
   it('换币种却不重报明细时直接拒绝', async () => {

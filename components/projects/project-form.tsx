@@ -17,17 +17,9 @@ type Props = {
   contacts: Contact[];
 };
 
-const STATUSES = ['active', 'completed', 'cancelled'] as const;
-
 export function ProjectForm({ orgSlug, locale, contacts }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
-
-  const statusLabel: Record<string, string> = {
-    active: t.projects.statusActive,
-    completed: t.projects.statusCompleted,
-    cancelled: t.projects.statusCancelled,
-  };
 
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
@@ -35,7 +27,6 @@ export function ProjectForm({ orgSlug, locale, contacts }: Props) {
   const [budget, setBudget] = useState('');
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
-  const [status, setStatus] = useState<'active' | 'completed' | 'cancelled'>('active');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
@@ -123,19 +114,8 @@ export function ProjectForm({ orgSlug, locale, contacts }: Props) {
         onChange={(e) => setEndDate(e.target.value)}
       />
 
-      <label htmlFor="pst">{t.projects.status}</label>
-      <select
-        id="pst"
-        value={status}
-        onChange={(e) => setStatus(e.target.value as 'active' | 'completed' | 'cancelled')}
-      >
-        {STATUSES.map((s) => (
-          <option key={s} value={s}>
-            {statusLabel[s]}
-          </option>
-        ))}
-      </select>
-
+      {/* 这里原来有一个「状态」下拉框，选什么都没有传给 createProject——
+          新项目一律是进行中，改状态在列表页上。 */}
       {error ? (
         <p role="alert" className="form-error">
           {error}

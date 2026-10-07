@@ -138,6 +138,34 @@ describe('createOrganization', () => {
     }
   });
 
+  it('lets a user who already owns a company create a second one and own both', async () => {
+    // /onboarding?new=1 走的就是这条：已有公司的人再建一家，不能有「只能有一家」
+    // 的隐含假设，第二家也必须写入 owner membership，否则进去就是 RLS 拒绝。
+    const first = await create('Second Org First Co');
+    const second = await create('Second Org Second Co');
+
+    expect(second.id).not.toBe(first.id);
+    expect(second.slug).not.toBe(first.slug);
+
+    const memberships = await admin`
+      select organization_id, role, status from memberships
+      where user_id = ${user.id} and organization_id in (${first.id}, ${second.id})
+    `;
+    expect(memberships).toHaveLength(2);
+    for (const m of memberships) {
+      expect(m.role).toBe('owner');
+      expect(m.status).toBe('active');
+    }
+
+    const { listUserOrganizations } = await import('@/server/repositories/organizations');
+    const slugs = (await listUserOrganizations(user.id)).map((o) => o.slug);
+    expect(slugs).toEqual(expect.arrayContaining([first.slug, second.slug]));
+
+    // 第二家的预置科目独立于第一家。
+    const accounts = await admin`select id from accounts where organization_id = ${second.id}`;
+    expect(accounts.length).toBeGreaterThanOrEqual(19);
+  });
+
   it('rejects an invalid payload', async () => {
     await expect(
       createOrganization({ name: '  ', baseCurrency: 'MYR', timezone: 'Asia/Kuala_Lumpur' }),

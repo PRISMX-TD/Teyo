@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import Link from 'next/link';
 import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
@@ -17,15 +18,26 @@ export default async function OnboardingPage({
 }) {
   const userId = await requireUserId();
   const existingOrgs = await listUserOrganizations(userId);
+  const query = await searchParams;
+  // ?new=1 是「已有公司的人再建一家」的显式入口（侧栏、更多页、公司列表）。
+  // 不带它时保持原样：首次流程里已经有公司的人被送进第一家，免得登录后
+  // 绕回这一页又被当成新用户。原来这里无条件跳走，于是有公司的人根本
+  // 建不了第二家——而「一个人管几套账」正是这个应用的卖点。
+  const addingAnother = existingOrgs.length > 0 && query.new === '1';
 
-  if (existingOrgs.length > 0) {
+  if (existingOrgs.length > 0 && !addingAnother) {
     // 已有公司 → 跳第一家
     redirect(`/${existingOrgs[0].slug}`);
   }
 
   const locale = (await getUserLocale(userId)) as 'en' | 'zh';
   const t = getMessages(locale);
-  const query = await searchParams;
+  const roleLabels: Record<string, string> = {
+    owner: t.members.roleOwner,
+    admin: t.members.roleAdmin,
+    bookkeeper: t.members.roleBookkeeper,
+    viewer: t.members.roleViewer,
+  };
   const nameRejected = query.error === 'name';
   const joinFailed = query.error === 'join';
   const noAccess = query.notice === 'no_access';
@@ -38,6 +50,12 @@ export default async function OnboardingPage({
 
   return (
     <main className="onboarding-page">
+      {addingAnother ? (
+        // 返回 '/'：多家公司时列出来选，只有一家时直接回到那一家（见 app/page.tsx）。
+        <Link href="/" className="back-link">
+          {t.onboarding.back}
+        </Link>
+      ) : null}
       {noAccess ? (
         <p role="status" className="form-error">
           {t.onboarding.noAccess}
@@ -67,7 +85,9 @@ export default async function OnboardingPage({
                     try {
                       ({ orgSlug } = await acceptInvitationById(invitation.id));
                     } catch (err) {
-                      if (err instanceof AuthError) redirect('/onboarding?error=join');
+                      if (err instanceof AuthError) {
+                        redirect(addingAnother ? '/onboarding?new=1&error=join' : '/onboarding?error=join');
+                      }
                       throw err;
                     }
                     redirect(`/${orgSlug}`);
@@ -76,7 +96,7 @@ export default async function OnboardingPage({
                   <span>
                     {t.onboarding.pendingItem
                       .replace('{org}', invitation.organizationName)
-                      .replace('{role}', invitation.role)}
+                      .replace('{role}', roleLabels[invitation.role] ?? invitation.role)}
                   </span>{' '}
                   <button type="submit">{t.onboarding.join}</button>
                 </form>
@@ -87,8 +107,8 @@ export default async function OnboardingPage({
         </section>
       ) : null}
 
-      <h1>{t.onboarding.title}</h1>
-      <p>{t.onboarding.subtitle}</p>
+      <h1>{addingAnother ? t.onboarding.newTitle : t.onboarding.title}</h1>
+      <p>{addingAnother ? t.onboarding.newSubtitle : t.onboarding.subtitle}</p>
 
       {/* 服务端校验失败时的回显。原来这里是一句光秃秃的 `return`：
           表单原地不动、什么都不显示，用户只会以为按钮坏了。浏览器原生的
@@ -107,7 +127,9 @@ export default async function OnboardingPage({
           'use server';
           const name = String(formData.get('companyName') ?? '').trim();
           if (!name || name.length < 2) {
-            redirect('/onboarding?error=name');
+            // 带回 new=1：否则已有公司的人校验失败后会被上面那条分支直接
+            // 送进第一家公司，错误提示和刚填的表单一起消失。
+            redirect(addingAnother ? '/onboarding?new=1&error=name' : '/onboarding?error=name');
           }
 
           // 复用 createOrganization：它会在同一事务内写入 owner membership。
@@ -134,6 +156,7 @@ export default async function OnboardingPage({
           type="text"
           required
           minLength={2}
+          maxLength={120}
           aria-invalid={nameRejected || undefined}
           aria-describedby={nameRejected ? 'companyName-error' : undefined}
         />
@@ -154,7 +177,8 @@ export default async function OnboardingPage({
         </select>
 
         <label htmlFor="industry">{t.onboarding.industry}</label>
-        <input id="industry" name="industry" type="text" />
+        {/* 上限与 createOrgSchema 一致：超长时 schema 抛 ZodError，用户看到的是整页错误。 */}
+        <input id="industry" name="industry" type="text" maxLength={60} />
 
         <button type="submit">{t.onboarding.submit}</button>
       </form>

@@ -159,20 +159,6 @@ export async function setPeriodLock(
   await tx`update organizations set locked_until = ${lockedUntil} where id = ${organizationId}`;
 }
 
-export async function listOrganizationsForUser(
-  tx: Tx,
-  userId: string,
-): Promise<Array<{ id: string; name: string; slug: string; role: string }>> {
-  const rows = await tx`
-    select o.id, o.name, o.slug, m.role
-    from organizations o
-    join memberships m on m.organization_id = o.id
-    where m.user_id = ${userId} and m.status = 'active'
-    order by o.name
-  `;
-  return rows as unknown as Array<{ id: string; name: string; slug: string; role: string }>;
-}
-
 /** 公司切换器：列出用户所有活跃成员关系的公司，按名称排序保证 UI 稳定。
  * 用 React.cache() 去重：同一请求内 layout + page 各自调用也只查一次。 */
 export const listUserOrganizations = cache(

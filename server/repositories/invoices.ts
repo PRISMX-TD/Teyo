@@ -157,7 +157,7 @@ export async function getInvoice(
     select id, invoice_id, description, quantity::text as quantity, unit_price_minor, amount_minor
     from invoice_items
     where invoice_id = ${id}
-    order by id
+    order by position nulls last, id
   `;
 
   return {
@@ -210,18 +210,22 @@ export async function insertInvoiceItems(
 
   await tx`
     insert into invoice_items ${tx(
-      items.map((item) => ({
+      // position 即提交时数组里的下标（0 起）。行序原来没有列可存，读取只能
+      // order by id（uuid，与录入顺序无关），编辑、打印时行序是乱的——见 0031。
+      items.map((item, index) => ({
         invoice_id: item.invoiceId,
         description: item.description,
         quantity: item.quantity,
         unit_price_minor: item.unitPriceMinor.toString(),
         amount_minor: item.amountMinor.toString(),
+        position: index,
       })),
       'invoice_id',
       'description',
       'quantity',
       'unit_price_minor',
       'amount_minor',
+      'position',
     )}
   `;
 }

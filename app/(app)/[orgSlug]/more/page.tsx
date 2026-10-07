@@ -112,6 +112,8 @@ export default async function MorePage({
             {/* 公司切换。'/' 会按公司数量分流：多家时列出来选，一家时直接
                 跳回去（见 app/page.tsx）。 */}
             <Link href="/">{t.nav.switchCompany}</Link>
+            {/* 再建一家公司。侧栏在手机上不显示，这里要有同一个入口。 */}
+            <Link href="/onboarding?new=1">{t.nav.newCompany}</Link>
             <ThemeToggleButton label={t.nav.toggleTheme} />
           </div>
         </section>

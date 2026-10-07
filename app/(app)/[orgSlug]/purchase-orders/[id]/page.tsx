@@ -10,7 +10,8 @@ import { can } from '@/server/domain/permissions';
 import { currencyExponent, formatMinorToDecimal, sumMinor } from '@/server/domain/money';
 import { formatScaledRate } from '@/server/domain/exchange-rate';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { getPurchaseOrder } from '@/server/repositories/purchase_orders';
+import { getPurchaseOrder, isPoBillable } from '@/server/repositories/purchase-orders';
+import { findActiveBillForPurchaseOrder } from '@/server/repositories/bills';
 import { formatScaledQuantity } from '@/server/repositories/inventory';
 import { listTaxRates } from '@/server/repositories/tax';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
@@ -23,10 +24,9 @@ import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
  * updatePurchaseOrderAction 也因此在 app/ 与 components/ 下零引用。结构
  * 照 invoices/[id] 与 bills/[id] 写，它们解决的是同一个问题。
  *
- * 只有草稿能改。这一条不是服务端给的——updatePurchaseOrderAction 本身不
- * 看状态，它信任调用方——所以判断落在这里，依据是 setPoStatusAction 认的
- * 那个状态枚举：draft 之后的每一个状态都意味着这份单子已经发出去了，
- * 事后改掉自己这一份，只会让买卖双方各拿着一张不一样的采购单。
+ * 只有草稿能改。updatePurchaseOrderAction 在服务端也拒绝非草稿，这里只是
+ * 不把一张必然被拒的表单画出来：draft 之后的每一个状态都意味着这份单子
+ * 已经发出去了，事后改掉自己这一份，只会让买卖双方各拿着一张不一样的采购单。
  */
 export default async function PurchaseOrderDetailPage({
   params,
@@ -38,9 +38,9 @@ export default async function PurchaseOrderDetailPage({
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const { po, vendors, taxRates } = await withTransaction(context.userId, async (tx) => {
+  const { po, vendors, taxRates, activeBill } = await withTransaction(context.userId, async (tx) => {
     const found = await getPurchaseOrder(tx, context.organizationId, id);
-    if (!found) return { po: null, vendors: [], taxRates: [] };
+    if (!found) return { po: null, vendors: [], taxRates: [], activeBill: null };
 
     // `or id = ...`：这张单的供应商可能已经被停用，那样它就不在下拉框里，
     // 保存之后供应商会静默换成列表里的第一个。与发票页那一段同一个理由。
@@ -54,7 +54,9 @@ export default async function PurchaseOrderDetailPage({
     `) as { id: string; name: string }[];
 
     const rates = await listTaxRates(tx, context.organizationId);
-    return { po: found, vendors: vendorRows, taxRates: rates };
+    // 转出来、仍然有效的那张账单（作废的不算，见 findActiveBillForPurchaseOrder）。
+    const bill = await findActiveBillForPurchaseOrder(tx, context.organizationId, found.id);
+    return { po: found, vendors: vendorRows, taxRates: rates, activeBill: bill };
   });
 
   // getPurchaseOrder 已经按 organization_id 过滤过，「查不到」与「不是你的」
@@ -70,6 +72,11 @@ export default async function PurchaseOrderDetailPage({
   // 却必然保存失败的表单。
   const mayEdit = can(context.role, 'transaction:edit:any');
 
+  // 「转为账单」与 createBill 同一道权限（transaction:create，记账员也有），
+  // 状态判断与服务端共用 isPoBillable。
+  const mayConvert =
+    can(context.role, 'transaction:create') && isPoBillable(po.status) && activeBill === null;
+
   const statusNotice = isVoided
     ? t.purchaseOrders.voidedNotice
     : !isDraft
@@ -83,6 +90,20 @@ export default async function PurchaseOrderDetailPage({
       <div className="page-header">
         <h1>{interpolate(t.purchaseOrders.editTitle, { number: po.poNumber })}</h1>
         <div className="page-header-actions">
+          {activeBill ? (
+            <Link href={`/${orgSlug}/bills/${activeBill.id}`} className="text-button">
+              {interpolate(t.purchaseOrders.billedAs, {
+                number: activeBill.billNumber ?? '—',
+              })}
+            </Link>
+          ) : null}
+          {mayConvert ? (
+            // 跳去一张按这张采购单预填的新账单表单，而不是一键生成：账单的
+            // 到期日、实际金额要照供应商开来的那张填。见 CreateBillInput.purchaseOrderId。
+            <Link href={`/${orgSlug}/bills/new?fromPo=${po.id}`} className="primary-button">
+              {t.purchaseOrders.convertToBill}
+            </Link>
+          ) : null}
           <Link href={`/${orgSlug}/purchase-orders`} className="text-button">
             {t.purchaseOrders.backToList}
           </Link>
@@ -151,7 +172,7 @@ export default async function PurchaseOrderDetailPage({
             <dt>{t.purchaseOrders.total}</dt>
             <dd className="mono amount">{formatMoney(documentTotalMinor, po.currency, locale)}</dd>
             {/* base_total_minor 是**本位币**（列名里的 base 就是这个意思，
-                见 server/actions/purchase_orders.ts 的 totalsFor）。用单据
+                见 server/actions/purchase-orders.ts 的 totalsFor）。用单据
                 自己的币种去格式化它，正是列表页上还留着的那个缺陷。 */}
             <dt>{t.purchaseOrders.baseTotal}</dt>
             <dd className="mono amount">

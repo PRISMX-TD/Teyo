@@ -324,7 +324,7 @@ function sumByDirection(lines: readonly ClosingLine[], direction: 'debit' | 'cre
  *
  * 界面用它决定显示「结转」按钮还是那条说明。做成一个常量而不是让用户点
  * 下去才拿到一句报错：一个点了必错的按钮，等于让用户替我们发现这个功能
- * 没做完。边界扩展落地后，这一行与 server/actions/year_end.ts 里
+ * 没做完。边界扩展落地后，这一行与 server/actions/year-end.ts 里
  * postClosingEntry 的函数体是同一次改动的两处。
  *
  * 放在这个文件而不是放在 actions 里：'use server' 文件的每一个导出都必须
@@ -462,7 +462,9 @@ export async function undoFiscalYearClose(
   // 与年结本身同级，因此同样要过期间检查。
   assertPeriodOpen(closing.periodEnd, ctx.lockedUntil, ctx.role);
 
-  if (closing.transactionId !== null) {
+  // 分录已经在交易页被单独作废过的话，不再作废一次：markVoided 会无条件
+  // 覆盖 voided_at / voided_by / void_reason，把当初是谁、为什么作废的记录抹掉。
+  if (closing.transactionId !== null && !closing.transactionVoided) {
     await markVoided(tx, ctx.organizationId, closing.transactionId, ctx.userId, reason);
   }
 

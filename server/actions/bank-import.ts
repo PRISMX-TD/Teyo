@@ -18,10 +18,10 @@ import {
   parseQifBuffer,
   type ParsedTransaction,
   type StatementDateFormat,
-} from '@/server/services/bank_import_parser';
+} from '@/server/services/bank-import-parser';
 import {
   getImportedTransaction,
-  importedTransactionClientUuid,
+  importedTransactionPostingUuid,
   insertImportedTransactions,
   matchImportedTransaction,
   ignoreImportedTransaction,
@@ -30,7 +30,7 @@ import {
   MAX_IMPORT_ROWS,
   MAX_POSTABLE_IMPORT_ROWS,
   type ImportedTransactionRow,
-} from '@/server/repositories/bank_import';
+} from '@/server/repositories/bank-import';
 
 const uploadSchema = z
   .object({
@@ -180,9 +180,12 @@ export async function matchTransaction(
     // 被匹配的交易也必须属于本公司：imported_transactions.matched_transaction_id
     // 的外键同样没有公司维度，不查一次就能把别家公司的交易挂进来。
     // 写法照抄 server/actions/attachments.ts 的「先确认交易属于本公司」。
+    // 作废的交易也不能拿来匹配：对号入座到一笔已经不算数的记录上，这一行
+    // 就再也不会出现在待处理里，而账上其实没有任何东西对应它。
     const rows = await tx`
       select id from transactions
       where id = ${parsed.matchedTransactionId} and organization_id = ${context.organizationId}
+        and voided_at is null
     `;
     if (rows.length === 0) {
       throw new AuthError('not_found', 'That record was not found in this company.');
@@ -419,7 +422,7 @@ async function postImportedRow(
     currency: context.baseCurrency,
     manualRateEntry: 'unavailable',
     categoryId: category.id,
-    clientUuid: importedTransactionClientUuid(row.id),
+    clientUuid: await importedTransactionPostingUuid(tx, context.organizationId, row.id),
     sourceType: 'imported_transaction',
     sourceId: row.id,
   });

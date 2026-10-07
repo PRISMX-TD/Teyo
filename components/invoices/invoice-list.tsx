@@ -15,6 +15,10 @@ type Props = {
   rows: InvoiceListRow[];
   locale: Locale;
   emptyLabel: string;
+  /** 能否开具（transaction:create）。 */
+  canIssue: boolean;
+  /** 能否编辑、作废（transaction:edit:any，owner/admin）。 */
+  canEdit: boolean;
 };
 
 /**
@@ -42,7 +46,7 @@ const STATUS_CLASS: Record<string, string> = {
 /** 还能改、还能作废的状态。voided 与 paid 之外的都算「在途」。 */
 const OPEN_STATUSES = new Set(['draft', 'sent', 'partially_paid', 'overdue']);
 
-export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
+export function InvoiceList({ orgSlug, rows, locale, emptyLabel, canIssue, canEdit }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
 
@@ -152,7 +156,7 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
                   <span className="doc-actions">
                     {/* 开具只在草稿上出现。issueInvoice 对其余状态一律抛错，
                         把按钮画出来再让服务端拒绝，等于请用户去点一个坏按钮。 */}
-                    {status === 'draft' && !isVoided ? (
+                    {canIssue && status === 'draft' && !isVoided ? (
                       <button
                         type="button"
                         className="btn-small"
@@ -166,7 +170,7 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
                     {/* 编辑对已过账的发票同样开放：updateInvoice 会走
                         repostJournal 重建分录，这是它存在的全部理由。
                         已收讫的不给入口——改动金额会让收款对不上。 */}
-                    {OPEN_STATUSES.has(status) && !isVoided ? (
+                    {canEdit && OPEN_STATUSES.has(status) && !isVoided ? (
                       <Link href={`/${orgSlug}/invoices/${row.id}`} className="btn-small">
                         {t.invoices.edit}
                       </Link>
@@ -175,7 +179,7 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel }: Props) {
                     {/* 作废：草稿也给。发票没有删除动作（账本不删行），
                         一张开错的草稿只能作废——它没有分录，作废就只是
                         改状态加理由，不会在总账上留任何东西。 */}
-                    {!isVoided ? (
+                    {canEdit && !isVoided ? (
                       <button
                         type="button"
                         className="btn-small btn-danger"

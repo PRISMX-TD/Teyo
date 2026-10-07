@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { z } from 'zod';
 import { inviteMemberSchema, memberRoleSchema } from '@/lib/schemas';
 import { AuthError, requirePermission, requireUserId } from '@/server/auth/guard';
 import { withTransaction, withoutUserContext } from '@/server/db/transaction';
@@ -60,6 +61,17 @@ const DB_ERROR_MESSAGES: Record<string, string> = {
   ownership_transfer_target_inactive: 'Only an active member can become the owner.',
   ownership_transfer_target_is_owner: 'That member is already the owner.',
 };
+
+/**
+ * setMemberStatus / revokeInvitation / transferOwnership 的入参。它们是可直接
+ * POST 的端点，TypeScript 的联合类型到运行时就不存在了：status 原来照单全收
+ * （能写进 'invited'），非 uuid 的 id 则一路落到 Postgres 报 22P02。
+ */
+const memberStatusSchema = z.object({
+  membershipId: z.string().uuid(),
+  status: z.enum(['active', 'suspended']),
+});
+const idSchema = z.string().uuid();
 
 function translateDbError(error: unknown): never {
   if (error instanceof Error) {
@@ -126,6 +138,7 @@ export async function inviteMember(
 }
 
 export async function revokeInvitation(orgSlug: string, invitationId: string): Promise<void> {
+  idSchema.parse(invitationId);
   const context = await requirePermission(orgSlug, 'member:manage');
 
   await withTransaction(context.userId, async (tx) => {
@@ -305,6 +318,7 @@ export async function setMemberStatus(
   membershipId: string,
   status: 'active' | 'suspended',
 ): Promise<void> {
+  memberStatusSchema.parse({ membershipId, status });
   const context = await requirePermission(orgSlug, 'member:manage');
 
   await withTransaction(context.userId, async (tx) => {
@@ -335,6 +349,7 @@ export async function transferOwnership(
   orgSlug: string,
   targetMembershipId: string,
 ): Promise<void> {
+  idSchema.parse(targetMembershipId);
   const context = await requirePermission(orgSlug, 'organization:transfer');
 
   await withTransaction(context.userId, async (tx) => {

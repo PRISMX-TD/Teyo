@@ -10,7 +10,8 @@ type ValuationItem = {
   nameEn: string;
   nameZh: string;
   unit: string;
-  quantity: number;
+  /** 四位小数的十进制字符串，来自 getInventoryValuation。 */
+  quantity: string;
   avgCostMinor: bigint;
   totalValueMinor: bigint;
 };
@@ -18,9 +19,11 @@ type ValuationItem = {
 type Props = {
   valuation: ValuationItem[];
   locale: Locale;
+  /** 库存成本记在本位币上。原来三处金额都硬写 'USD'。 */
+  baseCurrency: string;
 };
 
-export function InventoryValuation({ valuation, locale }: Props) {
+export function InventoryValuation({ valuation, locale, baseCurrency }: Props) {
   const t = getMessages(locale);
 
   const totalValue = valuation.reduce(
@@ -48,8 +51,8 @@ export function InventoryValuation({ valuation, locale }: Props) {
             <td>{localizedName({ name_en: v.nameEn, name_zh: v.nameZh }, locale)}</td>
             <td>{v.unit}</td>
             <td className="numeric">{v.quantity}</td>
-            <td className="numeric">{formatMoney(v.avgCostMinor, 'USD')}</td>
-            <td className="numeric">{formatMoney(v.totalValueMinor, 'USD')}</td>
+            <td className="numeric">{formatMoney(v.avgCostMinor, baseCurrency, locale)}</td>
+            <td className="numeric">{formatMoney(v.totalValueMinor, baseCurrency, locale)}</td>
           </tr>
         ))}
       </tbody>
@@ -59,7 +62,7 @@ export function InventoryValuation({ valuation, locale }: Props) {
             <strong>{t.reports.total}</strong>
           </td>
           <td className="numeric">
-            <strong>{formatMoney(totalValue, 'USD')}</strong>
+            <strong>{formatMoney(totalValue, baseCurrency, locale)}</strong>
           </td>
         </tr>
       </tfoot>

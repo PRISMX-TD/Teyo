@@ -160,13 +160,20 @@ async function insertCreditNote(args: {
   status?: string;
 }): Promise<void> {
   cnSeq += 1;
-  await admin`
+  const [cn] = await admin`
     insert into credit_notes
       (organization_id, invoice_id, contact_id, cn_number, status, issue_date,
        currency, exchange_rate, base_amount_minor, created_by)
     values (${orgId}, ${args.invoiceId}, ${customerId}, ${`CN-${suffix}-${cnSeq}`},
        ${args.status ?? 'issued'}, ${args.issueDate}::date, ${args.currency},
        100000000, ${args.amountMinor.toString()}, ${ownerId})
+    returning id
+  `;
+  // 账龄表的原币冲减额由明细现算（base_amount_minor 装的是本位币，见
+  // getArAging 的 credited CTE），所以一张没有明细的贷项通知单冲不掉任何东西。
+  await admin`
+    insert into credit_note_items (credit_note_id, description, quantity, unit_price_minor, amount_minor)
+    values (${cn.id}, 'Credit', 1, ${args.amountMinor.toString()}, ${args.amountMinor.toString()})
   `;
 }
 

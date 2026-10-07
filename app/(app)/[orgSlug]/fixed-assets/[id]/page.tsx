@@ -2,15 +2,17 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { AssetForm } from '@/components/fixed-assets/asset-form';
 import { DepreciationSchedule } from '@/components/fixed-assets/depreciation-schedule';
+import { DisposeAssetPanel } from '@/components/fixed-assets/dispose-asset-panel';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { listAllAccounts } from '@/server/repositories/accounts';
+import { listAllAccounts, listMoneyAccounts } from '@/server/repositories/accounts';
 import {
   getFixedAsset,
   getDepreciationSchedules,
-} from '@/server/repositories/fixed_assets';
+  getDisposalSummary,
+} from '@/server/repositories/fixed-assets';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
 /**
@@ -34,15 +36,29 @@ export default async function FixedAssetDetailPage({
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const { asset, schedules, accounts } = await withTransaction(context.userId, async (tx) => {
-    const assetResult = await getFixedAsset(tx, context.organizationId, id);
-    if (!assetResult) return { asset: null, schedules: [], accounts: [] };
-    const [schedulesResult, accountsResult] = await Promise.all([
-      getDepreciationSchedules(tx, context.organizationId, id),
-      listAllAccounts(tx, context.organizationId),
-    ]);
-    return { asset: assetResult, schedules: schedulesResult, accounts: accountsResult };
-  });
+  const { asset, schedules, accounts, moneyAccounts, disposal } = await withTransaction(
+    context.userId,
+    async (tx) => {
+      const assetResult = await getFixedAsset(tx, context.organizationId, id);
+      if (!assetResult) {
+        return { asset: null, schedules: [], accounts: [], moneyAccounts: [], disposal: null };
+      }
+      const [schedulesResult, accountsResult, moneyAccountsResult, disposalResult] =
+        await Promise.all([
+          getDepreciationSchedules(tx, context.organizationId, id),
+          listAllAccounts(tx, context.organizationId),
+          listMoneyAccounts(tx, context.organizationId),
+          getDisposalSummary(tx, context.organizationId, assetResult),
+        ]);
+      return {
+        asset: assetResult,
+        schedules: schedulesResult,
+        accounts: accountsResult,
+        moneyAccounts: moneyAccountsResult,
+        disposal: disposalResult,
+      };
+    },
+  );
 
   // getFixedAsset 已经按 organization_id 过滤过，所以「查不到」与「不是你的」
   // 在这里是同一件事，两者都只该得到 404。原来这里抛的是一个裸 Error，
@@ -74,16 +90,34 @@ export default async function FixedAssetDetailPage({
         i18n={t}
       />
 
-      <h2>{t.fixedAssets.editTitle}</h2>
-      <AssetForm
+      <DisposeAssetPanel
         orgSlug={orgSlug}
+        assetId={asset.id}
+        isActive={asset.isActive}
+        baseCurrency={context.baseCurrency}
+        today={todayInOrg(context)}
+        purchaseDate={asset.purchaseDate}
+        moneyAccounts={moneyAccounts.map((a) => ({ id: a.id, name_en: a.nameEn, name_zh: a.nameZh }))}
+        disposal={disposal}
         locale={locale}
         i18n={t}
-        accounts={accountOptions}
-        baseCurrency={context.baseCurrency}
-        currencies={[...SUPPORTED_CURRENCIES]}
-        asset={asset}
       />
+
+      {/* 已处置的资产不给编辑：updateFixedAssetAction 会拒绝，要改先撤销处置。 */}
+      {asset.isActive ? (
+        <>
+          <h2>{t.fixedAssets.editTitle}</h2>
+          <AssetForm
+            orgSlug={orgSlug}
+            locale={locale}
+            i18n={t}
+            accounts={accountOptions}
+            baseCurrency={context.baseCurrency}
+            currencies={[...SUPPORTED_CURRENCIES]}
+            asset={asset}
+          />
+        </>
+      ) : null}
     </>
   );
 }

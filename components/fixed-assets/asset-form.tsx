@@ -5,8 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
-import { createFixedAsset, updateFixedAssetAction } from '@/server/actions/fixed_assets';
-import type { FixedAssetRow } from '@/server/repositories/fixed_assets';
+import { createFixedAsset, updateFixedAssetAction } from '@/server/actions/fixed-assets';
+import type { FixedAssetRow } from '@/server/repositories/fixed-assets';
 import { todayLocalISO } from '@/lib/date';
 
 type AccountOption = {
@@ -28,7 +28,7 @@ type Props = {
    *
    * updateFixedAssetAction 此前在 app/ 与 components/ 下零引用——也就是说
    * 「改一条固定资产」在界面上根本没有入口，而它背后那套「改参数后重算整张
-   * 折旧表、冻结已过账期间」的逻辑（server/repositories/fixed_assets.ts 的
+   * 折旧表、冻结已过账期间」的逻辑（server/repositories/fixed-assets.ts 的
    * generateDepreciationSchedule）从来没有被任何用户触发过。这里把它接上。
    * 与定期规则那一处（components/settings/recurring-list.tsx 的 startEdit）
    * 是同一件事的同一种修法：复用同一张表单，不另起一套字段与校验。
@@ -96,7 +96,7 @@ export function AssetForm({
 
   // 一个币种能有几位小数由币种自己决定，不是一律两位：JPY / VND 没有分币。
   // 服务端按这个位数解析金额，多出来的小数会被拒绝而不是像以前那样截掉两位
-  // （见 server/actions/fixed_assets.ts 的 parseAmountMinor）。表单必须先把
+  // （见 server/actions/fixed-assets.ts 的 parseAmountMinor）。表单必须先把
   // 这件事说清楚——提示位数、当场拦住——而不是让用户提交后撞一句报错。
   const costDecimals = currencyExponent(originalCurrency);
   const amountPlaceholder = (decimals: number) => (decimals === 0 ? '0' : '0.00');
@@ -332,13 +332,16 @@ export function AssetForm({
       {method === 'declining_balance' && (
         <div className="form-field">
           <label>{t.fixedAssets.decliningRate}</label>
+          {/* 标签写的是「（%）」，输入框原来收的却是基点：照着标签填 200
+              （双倍余额递减）存下去的是 2%。框里显示与输入一律按百分数，
+              换算成基点只在这里做一次。 */}
           <input
             type="number"
-            value={decliningRateBps}
-            onChange={(e) => setDecliningRateBps(Number(e.target.value))}
+            value={decliningRateBps / 100}
+            onChange={(e) => setDecliningRateBps(Math.round(Number(e.target.value) * 100))}
             min={0}
+            step="0.01"
           />
-          <span className="hint">{(decliningRateBps / 100).toFixed(0)}%</span>
         </div>
       )}
 

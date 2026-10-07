@@ -112,6 +112,11 @@ export async function getAttachment(
   organizationId: string,
   attachmentId: string,
 ): Promise<AttachmentRow> {
+  // id 来自客户端。不是 uuid 的串交给 Postgres 会抛 22P02 而不是「找不到」。
+  if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(attachmentId)) {
+    throw new AttachmentNotFoundError('This attachment was not found in this company.');
+  }
+
   const rows = await tx`
     select id, transaction_id, storage_path, file_name, mime_type, size_bytes, uploaded_by
     from attachments

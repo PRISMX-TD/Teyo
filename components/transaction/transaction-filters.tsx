@@ -32,8 +32,11 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
   /* 有没有条件正在生效。决定筛选区一进页面是展开还是收起：
      正在筛的时候必须展开——否则用户看到一份被过滤过的列表，却看不见
      是什么在过滤它，只会以为数据丢了。 */
+  // 必须与下面各字段的 name 一致。原来写的是 category / moneyAccount /
+  // member，地址栏里实际是 categoryId / moneyAccountId / createdBy，于是只按
+  // 这三项筛选时手机上筛选区照样收起、那个小圆点也不亮。
   const FILTER_KEYS = [
-    'from', 'to', 'kind', 'category', 'moneyAccount', 'member',
+    'from', 'to', 'kind', 'categoryId', 'moneyAccountId', 'createdBy',
     'minAmount', 'maxAmount', 'keyword', 'includeVoided',
   ] as const;
   const hasActiveFilter = FILTER_KEYS.some((k) => (params.get(k) ?? '') !== '');

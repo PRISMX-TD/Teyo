@@ -23,6 +23,8 @@ type Props = {
   profitabilityMap: Record<string, ProjectProfit>;
   /** 公司本位币。预算原来一律按 'USD' 显示、按两位小数解析。 */
   baseCurrency: string;
+  /** 编辑与改状态要 account:manage；列表本身只要 transaction:read。 */
+  canManage: boolean;
 };
 
 export function ProjectList({
@@ -31,6 +33,7 @@ export function ProjectList({
   projects: initialProjects,
   profitabilityMap,
   baseCurrency,
+  canManage,
 }: Props) {
   const t = getMessages(locale);
   const exponent = currencyExponent(baseCurrency);
@@ -74,8 +77,12 @@ export function ProjectList({
     setPending(true);
     setError(null);
     try {
+      const current = projects.find((p) => p.id === id);
       await updateProjectAction(orgSlug, id, {
         name: editName.trim(),
+        // 这张行内表单没有客户一栏，但 updateProject 对可空列是「不传就清空」，
+        // 原来每改一次名字，项目挂的客户就被悄悄清掉。原样带回去。
+        contactId: current?.contactId ?? undefined,
         description: editDescription.trim(),
         // 传十进制字符串，由服务端按本位币的小数位解析（见
         // server/actions/projects.ts 的 budgetToMinor）。前端不再自己
@@ -204,7 +211,9 @@ export function ProjectList({
               </div>
               {/* 第三层：操作按钮组 */}
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-1)' }}>
-                <button onClick={() => startEdit(project)} className="btn-small">{t.common.edit}</button>
+                {canManage ? (
+                  <button onClick={() => startEdit(project)} className="btn-small">{t.common.edit}</button>
+                ) : null}
                 {/* 展开盈利分析。原来这颗按钮的全部内容就是一个 '+' 或 '−'，
                     没有 aria-label、没有 aria-expanded——读屏器念出来是
                     「加号，按钮」，既不知道它是干什么的，也不知道现在是开是关。
@@ -218,7 +227,7 @@ export function ProjectList({
                 >
                   <span aria-hidden="true">{expanded === project.id ? '−' : '+'}</span>
                 </button>
-                {(NEXT_STATUS[project.status] ?? []).map((ns) => (
+                {(canManage ? (NEXT_STATUS[project.status] ?? []) : []).map((ns) => (
                   <button
                     key={ns}
                     onClick={() => handleStatusChange(project.id, ns)}

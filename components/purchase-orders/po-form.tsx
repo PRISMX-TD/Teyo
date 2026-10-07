@@ -4,7 +4,7 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
-import { createPurchaseOrder, updatePurchaseOrderAction } from '@/server/actions/purchase_orders';
+import { createPurchaseOrder, updatePurchaseOrderAction } from '@/server/actions/purchase-orders';
 import { todayLocalISO } from '@/lib/date';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { RateField } from '@/components/transaction/rate-field';

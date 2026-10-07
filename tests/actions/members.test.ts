@@ -314,6 +314,19 @@ describe('setMemberStatus', () => {
     await expect(setMemberStatus(orgSlug, owner!.membershipId, 'suspended')).rejects.toThrow();
   });
 
+  it('rejects a status other than active/suspended at runtime', async () => {
+    // 这是可直接 POST 的端点，TS 的联合类型拦不住 'invited' 这种值。
+    user.id = ownerId;
+    const members = await listMembers(orgSlug);
+    const target = members.find((m) => m.userId === staffId);
+
+    await expect(
+      setMemberStatus(orgSlug, target!.membershipId, 'invited' as 'active'),
+    ).rejects.toThrow();
+    const [row] = await admin`select status from memberships where id = ${target!.membershipId}`;
+    expect(row.status).toBe('active');
+  });
+
   it('suspends a member, blocks their access, then reactivates them', async () => {
     user.id = ownerId;
     const members = await listMembers(orgSlug);

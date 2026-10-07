@@ -147,14 +147,22 @@ export async function deleteTaxRate(
 
   const rateBps = Number(rateRows[0].rate_bps);
 
+  // 账单自 0021 起也带 tax_rate_bps / tax_rate_id，原来只查发票：一个只被
+  // 账单用着的税率可以被删掉，账单编辑页的税率下拉里就再也找不到它。
   const refs = await tx`
-    select count(*)::int as cnt from invoices
-    where organization_id = ${organizationId}
-      and tax_rate_bps = ${rateBps}
-      and voided_at is null
+    select
+      (select count(*)::int from invoices
+        where organization_id = ${organizationId}
+          and tax_rate_bps = ${rateBps}
+          and voided_at is null)
+      +
+      (select count(*)::int from bills
+        where organization_id = ${organizationId}
+          and tax_rate_bps = ${rateBps}
+          and voided_at is null) as cnt
   `;
   if (Number(refs[0].cnt) > 0) {
-    throw new Error('This tax rate is used by one or more invoices and cannot be deleted.');
+    throw new Error('This tax rate is used by one or more invoices or bills and cannot be deleted.');
   }
 
   await tx`

@@ -356,11 +356,16 @@ export function parseCsvBuffer(buffer: Buffer, options: ParseOptions): ParsedTra
 
   const dateIdx = findHeaderIndex(headers, /date/i);
   const descIdx = findHeaderIndex(headers, /description|memo|payee|name|narrative|particulars/i);
-  const amountIdx = findHeaderIndex(headers, /amount|sum|value/i);
+  // 金额列不能是一个日期列。马来西亚不少银行的导出同时有「Transaction Date」
+  // 和「Value Date」两列，只按 /value/ 找会先命中「Value Date」，于是整份
+  // 对账单的每一行都在「这不是金额」上失败，而文件本身完全正常。
+  const amountColumn = (pattern: RegExp) =>
+    headers.findIndex((h) => pattern.test(h) && !/date/i.test(h));
+  const amountIdx = amountColumn(/amount|sum|value/i);
 
   // 没有单一金额列时退回借/贷两列。
-  const debitIdx = amountIdx === -1 ? findHeaderIndex(headers, /debit|withdrawal|payment/i) : -1;
-  const creditIdx = amountIdx === -1 ? findHeaderIndex(headers, /credit|deposit|income/i) : -1;
+  const debitIdx = amountIdx === -1 ? amountColumn(/debit|withdrawal|payment/i) : -1;
+  const creditIdx = amountIdx === -1 ? amountColumn(/credit|deposit|income/i) : -1;
 
   if (dateIdx === -1) {
     throw new BankImportError(

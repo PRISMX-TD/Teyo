@@ -4,7 +4,12 @@ import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission, AuthError } from '@/server/auth/guard';
-import { currencyExponent, parseDecimalToMinor, sumMinor } from '@/server/domain/money';
+import {
+  currencyExponent,
+  formatMinorToDecimal,
+  parseDecimalToMinor,
+  sumMinor,
+} from '@/server/domain/money';
 import { convertToBaseMinor, formatScaledRate } from '@/server/domain/exchange-rate';
 import { LedgerError } from '@/server/domain/ledger';
 import type { PostingEvent } from '@/server/domain/posting-templates';
@@ -54,6 +59,7 @@ import {
   refreshSettlementStatuses,
   setPaymentTransactionId,
   sumAppliedByPayment,
+  sumDeductedByDocument,
   sumSettledByDocument,
   voidPayment,
   MONEY_ACCOUNT_CODE_BY_METHOD,
@@ -108,7 +114,9 @@ const createPaymentSchema = z.object({
   items: z.array(paymentItemSchema).default([]),
 });
 
-export type CreatePaymentInput = z.infer<typeof createPaymentSchema>;
+// z.input 而不是 z.infer：currency / method / items 有缺省值，调用方可以不传；
+// z.infer 取的是 parse 之后的形状，会把它们全变成必填。
+export type CreatePaymentInput = z.input<typeof createPaymentSchema>;
 
 /**
  * 收付款表单上现在有汇率输入框了（components/payments/payment-form.tsx
@@ -231,6 +239,14 @@ export async function createPayment(
         );
       }
     }
+
+    await assertDocumentsSettleable(tx, context.organizationId, {
+      kind: documentKind,
+      contactId: parsed.contactId,
+      documents,
+      itemDocumentIds,
+      itemAmounts,
+    });
 
     // 3. 「本次之前」的已核销金额。必须在写 payment_items 之前查。
     const alreadySettled = await sumSettledByDocument(
@@ -604,6 +620,14 @@ export async function applyPrepayment(
       }
     }
 
+    await assertDocumentsSettleable(tx, context.organizationId, {
+      kind: documentKind,
+      contactId: payment.contactId,
+      documents,
+      itemDocumentIds,
+      itemAmounts,
+    });
+
     // 4. 「本次之前」的已核销金额。
     const alreadySettled = await sumSettledByDocument(
       tx,
@@ -939,6 +963,70 @@ function pickDocumentId(
     throw new LedgerError('A payment made settles bills, not invoices.');
   }
   return billId as string;
+}
+
+/**
+ * 被核销的单据必须真的欠着这笔钱。
+ *
+ * 原来服务端只查「属于本公司、币种一致」，另外三件事全靠界面过滤：
+ *   - **草稿**：没有过账，应收从未被借过。核销它就是凭空贷一笔应收，
+ *     总账上出现负的应收，而发票照样停在草稿（settlementStatusFor 不碰草稿）。
+ *     作废的单据同理。
+ *   - **往来对象**：用 A 客户的钱冲 B 客户的发票，两人的对账单都对不上。
+ *   - **超额**：核销金额超过单据剩余（总额 − 已收 − 已签发的贷项通知单）。
+ *     多出来的那一截在 clearedBaseMinor 里被 clamp 掉，于是整个记成了
+ *     汇兑收益——本位币发票也一样。该挂预收的钱变成了一笔假收入。
+ * 界面过滤挡不住直接调用 server action，也挡不住两个标签页先后提交。
+ */
+async function assertDocumentsSettleable(
+  tx: Tx,
+  organizationId: string,
+  args: {
+    kind: SettlementDocumentKind;
+    contactId: string;
+    documents: ReadonlyMap<string, SettlementDocument>;
+    itemDocumentIds: readonly string[];
+    itemAmounts: readonly bigint[];
+  },
+): Promise<void> {
+  const requested = new Map<string, bigint>();
+  args.itemDocumentIds.forEach((id, index) => {
+    requested.set(id, (requested.get(id) ?? 0n) + args.itemAmounts[index]);
+  });
+  if (requested.size === 0) return;
+
+  for (const id of requested.keys()) {
+    const document = args.documents.get(id) as SettlementDocument;
+    const label = document.number || 'This document';
+    if (document.status === 'voided' || document.voidedAt !== null) {
+      throw new LedgerError(`${label} is voided and can no longer be settled.`);
+    }
+    if (document.status === 'draft') {
+      throw new LedgerError(
+        `${label} is still a draft. Issue it before recording a payment against it.`,
+      );
+    }
+    if (document.contactId !== args.contactId) {
+      throw new LedgerError(`${label} belongs to a different contact than this payment.`);
+    }
+  }
+
+  const deducted = await sumDeductedByDocument(tx, organizationId, args.kind, [
+    ...requested.keys(),
+  ]);
+
+  for (const [id, amount] of requested) {
+    const document = args.documents.get(id) as SettlementDocument;
+    const remaining = document.totalMinor - (deducted.get(id) ?? 0n);
+    if (amount > remaining) {
+      throw new LedgerError(
+        `${document.number || 'This document'} only has ${formatMinorToDecimal(
+          remaining > 0n ? remaining : 0n,
+          currencyExponent(document.currency),
+        )} ${document.currency} left to settle. Leave the rest of the payment on account instead.`,
+      );
+    }
+  }
 }
 
 function settlementDescription(type: 'received' | 'made', reference: string | null): string {

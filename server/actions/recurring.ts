@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { parseOrThrow, recurringEditSchema } from '@/lib/schemas';
-import { AuthError, requirePermission, type OrgContext } from '@/server/auth/guard';
+import { AuthError, requirePermission, todayInOrg, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { currencyExponent, MoneyError, parseDecimalToMinor } from '@/server/domain/money';
 import { postJournal } from '@/server/posting/post-journal';
@@ -17,6 +17,8 @@ import {
   MAX_CATCH_UP_PER_RULE,
 } from '@/server/repositories/recurring';
 import { recordAudit } from '@/server/repositories/audit-logs';
+import { findAccount } from '@/server/repositories/accounts';
+import { getCategory } from '@/server/repositories/categories';
 import { LedgerError, type UserEntryKind } from '@/server/domain/ledger';
 import { PeriodLockedError } from '@/server/domain/period-lock';
 import type { PostingEvent } from '@/server/domain/posting-templates';
@@ -35,6 +37,46 @@ import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 function assertValidInterval(interval: number): void {
   if (!Number.isInteger(interval) || interval < 1) {
     throw new LedgerError('How often this repeats must be a whole number, at least 1.');
+  }
+}
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * 规则上的科目与分类必须属于本公司，借贷两边不能是同一个科目。
+ *
+ * recurring_transactions 的这三条外键都没有公司维度（0008），RLS 对外键校验
+ * 也不生效——不查一次，别家公司的科目 id 照样存得进来。到生成那天
+ * insertJournalLines 的归属校验会拦住，但那时用户看到的是一条每次运行都
+ * 失败的规则，而不是保存时一句「这个科目不在本公司」。借贷相同同理：
+ * templateFor 会拒，只是拒在几个月之后。
+ */
+async function assertRuleReferences(
+  tx: Tx,
+  organizationId: string,
+  refs: { debitAccountId?: string; creditAccountId?: string; categoryId?: string | null },
+): Promise<void> {
+  const accounts: [string, string | undefined][] = [
+    ['debit account', refs.debitAccountId],
+    ['credit account', refs.creditAccountId],
+  ];
+  for (const [label, accountId] of accounts) {
+    if (accountId === undefined) continue;
+    if (!UUID_PATTERN.test(accountId) || !(await findAccount(tx, organizationId, accountId))) {
+      throw new LedgerError(`The ${label} was not found in this company.`);
+    }
+  }
+  if (
+    refs.debitAccountId !== undefined &&
+    refs.debitAccountId === refs.creditAccountId
+  ) {
+    throw new LedgerError('Debit and credit must be different accounts.');
+  }
+  if (refs.categoryId) {
+    if (!UUID_PATTERN.test(refs.categoryId)) {
+      throw new LedgerError('This category was not found in this company.');
+    }
+    await getCategory(tx, organizationId, refs.categoryId);
   }
 }
 
@@ -75,6 +117,12 @@ export async function createRecurring(
   assertValidInterval(input.interval);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    await assertRuleReferences(tx, context.organizationId, {
+      debitAccountId: input.debitAccountId,
+      creditAccountId: input.creditAccountId,
+      categoryId: input.categoryId || null,
+    });
+
     const { id } = await insertRecurring(tx, {
       organizationId: context.organizationId,
       kind: input.kind,
@@ -178,7 +226,17 @@ export async function editRecurring(
     assertValidInterval(parsed.interval);
   }
 
+  if (!UUID_PATTERN.test(id)) {
+    throw new LedgerError('That recurring entry was not found in this company.');
+  }
+
   await withTransaction(context.userId, async (tx) => {
+    await assertRuleReferences(tx, context.organizationId, {
+      debitAccountId: parsed.debitAccountId,
+      creditAccountId: parsed.creditAccountId,
+      categoryId: parsed.categoryId,
+    });
+
     await updateRecurring(tx, context.organizationId, id, {
       ...parsed,
       // 空备注落库为 null，与 createRecurring 的 `|| null` 一致。
@@ -428,7 +486,10 @@ export async function generateDueRecurring(orgSlug: string): Promise<RecurringRu
   }
 
   const result = await withTransaction(context.userId, async (tx) => {
-    const today = new Date().toISOString().slice(0, 10);
+    // 公司时区的今天，不是服务器的 UTC 日期。原来是 toISOString()，对 UTC+8
+    // 的公司每天本地 00:00–08:00 里「今天到期」的规则一条都选不出来，而界面
+    // （按设备本地日期判断）却说有到期的——点下去得到「没有到期的分录」。
+    const today = todayInOrg(context);
     const dueList = await getDueRecurring(tx, context.organizationId, today);
 
     const report: RecurringRunReport = { generated: 0, blocked: [], deferred: [] };

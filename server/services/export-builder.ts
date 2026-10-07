@@ -35,6 +35,9 @@ const UTF8_BOM = Buffer.from([0xef, 0xbb, 0xbf]);
  * 直接写进 CSV 等于把公式注入送给打开文件的人，前面加单引号中和掉。
  */
 function neutralizeFormula(value: string): string {
+  // 纯数字（含负数）放行：科目汇总的净额可以是 -1200.50，加上单引号后
+  // 文件里那一格就成了文本 '-1200.50，求和全部失效。纯数字不可能是公式。
+  if (/^-?\d+(\.\d+)?$/.test(value)) return value;
   return /^[=+\-@]/.test(value) ? `'${value}` : value;
 }
 
@@ -109,9 +112,17 @@ const DETAIL_HEADERS: Record<Locale, string[]> = {
   ],
 };
 
+// journal / closing 原来没有标签：单据过账一律落成 kind = 'journal'，
+// 于是每一张发票、账单、收付款在导出文件里的「类型」一格都是空的。
 const KIND_LABELS: Record<Locale, Record<string, string>> = {
-  en: { income: 'Money in', expense: 'Money out', transfer: 'Transfer' },
-  zh: { income: '收入', expense: '支出', transfer: '转账' },
+  en: {
+    income: 'Money in',
+    expense: 'Money out',
+    transfer: 'Transfer',
+    journal: 'Journal entry',
+    closing: 'Year-end closing',
+  },
+  zh: { income: '收入', expense: '支出', transfer: '转账', journal: '记账凭证', closing: '年结分录' },
 };
 
 /** 含作废记录时追加的两列：状态与作废原因。 */
@@ -147,7 +158,7 @@ export async function buildTransactionDetailRows(
   const rows = transactions.map((t) => {
     const row = [
       t.occurredOn,
-      KIND_LABELS[locale][t.kind],
+      KIND_LABELS[locale][t.kind] ?? t.kind,
       t.description,
       t.categoryId
         ? localizedName({ name_en: t.categoryNameEn, name_zh: t.categoryNameZh }, locale)

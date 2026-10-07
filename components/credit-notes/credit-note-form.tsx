@@ -4,12 +4,12 @@ import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale, Messages } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
-import { createCreditNote, updateCreditNoteAction } from '@/server/actions/credit_notes';
+import { createCreditNote, updateCreditNoteAction } from '@/server/actions/credit-notes';
 import { todayLocalISO } from '@/lib/date';
 import { RateField } from '@/components/transaction/rate-field';
 
 type Contact = { id: string; name: string };
-type InvoiceRef = { id: string; invoice_number: string; total_minor: bigint };
+type InvoiceRef = { id: string; invoice_number: string; contact_id: string; currency: string };
 
 /**
  * 编辑模式下这张表单需要的那张单据，已经摊平成字符串。
@@ -44,7 +44,7 @@ type Props = {
   baseCurrency: string;
   /**
    * 有值即编辑模式。只有草稿才会走到这里——已签发的单据服务端直接拒绝
-   * （server/actions/credit_notes.ts 的 updateCreditNoteAction），页面负责
+   * （server/actions/credit-notes.ts 的 updateCreditNoteAction），页面负责
    * 在那之前就不渲染这张表单。
    */
   creditNote?: CreditNoteEditable | null;
@@ -113,16 +113,19 @@ export function CreditNoteForm({
   }
 
   /**
-   * 选中发票只记下 id，不去联动客户。
+   * 选中发票时把客户与币种对齐到那张发票。
    *
-   * 这里原来是一个空的 if 分支加一句「以后再自动填」，读起来像是漏写了
-   * 实现——其实是无从实现：invoices 这个下拉列表只带了发票号和总额，
-   * 没有带 contact_id，前端根本不知道这张发票开给了谁。要联动得让页面
-   * 多查一列，那是这一轮之外的事；在此之前，一个诚实的空动作胜过一段
-   * 看起来忘了写的代码。
+   * 贷项通知单冲的是那张发票的应收：客户不同，两个人的对账单都对不上；
+   * 币种不同，冲减额与发票总额根本没法比大小。服务端会拒绝这两种组合
+   * （assertInvoiceLink），在这里对齐是为了不让用户填完整张表才吃一句报错。
    */
   function handleInvoiceChange(value: string) {
     setInvoiceId(value);
+    const invoice = invoices.find((inv) => inv.id === value);
+    if (invoice) {
+      if (contacts.some((c) => c.id === invoice.contact_id)) setContactId(invoice.contact_id);
+      setCurrency(invoice.currency);
+    }
   }
 
   async function handleSubmit(e: React.FormEvent) {
@@ -249,7 +252,7 @@ export function CreditNoteForm({
         `manualRateEntry: 'unavailable'`，而那条路径的报错让用户「去
         Transactions 页面自己记一笔」——对一张贷项通知单同样是错误建议：
         自己记一笔交易不会冲减任何一张发票的应收。现在能就地填，服务端那个
-        常量应当改成 'available'（server/actions/credit_notes.ts 的
+        常量应当改成 'available'（server/actions/credit-notes.ts 的
         CREDIT_NOTE_MANUAL_RATE_ENTRY）。
 
         amount 传空串：这张表单没有一个「总金额」输入框，总额是各行单价乘

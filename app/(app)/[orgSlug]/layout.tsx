@@ -24,7 +24,10 @@ export default async function AppLayout({
     redirect('/?notice=no_access');
   }
 
-  resolveOrgContext(orgSlug);
+  // 角色给侧栏/dock 筛入口；React.cache 让页面里同一请求的 resolveOrgContext
+  // 直接复用这次结果。原来这里没有 await：成员资格在这两次查询之间被撤销时，它抛出的 AuthError
+  // 没有任何人接，变成一个未处理的 Promise rejection。
+  const context = await resolveOrgContext(orgSlug);
 
   const locale = (await getUserLocale(userId)) as 'en' | 'zh';
   const t = getMessages(locale);
@@ -41,6 +44,7 @@ export default async function AppLayout({
         orgSlug={orgSlug}
         i18n={t}
         orgs={allOrgs.map((o) => ({ id: o.id, slug: o.slug, name: o.name }))}
+        role={context.role}
       />
       {/* tabIndex={-1}：跳转链接把焦点送到这里，<main> 本身不可聚焦的话，
           浏览器只会滚动过去而焦点仍留在链接上，下一次 Tab 又回到导航。 */}
@@ -50,7 +54,7 @@ export default async function AppLayout({
       <main id="app-main-content" className="app-main" tabIndex={-1}>
         {children}
       </main>
-      <FloatingDock orgSlug={orgSlug} i18n={t} />
+      <FloatingDock orgSlug={orgSlug} i18n={t} role={context.role} />
     </div>
   );
 }

@@ -18,7 +18,7 @@ vi.mock('@/server/auth/session', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
 const { createPurchaseOrder, updatePurchaseOrderAction, setPoStatusAction } = await import(
-  '@/server/actions/purchase_orders'
+  '@/server/actions/purchase-orders'
 );
 
 const suffix = randomUUID().slice(0, 8);
@@ -322,7 +322,7 @@ describe('updatePurchaseOrderAction - 不再把两个 not null 列写成 NULL', 
 describe('setPoStatusAction - 作废要同时写 voided_at', () => {
   // 原来只改 status。于是「这张单作废了没有」在库里有两个互不相干的记号，
   // 而 listPurchaseOrders 与报表读的都是那个从来没人写的 voided_at。
-  it('置为 voided 时写上 voided_at，撤销时清掉', async () => {
+  it('置为 voided 时写上 voided_at；作废是终态，不能再改回草稿', async () => {
     currentUserId = ownerId;
     const { id } = await createPurchaseOrder(org.slug, {
       contactId: vendorId,
@@ -337,10 +337,25 @@ describe('setPoStatusAction - 作废要同时写 voided_at', () => {
     expect(voided.status).toBe('voided');
     expect(voided.voided_at).not.toBeNull();
 
-    await setPoStatusAction(org.slug, id, 'draft');
-    const restored = await poRow(id);
-    expect(restored.status).toBe('draft');
-    expect(restored.voided_at).toBeNull();
+    // 界面上作废之后没有任何按钮，但 Server Action 是网络端点。
+    await expect(setPoStatusAction(org.slug, id, 'draft')).rejects.toThrow(
+      /cannot change status/i,
+    );
+    const still = await poRow(id);
+    expect(still.status).toBe('voided');
+    expect(still.voided_at).not.toBeNull();
+  });
+
+  it('状态不能往回走', async () => {
+    currentUserId = ownerId;
+    const { id } = await createPurchaseOrder(org.slug, {
+      contactId: vendorId,
+      issueDate: ISSUE_DATE,
+      items: ONE_LINE,
+    });
+    await setPoStatusAction(org.slug, id, 'received');
+    await expect(setPoStatusAction(org.slug, id, 'sent')).rejects.toThrow(/back to sent/i);
+    expect((await poRow(id)).status).toBe('received');
   });
 });
 

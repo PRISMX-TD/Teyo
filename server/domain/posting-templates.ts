@@ -65,6 +65,29 @@ export type PostingEvent =
       netMinor: bigint;
       taxMinor: bigint;
       amountMinor: bigint;
+    }
+  /**
+   * 处置固定资产（出售或报废），全部为本位币：
+   *   借累计折旧（已入账的累计折旧） / 借资金账户（处置收入）/ 借处置损失
+   *   贷资产科目（原值） / 贷处置收益
+   *
+   * 调用方只给三个事实：原值、已入账的累计折旧、处置收入。损益由这里按
+   * 「收入 - 账面净值」算出来，不让调用方传——损益是另外三个数的函数，
+   * 让调用方再传一遍，就多了一种三个数与损益对不上、而分录照样配平的写法。
+   * amountMinor 是借方合计，与其余事件一样落进表头。
+   */
+  | {
+      type: 'asset-disposal';
+      assetAccountId: string;
+      accumAccountId: string;
+      /** 处置收入为 0（报废）时为 null。 */
+      proceedsAccountId: string | null;
+      gainAccountId: string;
+      lossAccountId: string;
+      costMinor: bigint;
+      accumulatedMinor: bigint;
+      proceedsMinor: bigint;
+      amountMinor: bigint;
     };
 
 /** 带净额/税额拆分的单据事件。三种共用同一套校验与同一种拆行方式。 */
@@ -169,6 +192,9 @@ export function templateFor(event: PostingEvent): DraftLineSpec[] {
       return [...event.lines];
     }
 
+    case 'asset-disposal':
+      return assetDisposalLines(event);
+
     case 'supplier-payment': {
       if (event.moneyAccountId === event.payableAccountId) {
         throw new LedgerError('This operation requires two different accounts.');
@@ -212,6 +238,9 @@ export function kindFor(event: PostingEvent): TransactionKind {
     case 'customer-receipt':
     case 'supplier-payment':
     case 'credit-note':
+    // 处置分录同样落成 'journal'：对方科目由资产自己指定，不挂分类；交易
+    // 详情页对它只读，要撤销就回资产页「撤销处置」。
+    case 'asset-disposal':
       return 'journal';
     // 年结必须落成自己的 kind，不能并进 'journal'：损益表正是靠它把年结
     // 排除在外（见 server/repositories/reports.ts 的 getProfitLoss）。
@@ -285,6 +314,79 @@ function splitLines(
   }
 
   return lines;
+}
+
+/**
+ * 处置固定资产的分录行。金额为零的行一律不出（journal_lines.amount_minor
+ * 有 > 0 的 CHECK）：没计提过折旧就没有累计折旧行，报废就没有资金行，
+ * 收入恰好等于账面净值就既无收益也无损失。
+ *
+ * 损益 = 收入 - (原值 - 累计折旧)。为正记贷方收益，为负记借方损失。
+ * 借方合计 = 累计折旧 + 收入 + 损失，贷方合计 = 原值 + 收益，两边恒等——
+ * 但仍然要核对 amountMinor 等于借方合计，理由与年结那一支相同：表头与
+ * 分录不一致时配平触发器看不见。
+ */
+function assetDisposalLines(event: Extract<PostingEvent, { type: 'asset-disposal' }>): DraftLineSpec[] {
+  if (event.costMinor <= 0n) {
+    throw new LedgerError('The asset cost must be greater than zero to record a disposal.');
+  }
+  if (event.accumulatedMinor < 0n || event.proceedsMinor < 0n) {
+    throw new LedgerError('Disposal amounts cannot be negative.');
+  }
+  if (event.accumulatedMinor > event.costMinor) {
+    throw new LedgerError('Accumulated depreciation cannot exceed the asset cost.');
+  }
+  if (event.proceedsMinor > 0n && event.proceedsAccountId === null) {
+    throw new LedgerError('Choose the account that received the sale proceeds.');
+  }
+  if (event.assetAccountId === event.accumAccountId) {
+    throw new LedgerError('This operation requires two different accounts.');
+  }
+
+  const bookValue = event.costMinor - event.accumulatedMinor;
+  const gainOrLoss = event.proceedsMinor - bookValue;
+
+  const debits: DraftLineSpec[] = [];
+  if (event.accumulatedMinor > 0n) {
+    debits.push({ accountId: event.accumAccountId, direction: 'debit', amountMinor: event.accumulatedMinor });
+  }
+  if (event.proceedsMinor > 0n) {
+    debits.push({
+      accountId: event.proceedsAccountId as string,
+      direction: 'debit',
+      amountMinor: event.proceedsMinor,
+    });
+  }
+  if (gainOrLoss < 0n) {
+    debits.push({ accountId: event.lossAccountId, direction: 'debit', amountMinor: -gainOrLoss });
+  }
+
+  const credits: DraftLineSpec[] = [
+    { accountId: event.assetAccountId, direction: 'credit', amountMinor: event.costMinor },
+  ];
+  if (gainOrLoss > 0n) {
+    credits.push({ accountId: event.gainAccountId, direction: 'credit', amountMinor: gainOrLoss });
+  }
+
+  const debitTotal = sumMinor(debits.map((line) => line.amountMinor));
+  if (debitTotal !== event.amountMinor) {
+    throw new LedgerError(
+      `Disposal entry total ${event.amountMinor} does not equal its debit side ${debitTotal}.`,
+    );
+  }
+
+  return [...debits, ...credits];
+}
+
+/** 处置分录的表头金额（借方合计）。调用方据此填 amountMinor，与模板同一个算法。 */
+export function assetDisposalTotal(args: {
+  costMinor: bigint;
+  accumulatedMinor: bigint;
+  proceedsMinor: bigint;
+}): bigint {
+  const bookValue = args.costMinor - args.accumulatedMinor;
+  const loss = bookValue > args.proceedsMinor ? bookValue - args.proceedsMinor : 0n;
+  return args.accumulatedMinor + args.proceedsMinor + loss;
 }
 
 /**

@@ -47,9 +47,16 @@ afterAll(async () => {
 });
 
 // 生成用的「今天」取自真实时钟（server/actions/recurring.ts 里的
-// new Date()），测试无法注入，所以到期日一律相对今天算，或者用 end_date
-// 把occurrence 数量钉死。
-const TODAY = new Date().toISOString().slice(0, 10);
+// todayInOrg），测试无法注入，所以到期日一律相对今天算，或者用 end_date
+// 把occurrence 数量钉死。测试公司用的是 organizations.timezone 的默认值
+// （Asia/Kuala_Lumpur），这里必须按同一个时区算，否则 UTC 16:00 之后两边
+// 差一天。
+const TODAY = new Intl.DateTimeFormat('en-CA', {
+  timeZone: 'Asia/Kuala_Lumpur',
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+}).format(new Date());
 
 function shiftDays(iso: string, days: number): string {
   const [y, m, d] = iso.split('-').map(Number);

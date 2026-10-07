@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listProjects, getProjectProfitability } from '@/server/repositories/projects';
 import { ProjectList } from '@/components/projects/project-list';
@@ -15,6 +16,8 @@ export default async function ProjectsListPage({
   const context = await requirePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
+  // 新建、编辑、改状态三个 action 都要 account:manage。
+  const canManage = can(context.role, 'account:manage');
 
   const projects = await withTransaction(context.userId, async (tx) =>
     listProjects(tx, context.organizationId),
@@ -43,11 +46,13 @@ export default async function ProjectsListPage({
     <>
       <div className="page-header">
         <h1>{t.projects.title}</h1>
-        <div className="page-header-actions">
-          <Link href={`/${orgSlug}/projects/new`} className="primary-button">
-            {t.projects.newTitle}
-          </Link>
-        </div>
+        {canManage ? (
+          <div className="page-header-actions">
+            <Link href={`/${orgSlug}/projects/new`} className="primary-button">
+              {t.projects.newTitle}
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       <ProjectList
@@ -56,6 +61,7 @@ export default async function ProjectsListPage({
         projects={projects}
         profitabilityMap={profitabilityMap}
         baseCurrency={context.baseCurrency}
+        canManage={canManage}
       />
     </>
   );

@@ -36,6 +36,7 @@ vi.mock('@/server/auth/session', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
 const { createBill, receiveBill, updateBill, voidBill } = await import('@/server/actions/bills');
+const { createPayment } = await import('@/server/actions/payments');
 
 let ownerId: string;
 let viewerId: string;
@@ -483,6 +484,57 @@ describe('voidBill - 作废连带作废分录', () => {
 
     await expect(voidBill(orgSlug, id, 'Duplicate entry')).rejects.toThrow(/already voided/i);
     await expect(updateBill(orgSlug, id, billInput())).rejects.toThrow(/voided/i);
+  });
+});
+
+describe('已付款的账单', () => {
+  async function payBill(billId: string, amount: string) {
+    await createPayment(orgSlug, {
+      contactId: vendorId,
+      type: 'made',
+      amount,
+      currency: 'MYR',
+      paymentDate: DAY,
+      items: [{ billId, amount }],
+    });
+  }
+
+  it('refuses to void a bill that still has payments against it', async () => {
+    currentUserId = ownerId;
+    const { id, transactionId } = await createBill(orgSlug, billInput());
+    await payBill(id, '40.00');
+
+    await expect(voidBill(orgSlug, id, 'Wrong vendor')).rejects.toThrow(/payments/i);
+    expect((await billRow(id)).voided_at).toBeNull();
+    expect((await transactionRow(transactionId as string)).voided_at).toBeNull();
+  });
+
+  it('refuses to cut the total below what has been paid, or to change currency', async () => {
+    currentUserId = ownerId;
+    const { id } = await createBill(orgSlug, billInput());
+    await payBill(id, '40.00');
+
+    await expect(
+      updateBill(orgSlug, id, billInput({ items: [{ description: 'Less', amount: '30.00' }] })),
+    ).rejects.toThrow(/already been paid/i);
+    await expect(updateBill(orgSlug, id, billInput({ currency: 'USD' }))).rejects.toThrow(
+      /currency/i,
+    );
+    expect((await billRow(id)).total_minor).toBe('10000');
+  });
+
+  it('re-derives paid / partially paid after the total changes', async () => {
+    currentUserId = ownerId;
+    const { id } = await createBill(orgSlug, billInput());
+    await payBill(id, '100.00');
+    expect((await billRow(id)).status).toBe('paid');
+
+    await updateBill(
+      orgSlug,
+      id,
+      billInput({ items: [{ description: 'Stock purchase', amount: '150.00' }] }),
+    );
+    expect((await billRow(id)).status).toBe('partially_paid');
   });
 });
 

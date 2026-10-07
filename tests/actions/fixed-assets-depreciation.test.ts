@@ -7,7 +7,7 @@ import { postJournal } from '@/server/posting/post-journal';
 import {
   loadDepreciationPosting,
   markDepreciationPosted,
-} from '@/server/repositories/fixed_assets';
+} from '@/server/repositories/fixed-assets';
 import {
   createTestOrgWithSeed,
   createTestUser,
@@ -23,8 +23,8 @@ vi.mock('@/server/auth/session', () => ({
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const { createFixedAsset, postDepreciationAction } = await import(
-  '@/server/actions/fixed_assets'
+const { createFixedAsset, postDepreciationAction, disposeFixedAssetAction } = await import(
+  '@/server/actions/fixed-assets'
 );
 
 const suffix = randomUUID().slice(0, 8);
@@ -564,5 +564,61 @@ describe('postDepreciationAction - an asset whose two accounts are the same', ()
 
     const row = await scheduleRow(washId, '2026-01-01');
     expect(row.is_posted).toBe(false);
+  });
+});
+
+describe('处置与输入校验', () => {
+  it('refuses to depreciate an asset after it has been disposed', async () => {
+    const sold = await newAsset(org, 'Sold forklift', {
+      expense: org.accountsByCode.depreciation,
+      accum: org.accountsByCode['ad-equipment'],
+    });
+    currentUserId = ownerId;
+    await disposeFixedAssetAction(org.slug, sold, { disposalDate: PURCHASE_DATE, proceeds: '0' });
+
+    await expect(postDepreciationAction(org.slug, sold, '2026-01-01')).rejects.toThrow(
+      /disposed/i,
+    );
+    expect((await scheduleRow(sold, '2026-01-01')).is_posted).toBe(false);
+  });
+
+  it('refuses a salvage value above the cost', async () => {
+    currentUserId = ownerId;
+    await expect(
+      createFixedAsset(org.slug, {
+        name: 'Upside-down asset',
+        description: null,
+        purchaseDate: PURCHASE_DATE,
+        cost: '100.00',
+        salvageValue: '200.00',
+        usefulLifeMonths: 4,
+        method: 'straight_line',
+        decliningRateBps: null,
+        assetAccountId: org.accountsByCode.equipment,
+        depnExpenseAccountId: org.accountsByCode.depreciation,
+        depnAccumAccountId: org.accountsByCode['ad-equipment'],
+      }),
+    ).rejects.toThrow(/salvage/i);
+  });
+
+  it("refuses another company's account", async () => {
+    const other = await createTestOrgWithSeed(ownerId, 'Other Depn Co', `depn-other-${suffix}`, 'MYR');
+    orgIds.push(other.id);
+    currentUserId = ownerId;
+    await expect(
+      createFixedAsset(org.slug, {
+        name: 'Borrowed account',
+        description: null,
+        purchaseDate: PURCHASE_DATE,
+        cost: '100.00',
+        salvageValue: '0',
+        usefulLifeMonths: 4,
+        method: 'straight_line',
+        decliningRateBps: null,
+        assetAccountId: other.accountsByCode.equipment,
+        depnExpenseAccountId: org.accountsByCode.depreciation,
+        depnAccumAccountId: org.accountsByCode['ad-equipment'],
+      }),
+    ).rejects.toThrow(/not found in this company/i);
   });
 });

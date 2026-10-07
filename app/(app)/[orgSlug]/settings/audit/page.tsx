@@ -13,7 +13,10 @@ export default async function AuditSettingsPage({
   searchParams: Promise<{ offset?: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'report:export');
+  // audit:read（owner/admin），不是 report:export：audit_logs 的 RLS 只放行
+  // owner/admin，用 report:export 时 bookkeeper/viewer 能进这页，但永远只看到
+  // 「什么都没发生」——一个看似正常、实则被 RLS 清空的空列表。
+  const context = await requirePermission(orgSlug, 'audit:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
@@ -56,11 +59,20 @@ export default async function AuditSettingsPage({
         </table>
       )}
 
-      {rows.length >= limit ? (
-        <a href={`/${orgSlug}/settings/audit?offset=${offset + limit}`}>
-          {t.common.loading}
-        </a>
-      ) : null}
+      {/* 翻页链接原来的文字是 t.common.loading（「加载中」），而且只有往后翻、
+          翻过去就回不来。 */}
+      <nav className="pagination">
+        {offset > 0 ? (
+          <Link href={`/${orgSlug}/settings/audit?offset=${Math.max(0, offset - limit)}`}>
+            {t.common.previous}
+          </Link>
+        ) : null}
+        {rows.length >= limit ? (
+          <Link href={`/${orgSlug}/settings/audit?offset=${offset + limit}`}>
+            {t.common.next}
+          </Link>
+        ) : null}
+      </nav>
     </>
   );
 }

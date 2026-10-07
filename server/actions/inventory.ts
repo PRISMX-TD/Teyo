@@ -62,7 +62,9 @@ export async function createInventoryItem(
     return { id };
   });
 
-  revalidatePath(`/${orgSlug}/inventory`);
+  // 库存页在 settings/inventory 下，app/(app)/[orgSlug]/ 下没有 inventory
+  // 这个路由段——原来刷的是一个不存在的路径。
+  revalidatePath(`/${orgSlug}/settings/inventory`);
   return result;
 }
 
@@ -84,6 +86,7 @@ export async function updateInventoryItemAction(
 
   await withTransaction(context.userId, async (tx) => {
     const before = await getInventoryItem(tx, context.organizationId, id);
+    if (!before) throw new Error('Inventory item not found.');
 
     await updateInventoryItem(tx, context.organizationId, id, {
       sku: input.sku,
@@ -103,13 +106,12 @@ export async function updateInventoryItemAction(
       action: 'inventory_item.updated',
       entityType: 'inventory_item',
       entityId: id,
-      before: { sku: before?.sku, nameEn: before?.nameEn },
+      before: { sku: before.sku, nameEn: before.nameEn },
       after: input,
     });
   });
 
-  revalidatePath(`/${orgSlug}/inventory`);
-  revalidatePath(`/${orgSlug}/inventory/${id}`);
+  revalidatePath(`/${orgSlug}/settings/inventory`);
 }
 
 export async function toggleInventoryItemActive(
@@ -121,6 +123,7 @@ export async function toggleInventoryItemActive(
 
   await withTransaction(context.userId, async (tx) => {
     const before = await getInventoryItem(tx, context.organizationId, id);
+    if (!before) throw new Error('Inventory item not found.');
 
     await setItemActive(tx, context.organizationId, id, active);
 
@@ -130,12 +133,12 @@ export async function toggleInventoryItemActive(
       action: active ? 'inventory_item.activated' : 'inventory_item.deactivated',
       entityType: 'inventory_item',
       entityId: id,
-      before: { isActive: before?.isActive },
+      before: { isActive: before.isActive },
       after: { isActive: active },
     });
   });
 
-  revalidatePath(`/${orgSlug}/inventory`);
+  revalidatePath(`/${orgSlug}/settings/inventory`);
 }
 
 /**

@@ -121,21 +121,6 @@ export type InventoryItemRow = {
   createdAt: string;
 };
 
-export type InventoryTransactionRow = {
-  id: string;
-  organizationId: string;
-  inventoryItemId: string;
-  type: 'purchase' | 'sale' | 'adjustment' | 'return';
-  quantity: number;
-  unitCostMinor: bigint;
-  totalCostMinor: bigint;
-  referenceType: string | null;
-  referenceId: string | null;
-  notes: string | null;
-  createdAt: string;
-  createdBy: string;
-};
-
 export async function listInventoryItems(tx: Tx, organizationId: string): Promise<InventoryItemRow[]> {
   const rows = await tx`
     select id, organization_id, sku, name_en, name_zh, unit, cost_method,
@@ -161,30 +146,6 @@ export async function getInventoryItem(
     where id = ${id} and organization_id = ${organizationId}
   `;
   return rows.length ? mapItem(rows[0]) : null;
-}
-
-export async function getInventoryItemWithRecentTxns(
-  tx: Tx,
-  organizationId: string,
-  id: string,
-): Promise<{ item: InventoryItemRow; recentTransactions: InventoryTransactionRow[] } | null> {
-  const item = await getInventoryItem(tx, organizationId, id);
-  if (!item) return null;
-
-  const txnRows = await tx`
-    select id, organization_id, inventory_item_id, type, quantity,
-           unit_cost_minor, total_cost_minor, reference_type, reference_id,
-           notes, created_at, created_by
-    from inventory_transactions
-    where inventory_item_id = ${id} and organization_id = ${organizationId}
-    order by created_at desc
-    limit 20
-  `;
-
-  return {
-    item,
-    recentTransactions: txnRows.map(mapTransaction),
-  };
 }
 
 export async function insertInventoryItem(
@@ -366,6 +327,13 @@ export async function recordInventoryTransaction(
       ? roundedDiv(oldAvgCost * oldQty + input.unitCostMinor * q, newQty)
       : input.unitCostMinor;
   } else if (input.type === 'sale') {
+    // 卖不出比在库更多的货。原来照减不误：数量变成负数，存货科目跟着出现
+    // 贷方余额，而下一次入库的加权平均会拿这个负数去算，平均成本随之失真。
+    if (q > oldQty) {
+      throw new MoneyError(
+        `Only ${formatScaledQuantity(oldQty)} in stock; cannot take out ${formatScaledQuantity(q)}.`,
+      );
+    }
     newQty = oldQty - q;
     newAvgCost = oldAvgCost;
     effectiveUnitCost = oldAvgCost;
@@ -440,9 +408,12 @@ export type InventoryValuationRow = {
  * qty 是 Number，所以没有放大倍数可除，但也因此只有整数数量才碰巧对）。
  * 改成定标整数相乘再一次性舍入。
  *
- * 这个函数今天没有调用方（inventory 设置页只调 listInventoryItems）。留着并
- * 修对，是因为它正是「库存进总账」之后用来跟存货科目余额对账的那张表——
- * 一个算错的对账口径比没有对账更糟。
+ * 这张表就是「库存进总账」之后用来跟存货科目余额对账的那张表，显示在
+ * 库存设置页底部（components/reports/inventory-valuation.tsx）。
+ *
+ * 停用的物料只要还有在库数量就照样列出：停用只是不再出现在日常列表里，
+ * 它的货值仍然躺在存货科目上。原来按 is_active = true 过滤，停用一件还有
+ * 存货的物料，估值合计就与科目余额对不上了。
  */
 export async function getInventoryValuation(
   tx: Tx,
@@ -452,7 +423,8 @@ export async function getInventoryValuation(
     select id, sku, name_en, name_zh, unit, current_quantity,
            current_avg_cost_minor
     from inventory_items
-    where organization_id = ${organizationId} and is_active = true
+    where organization_id = ${organizationId}
+      and (is_active = true or current_quantity <> 0)
     order by name_en
   `;
 
@@ -472,24 +444,6 @@ export async function getInventoryValuation(
       totalValueMinor: extendQuantity(avgCost, quantityScaled),
     };
   });
-}
-
-/** 库存水平 <= 再订购点的物品 */
-export async function getLowStockItems(
-  tx: Tx,
-  organizationId: string,
-): Promise<InventoryItemRow[]> {
-  const rows = await tx`
-    select id, organization_id, sku, name_en, name_zh, unit, cost_method,
-           current_quantity, current_avg_cost_minor, reorder_level,
-           cogs_account_id, inventory_account_id, is_active, created_at
-    from inventory_items
-    where organization_id = ${organizationId}
-      and is_active = true
-      and current_quantity <= reorder_level
-    order by name_en
-  `;
-  return rows.map(mapItem);
 }
 
 /**
@@ -521,22 +475,5 @@ function mapItem(row: Record<string, unknown>): InventoryItemRow {
     inventoryAccountId: (row.inventory_account_id as string | null) ?? null,
     isActive: row.is_active as boolean,
     createdAt: (row.created_at as string),
-  };
-}
-
-function mapTransaction(row: Record<string, unknown>): InventoryTransactionRow {
-  return {
-    id: row.id as string,
-    organizationId: row.organization_id as string,
-    inventoryItemId: row.inventory_item_id as string,
-    type: row.type as 'purchase' | 'sale' | 'adjustment' | 'return',
-    quantity: Number(row.quantity),
-    unitCostMinor: BigInt(row.unit_cost_minor as string),
-    totalCostMinor: BigInt(row.total_cost_minor as string),
-    referenceType: (row.reference_type as string | null) ?? null,
-    referenceId: (row.reference_id as string | null) ?? null,
-    notes: (row.notes as string | null) ?? null,
-    createdAt: (row.created_at as string),
-    createdBy: row.created_by as string,
   };
 }

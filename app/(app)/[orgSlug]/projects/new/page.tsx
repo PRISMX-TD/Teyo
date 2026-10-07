@@ -11,7 +11,8 @@ export default async function NewProjectPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  // 与 createProject 同一道权限，否则只读用户看到的是一张必然保存失败的表单。
+  const context = await requirePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 

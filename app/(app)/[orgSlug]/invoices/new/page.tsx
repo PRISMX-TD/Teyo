@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { InvoiceForm } from '@/components/invoices/invoice-form';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -11,7 +12,7 @@ export default async function NewInvoicePage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
@@ -31,7 +32,12 @@ export default async function NewInvoicePage({
     return (
       <>
         <h1>{t.invoices.newTitle}</h1>
-        <p className="empty-state">You need to add a customer contact first. Go to Settings → Categories to manage contacts.</p>
+        {/* 原来是一句写死的英文，还把人指到「设置 → 分类」——联系人在
+            settings/contacts，不在分类页。 */}
+        <p className="empty-state">
+          {t.invoices.noCustomers}{' '}
+          <Link href={`/${orgSlug}/settings/contacts`}>{t.settings.contacts}</Link>
+        </p>
       </>
     );
   }

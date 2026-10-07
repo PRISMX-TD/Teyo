@@ -4,13 +4,13 @@ import { useMemo, useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import type { ImportedTransactionRow } from '@/server/repositories/bank_import';
+import type { ImportedTransactionRow } from '@/server/repositories/bank-import';
 import {
   matchTransaction,
   ignoreImportedAction,
   postImportedTransactions,
   resetImportedAction,
-} from '@/server/actions/bank_import';
+} from '@/server/actions/bank-import';
 
 type MoneyAccountOption = {
   id: string;
@@ -72,6 +72,8 @@ export function ImportedList({
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searching, setSearching] = useState(false);
   const [acting, setActing] = useState<string | null>(null);
+  /** 匹配/忽略/重置失败时的那句话。原来这三个动作只有 try/finally，失败了界面上什么都不说。 */
+  const [actionError, setActionError] = useState<string | null>(null);
 
   /** 导入行 id -> 用户给它选的分类 id。 */
   const [chosenCategory, setChosenCategory] = useState<Record<string, string>>({});
@@ -181,38 +183,34 @@ export function ImportedList({
     }
   };
 
-  const handleMatch = async (importedId: string, txnId: string) => {
-    setActing(importedId);
+  const runAction = async (id: string, action: () => Promise<void>) => {
+    setActing(id);
+    setActionError(null);
     try {
+      await action();
+    } catch (e) {
+      setActionError((e as Error).message);
+    } finally {
+      setActing(null);
+    }
+  };
+
+  const handleMatch = (importedId: string, txnId: string) =>
+    runAction(importedId, async () => {
       await matchTransaction(orgSlug, importedId, txnId);
       setMatchDropdown(null);
       setSearchQuery('');
       setSearchResults([]);
-    } finally {
-      setActing(null);
-    }
-  };
+    });
 
-  const handleIgnore = async (id: string) => {
-    setActing(id);
-    try {
-      await ignoreImportedAction(orgSlug, id);
-    } finally {
-      setActing(null);
-    }
-  };
+  const handleIgnore = (id: string) => runAction(id, () => ignoreImportedAction(orgSlug, id));
 
-  const handleReset = async (id: string) => {
-    setActing(id);
-    try {
-      await resetImportedAction(orgSlug, id);
-    } finally {
-      setActing(null);
-    }
-  };
+  const handleReset = (id: string) => runAction(id, () => resetImportedAction(orgSlug, id));
 
   if (importedTxns.length === 0) {
-    return <p className="empty-state">{i18n.bankImport.imported}</p>;
+    // 原来这里显示的是 bankImport.imported（「已导入的交易」）——一个标题
+    // 被当成空态说明，用户读到的是「已导入的交易」而下面什么都没有。
+    return <p className="empty-state">{i18n.bankImport.empty}</p>;
   }
 
   return (
@@ -242,6 +240,12 @@ export function ImportedList({
           </select>
         </label>
       </div>
+
+      {actionError ? (
+        <p role="alert" className="form-error">
+          {actionError}
+        </p>
+      ) : null}
 
       {/*
         从对账单行直接生成交易。
@@ -292,7 +296,7 @@ export function ImportedList({
             <th>{i18n.transaction.description}</th>
             <th className="numeric">{i18n.transaction.amount}</th>
             {canPost ? <th>{i18n.bankImport.category}</th> : null}
-            <th>{i18n.invoices.status}</th>
+            <th>{i18n.bankImport.status}</th>
             <th>{i18n.common.actions}</th>
           </tr>
         </thead>

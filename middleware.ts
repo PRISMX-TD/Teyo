@@ -21,9 +21,12 @@ export async function middleware(request: NextRequest) {
 
   const isPublic =
     PUBLIC_PATHS.some((p) => pathname.startsWith(p)) || pathname.startsWith('/invite/');
+  // 登录/注册页虽然公开，但要知道「是不是已经登录了」：已登录的人该直接去 next。
+  // 之前它们和其余公开页一起在这里提前返回，下面那条已登录跳转分支永远走不到。
+  const isAuthEntry = pathname === '/login' || pathname === '/signup';
 
-  // 公开页面不需要鉴权：跳过 Supabase Auth API 调用，省一次网络往返。
-  if (isPublic) {
+  // 其余公开页面不需要鉴权：跳过 Supabase Auth API 调用，省一次网络往返。
+  if (isPublic && !isAuthEntry) {
     return NextResponse.next();
   }
 
@@ -53,6 +56,8 @@ export async function middleware(request: NextRequest) {
   } = await supabase.auth.getUser();
 
   if (!user) {
+    // 未登录访问登录/注册页：正常渲染，不能再重定向回 /login（那是死循环）。
+    if (isAuthEntry) return response;
     const url = request.nextUrl.clone();
     url.pathname = '/login';
     url.search = '';
@@ -60,7 +65,7 @@ export async function middleware(request: NextRequest) {
     return NextResponse.redirect(url);
   }
 
-  if (user && (pathname === '/login' || pathname === '/signup')) {
+  if (isAuthEntry) {
     // 已登录的人点开带 next 的登录链接（比如邀请）时，直接送去 next。
     const next = safeNextPath(request.nextUrl.searchParams.get('next'));
     return NextResponse.redirect(new URL(next, request.url));

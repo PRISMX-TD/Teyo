@@ -1,5 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
-// 数量的定标整数格式化与库存共用一份实现，理由见 server/actions/purchase_orders.ts
+// 数量的定标整数格式化与库存共用一份实现，理由见 server/actions/purchase-orders.ts
 // 顶部那条 import 上的注释。
 import { formatScaledQuantity, parseQuantityToScaled } from '@/server/repositories/inventory';
 import { toIsoDate } from '@/lib/format';
@@ -21,6 +21,22 @@ export type PurchaseOrderRow = {
   createdAt: string;
   createdBy: string;
 };
+
+export type PoStatus = PurchaseOrderRow['status'];
+
+/**
+ * 可以转成账单的采购单状态。
+ *
+ * 草稿不行：还没发给供应商的单子，不会有供应商开来的账单——界面上的状态流
+ * （po-list.tsx 的 NEXT_STATUS）也是 draft 先走到 sent。billed / closed /
+ * voided 都已经走过「出账单」这一步或者是终态。转换的 action 与采购单详情页
+ * 上那个按钮共用这一份判断，免得按钮亮着、点下去被服务端拒绝。
+ */
+export const PO_BILLABLE_STATUSES: readonly PoStatus[] = ['sent', 'received'];
+
+export function isPoBillable(status: PoStatus): boolean {
+  return PO_BILLABLE_STATUSES.includes(status);
+}
 
 export type PoItemRow = {
   id: string;
@@ -87,12 +103,47 @@ export async function getPurchaseOrder(
            amount_minor, tax_rate_id
     from po_items
     where po_id = ${id}
-    order by id
+    order by position nulls last, id
   `;
 
   return {
     ...po,
     items: items.map(mapPoItem),
+  };
+}
+
+/**
+ * 锁住一张采购单的表头行并取回转账单要核对的几个字段。
+ *
+ * for update：两个人同时把同一张采购单转成账单，各自读到「还没有账单」，
+ * 就会各建一张。锁住表头之后，后到的那一个要等前一个提交，再读到的已经是
+ * billed，被状态判断挡下。
+ */
+export async function lockPurchaseOrder(
+  tx: Tx,
+  organizationId: string,
+  id: string,
+): Promise<{
+  id: string;
+  poNumber: string;
+  status: PoStatus;
+  contactId: string;
+  currency: string;
+} | null> {
+  const rows = await tx`
+    select id, po_number, status, contact_id, currency
+    from purchase_orders
+    where id = ${id} and organization_id = ${organizationId}
+    for update
+  `;
+  const row = rows.at(0);
+  if (!row) return null;
+  return {
+    id: row.id as string,
+    poNumber: row.po_number as string,
+    status: row.status as PoStatus,
+    contactId: row.contact_id as string,
+    currency: row.currency as string,
   };
 }
 
@@ -143,7 +194,8 @@ export async function insertPoItems(
 
   await tx`
     insert into po_items ${tx(
-      items.map((item) => ({
+      // position = 提交顺序的下标，理由见 invoices.ts 的 insertInvoiceItems。
+      items.map((item, index) => ({
         po_id: item.poId,
         description: item.description,
         // 数量以十进制字符串写入，不经 double。调用方传的是定标整数，
@@ -152,6 +204,7 @@ export async function insertPoItems(
         unit_price_minor: item.unitPriceMinor.toString(),
         amount_minor: item.amountMinor.toString(),
         tax_rate_id: item.taxRateId ?? null,
+        position: index,
       })),
       'po_id',
       'description',
@@ -159,6 +212,7 @@ export async function insertPoItems(
       'unit_price_minor',
       'amount_minor',
       'tax_rate_id',
+      'position',
     )}
   `;
 }

@@ -8,10 +8,10 @@ import { signIn } from '@/server/actions/auth';
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ checkEmail?: string; next?: string }>;
+  searchParams: Promise<{ checkEmail?: string; next?: string; error?: string }>;
 }) {
   const t = getMessages(await resolveAnonymousLocale());
-  const { checkEmail, next: rawNext } = await searchParams;
+  const { checkEmail, next: rawNext, error } = await searchParams;
   // 入口处就收窄成站内路径，拼进链接的值和最终跳转用的值是同一个。
   const next = rawNext ? safeNextPath(rawNext) : undefined;
   const signupHref = next ? `/signup?next=${encodeURIComponent(next)}` : '/signup';
@@ -41,6 +41,13 @@ export default async function LoginPage({
       {checkEmail ? (
         <p role="status" className="form-success">
           {t.auth.confirmEmailSent}
+        </p>
+      ) : null}
+      {/* /auth/callback 换码失败（确认或重设密码的链接过期、被用过）会带 error=callback
+          回到这里。之前没人读它，用户只看到一张空白登录表单，不知道刚才那封邮件没生效。 */}
+      {error === 'callback' ? (
+        <p role="alert" className="form-error">
+          {t.auth.callbackFailed}
         </p>
       ) : null}
 

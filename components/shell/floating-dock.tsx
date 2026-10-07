@@ -3,10 +3,12 @@
 import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { Messages } from '@/lib/i18n';
+import { can, type Role } from '@/server/domain/permissions';
 
 type Props = {
   orgSlug: string;
   i18n: Messages;
+  role: Role;
 };
 
 // 5 个格子，不是 8 个：第一版把 Settings/主题切换/My account 全塞进 dock，
@@ -27,35 +29,48 @@ const NAV_ITEMS: { label: keyof Messages['nav']; href: (slug: string) => string 
   { label: 'more', href: (slug) => `/${slug}/more` },
 ];
 
-export function FloatingDock({ orgSlug, i18n }: Props) {
+export function FloatingDock({ orgSlug, i18n, role }: Props) {
   const pathname = usePathname();
+
+  const matches = (href: string) =>
+    pathname === href || (href !== `/${orgSlug}` && pathname.startsWith(`${href}/`));
+  // 从 More 分流进去的页面（发票、账单、设置……）在 dock 上没有自己的格子，
+  // 原来在那些页面上 dock 一格都不亮，用户看不出自己在哪个分支下。归到 More。
+  const moreHref = `/${orgSlug}/more`;
+  const underMore =
+    pathname.startsWith(`/${orgSlug}/`) &&
+    !NAV_ITEMS.some((item) => item.label !== 'more' && matches(item.href(orgSlug)));
 
   return (
     <nav className="floating-dock" aria-label={i18n.nav.primaryNavigation}>
       {NAV_ITEMS.map((item) => {
         const href = item.href(orgSlug);
-        const isActive =
-          pathname === href ||
-          (href !== `/${orgSlug}` && pathname.startsWith(href));
+        const isActive = matches(href);
+        // 只有真的停在 /more 上才是 aria-current="page"；从 More 分流进去的
+        // 子页只是「在这个分支里」，用 'true' 而不是冒充当前页。
+        const isBranch = !isActive && href === moreHref && underMore;
         return (
           <Link
             key={item.label}
             href={href}
-            aria-current={isActive ? 'page' : undefined}
-            className={isActive ? 'active' : ''}
+            aria-current={isActive ? 'page' : isBranch ? 'true' : undefined}
+            className={isActive || isBranch ? 'active' : ''}
           >
             {i18n.nav[item.label]}
           </Link>
         );
       })}
 
-      <Link
-        href={`/${orgSlug}/transactions/new`}
-        className="topbar-cta"
-        aria-label={i18n.transaction.newTitle}
-      >
-        +
-      </Link>
+      {/* viewer 没有 transaction:create，这一格对它只会是一个 403。 */}
+      {can(role, 'transaction:create') ? (
+        <Link
+          href={`/${orgSlug}/transactions/new`}
+          className="topbar-cta"
+          aria-label={i18n.transaction.newTitle}
+        >
+          +
+        </Link>
+      ) : null}
     </nav>
   );
 }

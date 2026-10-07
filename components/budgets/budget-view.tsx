@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -50,20 +50,32 @@ export function BudgetView({
   const [rows, setRows] = useState<BudgetRow[]>([]);
   const [editing, setEditing] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState<Record<string, boolean>>({});
-  const [loading, setLoading] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const fetchData = useCallback(
     async (y: number, m: number) => {
       setLoading(true);
+      setError(null);
       try {
         const data = await loadData(y, m);
         setRows(data);
+      } catch {
+        setError(t.errors.unexpected);
       } finally {
         setLoading(false);
       }
     },
-    [loadData],
+    [loadData, t],
   );
+
+  // 进页面就把本月载入。原来要先点一次「应用」才有数据，在那之前表格位置
+  // 显示的是「这个期间没有预算」——一句对用户而言是错的话。
+  // loadData 是服务端传下来的 Server Action 引用，只在挂载时取一次。
+  useEffect(() => {
+    void fetchData(initialYear, initialMonth);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleFetch = () => {
     fetchData(year, month);
@@ -73,6 +85,7 @@ export function BudgetView({
     const accountId = row.accountId;
     const amount = editing[accountId] ?? '0';
     setSaving((prev) => ({ ...prev, [accountId]: true }));
+    setError(null);
     try {
       await updateBudgetAction(orgSlug, { accountId, year, month, amount });
       setEditing((prev) => {
@@ -81,6 +94,10 @@ export function BudgetView({
         return next;
       });
       await fetchData(year, month);
+    } catch {
+      // 原来没有 catch：金额填错（「abc」、空串）时 Server Action 抛错，
+      // 界面上什么都不发生，用户只能猜是不是没点上。
+      setError(t.errors.validation);
     } finally {
       setSaving((prev) => ({ ...prev, [accountId]: false }));
     }
@@ -113,6 +130,8 @@ export function BudgetView({
         </button>
       </div>
 
+      {error ? <p role="alert" className="form-error">{error}</p> : null}
+
       {rows.length === 0 && !loading ? (
         <p className="empty-state">{t.budgets.empty}</p>
       ) : (
@@ -132,6 +151,14 @@ export function BudgetView({
               const actualBig = (() => { try { return BigInt(row.actualMinor); } catch { return 0n; } })();
               const varianceBig = (() => { try { return BigInt(row.varianceMinor); } catch { return 0n; } })();
               const isEditing = row.accountId in editing;
+              // variance = 预算 − 实际。费用少花是好事（正数），收入少收是坏事
+              // （也是正数）——上色要按科目性质翻过来，否则没完成的收入目标
+              // 会被标成绿色。
+              const creditNatured =
+                row.accountType === 'revenue' ||
+                row.accountType === 'liability' ||
+                row.accountType === 'equity';
+              const favourable = creditNatured ? -varianceBig : varianceBig;
 
               return (
                 <tr key={row.accountId}>
@@ -173,7 +200,7 @@ export function BudgetView({
                         ? formatMoney(actualBig, baseCurrency, locale)
                         : `(${formatMoney(-actualBig, baseCurrency, locale)})`}
                   </td>
-                  <td className={`numeric mono ${varianceBig > 0n ? 'positive' : varianceBig < 0n ? 'negative' : ''}`}>
+                  <td className={`numeric mono ${favourable > 0n ? 'positive' : favourable < 0n ? 'negative' : ''}`}>
                     {formatMoney(varianceBig, baseCurrency, locale)}
                   </td>
                   <td>

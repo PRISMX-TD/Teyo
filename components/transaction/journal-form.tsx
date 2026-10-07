@@ -16,17 +16,19 @@ type Props = {
   accounts: Option[];
 };
 
-const TYPE_LABELS: Record<string, string> = {
-  asset: 'Asset',
-  liability: 'Liability',
-  equity: 'Equity',
-  revenue: 'Revenue',
-  expense: 'Expense',
-};
-
 export function JournalForm({ orgSlug, baseCurrency, locale, accounts }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
+
+  // 科目类型的分组标题。原来是一张写死英文的表，中文界面上照样显示
+  // Asset / Liability。
+  const TYPE_LABELS: Record<string, string> = {
+    asset: t.settings.typeAsset,
+    liability: t.settings.typeLiability,
+    equity: t.settings.typeEquity,
+    revenue: t.settings.typeRevenue,
+    expense: t.settings.typeExpense,
+  };
 
   const [occurredOn, setOccurredOn] = useState(() => todayLocalISO());
   const [amount, setAmount] = useState('');
@@ -55,7 +57,8 @@ export function JournalForm({ orgSlug, baseCurrency, locale, accounts }: Props) 
         description,
         clientUuid,
       });
-      router.push(`/${orgSlug}/transactions`);
+      // 与 transaction-form.tsx 一致：列表页凭 ?saved=1 说一句「已保存」。
+      router.push(`/${orgSlug}/transactions?saved=1`);
     } catch (e) {
       setError((e as Error).message);
     } finally {

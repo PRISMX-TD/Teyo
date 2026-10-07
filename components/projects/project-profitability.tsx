@@ -38,7 +38,9 @@ export function ProjectProfitability({ profitability, locale, baseCurrency }: Pr
             <strong>{t.projects.netProfit}</strong>
           </td>
           <td className={`numeric ${netProfit >= 0n ? 'money-in' : 'money-out'}`}>
-            <strong>{formatMoney(netProfit >= 0n ? netProfit : -netProfit, baseCurrency, locale)}</strong>
+            {/* 亏损要带负号。原来取了绝对值，只剩颜色区分盈亏——
+                读屏器与打印出来的一页上，亏 500 和赚 500 是同一个数。 */}
+            <strong>{formatMoney(netProfit, baseCurrency, locale)}</strong>
           </td>
         </tr>
       </tfoot>

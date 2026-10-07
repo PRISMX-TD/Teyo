@@ -5,17 +5,31 @@ import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import type { MemberRow } from '@/server/repositories/memberships';
 import type { InvitationRow } from '@/server/repositories/invitations';
-import { inviteMember, changeMemberRole, setMemberStatus, revokeInvitation, transferOwnership } from '@/server/actions/members';
+import type { Role } from '@/server/domain/permissions';
+
+export type MemberActionResult<T = void> = { ok: true; value: T } | { ok: false; error: string };
+
+/**
+ * 成员 action 由页面包一层再传进来（见 settings/members/page.tsx 的 toResult）：
+ * 直接 import 的话，失败时生产环境只给一句脱敏摘要，具体原因到不了用户。
+ */
+type MemberActions = {
+  invite: (input: { email: string; role: Role }) => Promise<MemberActionResult<{ token: string }>>;
+  changeRole: (membershipId: string, role: Role) => Promise<MemberActionResult>;
+  setStatus: (membershipId: string, status: 'active' | 'suspended') => Promise<MemberActionResult>;
+  revoke: (invitationId: string) => Promise<MemberActionResult>;
+  transfer: (membershipId: string) => Promise<MemberActionResult>;
+};
 
 type Props = {
-  orgSlug: string;
   members: MemberRow[];
   invitations: InvitationRow[];
   currentUserId: string;
   locale: Locale;
+  actions: MemberActions;
 };
 
-export function MembersPanel({ orgSlug, members, invitations, currentUserId, locale }: Props) {
+export function MembersPanel({ members, invitations, currentUserId, locale, actions }: Props) {
   const t = getMessages(locale);
   const [email, setEmail] = useState('');
   const [role, setRole] = useState<string>('bookkeeper');
@@ -120,9 +134,17 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                     aria-describedby={`role-hint-${m.membershipId}`}
                     defaultValue={m.role}
                     onChange={async (e) => {
-                      const next = e.target.value;
+                      const select = e.currentTarget;
+                      const next = select.value;
+                      setError(null);
                       setPicked((prev) => ({ ...prev, [m.membershipId]: next }));
-                      try { await changeMemberRole(orgSlug, m.membershipId, next as import('@/server/domain/permissions').Role); } catch (err) { setError((err as Error).message); }
+                      const result = await actions.changeRole(m.membershipId, next as Role);
+                      if (!result.ok) {
+                        // 下拉是非受控的：失败时要手动退回原角色，否则界面显示的不是库里的值。
+                        select.value = m.role;
+                        setPicked((prev) => ({ ...prev, [m.membershipId]: m.role }));
+                        setError(result.error);
+                      }
                     }}
                   >
                     {isOwner ? <option value="admin">{t.members.roleAdmin}</option> : null}
@@ -133,10 +155,12 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                     {roleHints[picked[m.membershipId] ?? m.role] ?? ''}
                   </span>
                   <button onClick={async () => {
-                    try {
-                      if (m.status === 'active') await setMemberStatus(orgSlug, m.membershipId, 'suspended');
-                      else await setMemberStatus(orgSlug, m.membershipId, 'active');
-                    } catch (err) { setError((err as Error).message); }
+                    setError(null);
+                    const result = await actions.setStatus(
+                      m.membershipId,
+                      m.status === 'active' ? 'suspended' : 'active',
+                    );
+                    if (!result.ok) setError(result.error);
                   }}>
                     {m.status === 'active' ? t.members.suspend : t.members.reactivate}
                   </button>
@@ -144,7 +168,9 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                   {isOwner && m.status === 'active' ? (
                     <button onClick={async () => {
                       if (!confirm(t.members.transferConfirm)) return;
-                      try { await transferOwnership(orgSlug, m.membershipId); } catch (err) { setError((err as Error).message); }
+                      setError(null);
+                      const result = await actions.transfer(m.membershipId);
+                      if (!result.ok) setError(result.error);
                     }}>
                       {t.members.transferOwnership}
                     </button>
@@ -196,19 +222,19 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                 setError(null);
                 setCopied(false);
                 try {
-                  const { token } = await inviteMember(orgSlug, {
-                    email,
-                    role: role as import('@/server/domain/permissions').Role,
-                  });
+                  const result = await actions.invite({ email, role: role as Role });
+                  if (!result.ok) {
+                    setError(result.error);
+                    return;
+                  }
                   // origin 取自浏览器而不是服务端的环境变量：本地开发、预览
                   // 部署、生产各有各的域名，而链接必须在用户此刻所在的那个
                   // 域名下才点得开。
-                  setInvite({ email, url: `${window.location.origin}/invite/${token}` });
+                  setInvite({ email, url: `${window.location.origin}/invite/${result.value.token}` });
                   setEmail('');
-                } catch (err) {
-                  setError((err as Error).message);
+                } finally {
+                  setPending(false);
                 }
-                finally { setPending(false); }
               }}
             >
               {t.members.invite}
@@ -267,7 +293,9 @@ export function MembersPanel({ orgSlug, members, invitations, currentUserId, loc
                 <span className={statusClasses.invited}>{t.members.statusInvited}</span>
                 {canManage && (isOwner || inv.role !== 'admin') ? (
                   <button onClick={async () => {
-                    try { await revokeInvitation(orgSlug, inv.id); } catch (err) { setError((err as Error).message); }
+                    setError(null);
+                    const result = await actions.revoke(inv.id);
+                    if (!result.ok) setError(result.error);
                   }}>
                     {t.members.revoke}
                   </button>

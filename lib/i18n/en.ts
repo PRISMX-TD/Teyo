@@ -2,7 +2,6 @@ const en = {
   brand: {
     name: 'Teyo',
     tagline: 'Know your numbers. Own your business.',
-    subline: 'Simple books. Clear business.',
   },
   auth: {
     signIn: 'Sign in',
@@ -17,6 +16,7 @@ const en = {
     resetLinkSent: 'Check your inbox for the reset link.',
     invalidCredentials: 'That email and password combination did not work.',
     confirmEmailSent: 'Check your inbox to confirm your email, then sign in.',
+    callbackFailed: 'That link has expired or was already used. Sign in, or request a new email.',
   },
   onboarding: {
     title: 'Set up your company',
@@ -35,6 +35,9 @@ const en = {
     suspended: 'Your access to {orgs} is suspended. Ask the owner to reinstate you.',
     noAccess: 'You no longer have access to that company.',
     joinFailed: 'That invitation could not be accepted. It may have expired or been revoked.',
+    newTitle: 'Add another company',
+    newSubtitle: 'Each company keeps its own books. You will be its owner.',
+    back: 'Back to my companies',
   },
   nav: {
     overview: 'Overview',
@@ -57,6 +60,7 @@ const en = {
     tax: 'Tax',
     more: 'More',
     switchCompany: 'Switch company',
+    newCompany: 'New company',
     account: 'My account',
     toggleTheme: 'Toggle theme',
     primaryNavigation: 'Primary navigation',
@@ -64,10 +68,6 @@ const en = {
   },
   overview: {
     title: 'Overview',
-    monthIncome: 'Income this month',
-    monthExpense: 'Spending this month',
-    monthNet: 'Net this month',
-    bankBalance: 'Bank balance',
     unpaidInvoices: 'Unpaid invoices',
     unpaidBills: 'Unpaid bills',
     // 占位符必须是 {unpaid}，与 components/dashboard/dashboard-view.tsx 的
@@ -75,7 +75,6 @@ const en = {
     // 原来写作 '{count} unpaid'，于是页面上原样渲染出 '{count} unpaid'。
     unpaidCount: '{unpaid} outstanding ({overdue} overdue)',
     monthlyTrends: 'Monthly Trends',
-    expenseBreakdown: 'Expense Breakdown',
     accountBalances: 'Money accounts',
     recentTransactions: 'Recent activity',
     spendingByCategory: 'Where the money went',
@@ -137,9 +136,21 @@ const en = {
     previewOpen: 'Preview {name}',
     previewClose: 'Close the preview of {name}',
     deleteAttachment: 'Delete {name}',
+    deleteAttachmentConfirm: 'Delete {name}? This cannot be undone.',
+    noReceipts: 'No receipts attached yet.',
     receiptImageAlt: 'Receipt: {name}',
     amountInvalid: 'Enter a number, for example 125.50.',
     amountTooPrecise: 'This currency does not use more than {places} decimal place(s).',
+    sourceFrom: 'Generated from',
+    sourceHint:
+      'This entry was created by a document. To change or void it, open the document and do it there, so the document and your books stay in step.',
+    sourceInvoice: 'Invoice',
+    sourceBill: 'Bill',
+    sourceCreditNote: 'Credit note',
+    sourcePayment: 'Payment',
+    sourceDepreciation: 'Depreciation',
+    sourceYearEnd: 'Year-end close',
+    sourceAssetDisposal: 'Asset disposal',
   },
   scenario: {
     title: 'What happened?',
@@ -368,7 +379,6 @@ const en = {
     trialBalance: 'Trial Balance',
     profitLoss: 'Profit & Loss',
     balanceSheet: 'Balance Sheet',
-    asOf: 'As of',
     period: 'Period',
     from: 'From',
     to: 'To',
@@ -407,6 +417,10 @@ const en = {
     invChange: 'Change in Inventory',
     deferredRevChange: 'Change in Deferred Revenue',
     prepaidChange: 'Change in Prepaid Expenses',
+    taxPayableChange: 'Change in Tax Payable',
+    taxReceivableChange: 'Change in Input Tax Receivable',
+    customerDepositsChange: 'Change in Customer Deposits',
+    supplierDepositsChange: 'Change in Supplier Deposits',
     equipment_cf: 'Purchase/Sale of Equipment',
     furniture_cf: 'Purchase/Sale of Furniture',
     vehicles_cf: 'Purchase/Sale of Vehicles',
@@ -426,6 +440,8 @@ const en = {
     chinese: '中文',
     changePassword: 'Change password',
     newPassword: 'New password',
+    nameInvalid: 'Enter a name of 1 to 80 characters.',
+    passwordRejected: 'That password could not be set. Use at least 8 characters, different from your current one.',
   },
   errors: {
     unauthenticated: 'Please sign in to continue.',
@@ -510,12 +526,11 @@ const en = {
     voidReasonHint: 'This is kept with the record. "Customer cancelled the order", "Wrong amount", and so on.',
     voidReasonRequired: 'Write a reason first. A voided invoice has to say why.',
     voidConfirm: 'Void this invoice',
-    notFound: 'This invoice was not found in this company.',
     backToList: 'Back to invoices',
+    noCustomers: 'Add a customer first, then you can invoice them.',
   },
   invoicePdf: {
-    download: 'Download PDF',
-    // 这三个键由并行进行的「可打印发票」那一项使用
+    // 这三个键由「可打印发票」那一项使用
     // （app/(app)/[orgSlug]/invoices/[id]/print/page.tsx 与 invoice-list.tsx）。
     // 它们落在这里而不是那一项自己加，是因为 en.ts / zh.ts 这一轮只由一个
     // 任务写——两个任务同时改同一个对象字面量，合并出来的多半是少了一半键
@@ -545,6 +560,8 @@ const en = {
     amount: 'Amount',
     notes: 'Notes',
     empty: 'No bills yet.',
+    noVendors: 'You need a vendor contact before you can record a bill.',
+    manageContacts: 'Add one in Settings › Contacts',
     save: 'Save Bill',
     saved: 'Bill saved.',
     actions: 'Actions',
@@ -565,8 +582,11 @@ const en = {
     voidReasonHint: 'This is kept with the record. "Vendor sent it twice", "Wrong amount", and so on.',
     voidReasonRequired: 'Write a reason first. A voided bill has to say why.',
     voidConfirm: 'Void this bill',
-    notFound: 'This bill was not found in this company.',
     backToList: 'Back to bills',
+    fromPurchaseOrder: 'Converted from purchase order {number}',
+    convertingFromPo: 'Billing purchase order {number}. The vendor and currency follow the purchase order; adjust the lines to match what the vendor actually billed.',
+    poTaxRatesDiffer: 'The purchase order lines use different tax rates, but a bill has one tax rate. Check the tax rate below.',
+    fromPoUnavailable: 'That purchase order cannot be converted into a bill: it was not found, is not sent or received, or already has a bill.',
     subtotal: 'Subtotal',
     tax: 'Tax',
     taxRate: 'Tax rate',
@@ -600,7 +620,6 @@ const en = {
     bookBalance: 'Book Balance',
     difference: 'Difference',
     cleared: 'Cleared',
-    notCleared: 'Not cleared',
     adjustment: 'Adjustment',
     priorBalance: 'Previously reconciled',
     clearedTotal: 'Cleared on this statement',
@@ -637,6 +656,7 @@ const en = {
     generateDeferred: '{n} rule(s) still have earlier periods left. Run this again to continue.',
     generateResumeFrom: 'next period: {date}',
     generateBlocked: 'Nothing was recorded for {n} rule(s):',
+    empty: 'No recurring entries yet.',
   },
   budgets: {
     title: 'Budgets',
@@ -725,6 +745,8 @@ const en = {
     notes: 'Notes',
     currency: 'Currency',
     empty: 'No purchase orders yet.',
+    noVendors: 'You need a vendor contact before you can raise a purchase order.',
+    manageContacts: 'Add one in Settings › Contacts',
     save: 'Save Purchase Order',
     saved: 'Purchase Order saved.',
     total: 'Total',
@@ -733,7 +755,8 @@ const en = {
     editTitle: 'Edit purchase order {number}',
     saveChanges: 'Save changes',
     backToList: 'Back to purchase orders',
-    notFound: 'This purchase order was not found in this company.',
+    convertToBill: 'Convert to bill',
+    billedAs: 'Billed as {number}',
     lifecycle: 'Where this purchase order is',
     draftNotice: 'A draft has not gone to the vendor yet. Anything on it can still be changed.',
     // 「已发送」往后一律只读：那份单子已经在供应商手上，事后改掉自己这份
@@ -836,9 +859,8 @@ const en = {
     editTitle: 'Edit credit note {number}',
     saveChanges: 'Save changes',
     backToList: 'Back to credit notes',
-    notFound: 'This credit note was not found in this company.',
     lifecycle: 'Where this credit note is',
-    // 已签发之后服务端直接拒绝编辑（server/actions/credit_notes.ts），所以
+    // 已签发之后服务端直接拒绝编辑（server/actions/credit-notes.ts），所以
     // 界面在这一步就该把表单收起来，而不是让用户填完再吃一个报错。
     issuedNotice: 'This credit note is in your books. To change it, void it and raise a new one.',
     appliedNotice: 'This credit note has been applied to an invoice. To change it, void it and raise a new one.',
@@ -847,10 +869,12 @@ const en = {
     subtotal: 'Subtotal',
     tax: 'Tax',
     baseTotal: 'Total in your main currency',
+    voidTitle: 'Void credit note {number}',
+    voidReasonRequired: 'Write a reason first. A voided credit note has to say why.',
+    voidConfirm: 'Void this credit note',
   },
   tax: {
     title: 'Tax',
-    rateName: 'Tax Rate Name',
     rate: 'Rate',
     defaultRate: 'Default',
     outputTax: 'Output Tax (Sales)',
@@ -869,7 +893,6 @@ const en = {
       'Only sales and purchases that actually carried tax are counted here. Zero-rated and exempt supplies are not, because nothing in the books marks them as such yet.',
     addRate: 'Add Tax Rate',
     ratePercent: 'Rate (%)',
-    deleteRateWarning: 'This tax rate is used by invoices and cannot be deleted.',
   },
   fixedAssets: {
     title: 'Fixed Assets',
@@ -884,6 +907,7 @@ const en = {
     depreciationExpense: 'Depreciation Expense Account',
     accumulatedDepreciation: 'Accumulated Depreciation',
     dispose: 'Dispose',
+    disposed: 'Disposed',
     bookValue: 'Book Value',
     postDepreciation: 'Post Depreciation',
     posted: 'Posted',
@@ -905,6 +929,27 @@ const en = {
     scheduleKept:
       '{count} period(s) already in your books were left exactly as they were ({periods}). Only the periods after them were recalculated.',
     scheduleKeptNone: 'No period had been posted yet, so every period was recalculated.',
+    // 处置（出售或报废）会出一笔处置分录，见 server/actions/fixed-assets.ts
+    // 的 disposeFixedAssetAction。
+    disposalTitle: 'Dispose of this asset',
+    disposalHint:
+      'Disposing records one entry: the cost and the depreciation already in your books come off, the proceeds go into the account you choose, and any difference is recorded as a gain or loss.',
+    disposalDate: 'Disposal date',
+    disposalProceeds: 'Sale proceeds',
+    disposalProceedsHint: 'Enter 0 if the asset was scrapped.',
+    disposalDecimals: '{currency} amounts take at most {decimals} decimal place(s).',
+    disposalMoneyAccount: 'Received into',
+    disposeConfirm: 'Dispose of this asset and record the disposal entry?',
+    scrapped: 'scrapped',
+    disposalGain: 'Gain on disposal',
+    disposalLoss: 'Loss on disposal',
+    viewDisposalEntry: 'View the disposal entry',
+    disposalEntryVoided: 'voided',
+    disposedWithoutEntry:
+      'This asset was disposed before disposals were recorded in the books, so there is no disposal entry.',
+    undoDisposal: 'Undo disposal',
+    undoDisposalConfirm:
+      'Undo this disposal? The disposal entry will be voided and the asset becomes active again.',
   },
   common: {
     cancel: 'Cancel',
@@ -924,7 +969,6 @@ const en = {
     pageN: 'Page {page}',
     back: 'Back',
     edit: 'Edit',
-    close: 'Close',
     actions: 'Actions',
     viewDetails: 'View details',
     // 只读的原因分两种，用户要分得清：单据自己的状态不许改（那由各模块的
@@ -973,6 +1017,7 @@ const en = {
     createdCount: 'Recorded {created} line(s). {skipped} were already handled.',
     createFailed: 'Those lines could not be recorded.',
     selectLine: 'Record this line',
+    empty: 'No statements imported yet. Upload one above to get started.',
   },
 } as const;
 

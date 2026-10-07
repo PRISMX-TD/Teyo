@@ -118,7 +118,7 @@ describe('记账写入边界的 ESLint 规则', () => {
   it('全仓现状：没有任何地方越过边界直接导入底层写入函数', async () => {
     // 上面几条证明规则本身有效，这条才是真的在扫仓库。
     // 只按 ruleId 过滤边界规则：仓库里另有 4 个与本分支无关的既有 ESLint 错误
-    // （server/repositories/bank_import.ts、server/services/bank_import_parser.ts
+    // （server/repositories/bank-import.ts、server/services/bank-import-parser.ts
     // 与生成物 public/sw.js），本测试不该因为它们变红，也不该替它们遮掩。
     const results = await eslint.lintFiles([
       'app',

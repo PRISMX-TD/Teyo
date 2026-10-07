@@ -4,6 +4,7 @@ import { InvoiceForm } from '@/components/invoices/invoice-form';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getInvoice } from '@/server/repositories/invoices';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
@@ -54,16 +55,28 @@ export default async function InvoiceDetailPage({
     ? contacts
     : [{ id: invoice.contactId, name: invoice.contactName }, ...contacts];
 
+  // 这一页只要 transaction:read，而 updateInvoice 要 transaction:edit:any
+  // （owner/admin）。不在这里判，viewer 与记账员会看到一张填得动却必然
+  // 保存失败的表单。
+  const mayEdit = can(context.role, 'transaction:edit:any');
+
   return (
     <>
       <div className="page-header">
         <h1>{interpolate(t.invoices.editTitle, { number: invoice.invoiceNumber })}</h1>
         <div className="page-header-actions">
+          {/* 打印页此前只能从列表进，详情页上没有入口，而打印页的「返回」
+              却指回这里。 */}
+          <Link href={`/${orgSlug}/invoices/${invoice.id}/print`} className="text-button">
+            {t.invoicePdf.print}
+          </Link>
           <Link href={`/${orgSlug}/invoices`} className="text-button">
             {t.invoices.backToList}
           </Link>
         </div>
       </div>
+
+      {mayEdit ? null : <p className="hint">{t.common.noEditPermission}</p>}
 
       <InvoiceForm
         orgSlug={orgSlug}
@@ -72,6 +85,7 @@ export default async function InvoiceDetailPage({
         currencies={[...SUPPORTED_CURRENCIES]}
         baseCurrency={context.baseCurrency}
         invoice={invoice}
+        readOnly={!mayEdit}
       />
     </>
   );

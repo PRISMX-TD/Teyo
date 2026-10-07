@@ -193,6 +193,26 @@ describe('getVendorStatement', () => {
     expect(payment.amount).toBe(-25200n);
   });
 
+  it('还没核销到账单的预付款也出现在对账单上', async () => {
+    // 预付 RM 200.00，一张账单都没核销——原来对账单只列 payment_items，
+    // 这笔钱在核销之前完全看不见。
+    await admin`
+      insert into payments
+        (organization_id, contact_id, type, amount_minor, currency, exchange_rate,
+         base_amount_minor, payment_date, method, reference, created_by)
+      values (${orgId}, ${vendorId}, 'made', 20000, 'MYR', 100000000,
+         20000, '2026-07-05'::date, 'bank_transfer', 'PRE-1', ${ownerId})
+    `;
+
+    const statement = await withTransaction(ownerId, (tx) =>
+      getVendorStatement(tx, orgId, vendorId, '2026-07-01', '2026-07-31'),
+    );
+
+    const line = statement.lines.find((l) => l.reference === 'PRE-1')!;
+    expect(line.description).toBe('Payment on account');
+    expect(line.amount).toBe(-20000n);
+  });
+
   it('未过账的外币账单不进金额，只进 notice', async () => {
     seq += 1;
     await admin`

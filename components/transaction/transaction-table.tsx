@@ -47,7 +47,9 @@ export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLab
                 ? localizedName({ name_en: row.categoryNameEn, name_zh: row.categoryNameZh }, locale)
                 : row.kind === 'journal'
                   ? t.transaction.journal
-                  : t.transaction.transfer}
+                  : row.kind === 'closing'
+                    ? t.yearEnd.closingEntry
+                    : t.transaction.transfer}
             </td>
             <td>
               {localizedName(

@@ -6,7 +6,7 @@ import { createTestOrgWithSeed, createTestUser, resetTestData } from '@/tests/he
 /**
  * 从银行对账单行**生成**交易。
  *
- * 改动之前，server/actions/bank_import.ts 全文没有一次 postJournal 调用：
+ * 改动之前，server/actions/bank-import.ts 全文没有一次 postJournal 调用：
  * 导进来的对账单行只能匹配到用户**已经手工记过**的交易。而银行导入最省事
  * 的用法恰恰是反过来——把银行给的流水直接变成账。
  *
@@ -21,7 +21,7 @@ vi.mock('@/server/auth/session', () => ({
 }));
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const { postImportedTransactions } = await import('@/server/actions/bank_import');
+const { postImportedTransactions } = await import('@/server/actions/bank-import');
 
 const suffix = randomUUID().slice(0, 8);
 const DAY = '2033-06-15';
@@ -226,6 +226,40 @@ describe('postImportedTransactions', () => {
       where organization_id = ${orgId} and description = 'Good line'
     `;
     expect(count.n).toBe(0);
+  });
+
+  it('作废后重置再记一次，会真的生成一笔新交易', async () => {
+    // client_uuid 由导入行 id 确定性派生。不处理作废的情形时，重记会命中
+    // 那笔作废交易的幂等短路：什么都没记，这一行却被标成匹配到一笔作废的记录。
+    const id = await importRow(-45_00n, 'Wrong category first');
+    await postImportedTransactions(orgSlug, {
+      entries: [{ importedTransactionId: id, categoryId: expenseCategoryId }],
+    });
+    const [first] = await admin`
+      select matched_transaction_id from imported_transactions where id = ${id}
+    `;
+    await admin`
+      update transactions
+      set voided_at = now(), voided_by = ${ownerId}, void_reason = 'test'
+      where id = ${first.matched_transaction_id}
+    `;
+    await admin`
+      update imported_transactions set status = 'pending', matched_transaction_id = null
+      where id = ${id}
+    `;
+
+    const result = await postImportedTransactions(orgSlug, {
+      entries: [{ importedTransactionId: id, categoryId: expenseCategoryId }],
+    });
+    expect(result.created).toBe(1);
+
+    const [second] = await admin`
+      select i.matched_transaction_id, t.voided_at
+      from imported_transactions i join transactions t on t.id = i.matched_transaction_id
+      where i.id = ${id}
+    `;
+    expect(second.matched_transaction_id).not.toBe(first.matched_transaction_id);
+    expect(second.voided_at).toBeNull();
   });
 
   it('全公司每一笔生成的交易都配平', async () => {

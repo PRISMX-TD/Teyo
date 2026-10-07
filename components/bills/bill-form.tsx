@@ -3,7 +3,7 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, interpolate } from '@/lib/i18n';
 import { createBill, updateBill } from '@/server/actions/bills';
 import { addMonthsLocalISO, todayLocalISO } from '@/lib/date';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
@@ -32,6 +32,30 @@ type Props = {
   taxRates: BillTaxRateOption[];
   /** 有值即编辑模式。 */
   bill?: BillDetail | null;
+  /**
+   * 只看不改。详情页只要 transaction:read，而 updateBill 要
+   * transaction:edit:any——不分出这一支，记账员与只读用户看到的是一张
+   * 填得动、却必然保存失败的表单。
+   */
+  readOnly?: boolean;
+  /**
+   * 采购单转账单（bills/new?fromPo=<id>）时由页面按那张采购单预填。
+   * 供应商与币种锁住——服务端 assertPurchaseOrderBillable 也会拒绝不一致的；
+   * 明细与税率可改，供应商实际开来的账单不一定与采购单一字不差。
+   */
+  fromPurchaseOrder?: BillFromPurchaseOrder | null;
+};
+
+export type BillFromPurchaseOrder = {
+  id: string;
+  poNumber: string;
+  contactId: string;
+  currency: string;
+  /** '' = 不含税。 */
+  taxRateId: string;
+  /** 采购单各行税率不一致：账单只有一个税率，提醒用户核对。 */
+  taxRatesDiffer: boolean;
+  items: LineItem[];
 };
 
 type LineItem = {
@@ -63,6 +87,8 @@ export function BillForm({
   baseCurrency,
   taxRates,
   bill = null,
+  readOnly = false,
+  fromPurchaseOrder = null,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
@@ -72,13 +98,24 @@ export function BillForm({
   const isVoided = bill !== null && (status === 'voided' || bill.voidedAt !== null);
   const isPosted = bill?.transactionId != null;
 
-  const [contactId, setContactId] = useState(bill?.contactId ?? contacts[0]?.id ?? '');
+  // 编辑时 bill 优先；新建且来自采购单时用采购单预填；否则空白。
+  const source = bill ? null : fromPurchaseOrder;
+  // 已经从采购单转来的账单，编辑时供应商与币种同样锁住（updateBill 会拒绝）。
+  const lockedToPo = source !== null || bill?.purchaseOrderId != null;
+
+  const [contactId, setContactId] = useState(
+    bill?.contactId ?? source?.contactId ?? contacts[0]?.id ?? '',
+  );
   const [issueDate, setIssueDate] = useState(bill?.issueDate ?? todayLocalISO());
   const [dueDate, setDueDate] = useState(bill?.dueDate ?? addMonthsLocalISO(1));
-  const [currency, setCurrency] = useState(bill?.currency ?? baseCurrency);
+  const [currency, setCurrency] = useState(bill?.currency ?? source?.currency ?? baseCurrency);
   const [notes, setNotes] = useState(bill?.notes ?? '');
   const [items, setItems] = useState<LineItem[]>(
-    bill ? itemsOf(bill) : [{ description: '', amount: '' }],
+    bill
+      ? itemsOf(bill)
+      : source && source.items.length > 0
+        ? source.items
+        : [{ description: '', amount: '' }],
   );
   /**
    * 选中的税率。
@@ -89,14 +126,22 @@ export function BillForm({
    * 里根本没有那个数。0021 补上了 subtotal_minor / tax_rate_bps / tax_minor，
    * 这个下拉框是它们在界面上的第一个入口。
    *
-   * 初始值：编辑时按这张账单已记的基点去匹配（bills.tax_rate_id 目前还没有
-   * 被写入过，见下面的注释，所以只能按 bps 反查）；新建时用默认税率——
-   * 商户日常收到的账单绝大多数适用同一个税率，让他每次手选一遍只会增加漏选。
+   * 初始值：编辑时先认这张账单记下的 tax_rate_id，那条记录不在下拉里
+   * （停用了，或是 tax_rate_id 落库之前的旧账单）才按基点反查；新建时用
+   * 默认税率——商户日常收到的账单绝大多数适用同一个税率，让他每次手选
+   * 一遍只会增加漏选。
    */
   const [taxRateId, setTaxRateId] = useState<string>(() => {
     if (bill) {
-      const matched = taxRates.find((rate) => rate.rateBps === bill.taxRateBps);
+      const byId = bill.taxRateId
+        ? taxRates.find((rate) => rate.id === bill.taxRateId)
+        : undefined;
+      const matched = byId ?? taxRates.find((rate) => rate.rateBps === bill.taxRateBps);
       return matched?.id ?? '';
+    }
+    // 来自采购单：认采购单行上的那条税率，不在下拉里（停用了）就留空让用户选。
+    if (source) {
+      return taxRates.some((rate) => rate.id === source.taxRateId) ? source.taxRateId : '';
     }
     return taxRates.find((rate) => rate.rateBps > 0)?.id ?? '';
   });
@@ -123,6 +168,7 @@ export function BillForm({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    if (readOnly) return;
     setPending(true);
     setError(null);
 
@@ -131,13 +177,11 @@ export function BillForm({
       issueDate,
       dueDate,
       currency,
-      // 服务端收的是百分数字符串，不是基点也不是税率 id。
-      //
-      // CreateBillInput 里没有 taxRateId 这个字段，insertBill 那边写死了
-      // `taxRateId: null`——所以选中的是「哪一条税率记录」这件事今天存不下来，
-      // 存下来的只有税率本身。等 CreateBillInput 接受 taxRateId 之后，
-      // 这里把 selectedRate.id 一并传过去即可，界面不用再动。已在报告里记下。
+      // 税率数值（百分数字符串）决定算多少税；taxRateId 记下选的是哪一条。
+      // 后者原来没传——CreateBillInput 早就收它了，bills.tax_rate_id 却恒为
+      // null，编辑时还会把已有的值清掉。
       taxRatePercent: selectedRate ? bpsToPercent(selectedRate.rateBps) : '0',
+      taxRateId: selectedRate?.id ?? null,
       notes: notes || undefined,
       items: items.map((item) => ({
         description: item.description,
@@ -149,7 +193,11 @@ export function BillForm({
       if (isEdit && bill) {
         await updateBill(orgSlug, bill.id, payload);
       } else {
-        await createBill(orgSlug, { ...payload, status: keepDraft ? 'draft' : 'received' });
+        await createBill(orgSlug, {
+          ...payload,
+          status: keepDraft ? 'draft' : 'received',
+          purchaseOrderId: source?.id ?? null,
+        });
       }
       // ?saved=1：回执由列表页渲染。理由见 components/invoices/invoice-form.tsx。
       router.push(`/${orgSlug}/bills?saved=1`);
@@ -177,11 +225,13 @@ export function BillForm({
       notice={
         isVoided
           ? t.bills.voidedNotice
-          : status === 'paid'
-            ? t.bills.paidNotice
-            : isPosted
-              ? t.bills.postedNotice
-              : t.bills.draftNotice
+          : readOnly
+            ? t.common.noEditPermission
+            : status === 'paid'
+              ? t.bills.paidNotice
+              : isPosted
+                ? t.bills.postedNotice
+                : t.bills.draftNotice
       }
     />
   ) : null;
@@ -195,11 +245,22 @@ export function BillForm({
       {lifecycle}
 
       <form onSubmit={handleSubmit} className="transaction-form">
+        {/* display: contents：这一层只为把 disabled 一次传给所有字段，不参与
+            .transaction-form 的纵向排版。 */}
+        <fieldset disabled={readOnly} style={{ display: 'contents' }}>
+        {source ? (
+          <p className="field-hint" role="note">
+            {interpolate(t.bills.convertingFromPo, { number: source.poNumber })}
+            {source.taxRatesDiffer ? <> {t.bills.poTaxRatesDiffer}</> : null}
+          </p>
+        ) : null}
+
         <label htmlFor="contactId">{t.bills.vendor}</label>
         <select
           id="contactId"
           value={contactId}
           onChange={(e) => setContactId(e.target.value)}
+          disabled={lockedToPo}
           required
         >
           {contacts.map((c) => (
@@ -228,7 +289,12 @@ export function BillForm({
         />
 
         <label htmlFor="currency">{t.transaction.currency}</label>
-        <select id="currency" value={currency} onChange={(e) => setCurrency(e.target.value)}>
+        <select
+          id="currency"
+          value={currency}
+          onChange={(e) => setCurrency(e.target.value)}
+          disabled={lockedToPo}
+        >
           {currencies.map((code) => (
             <option key={code} value={code}>
               {code}
@@ -339,11 +405,14 @@ export function BillForm({
           </p>
         ) : null}
 
-        <div className="form-actions">
-          <button type="submit" disabled={pending}>
-            {pending ? t.common.loading : isEdit ? t.bills.saveChanges : t.bills.save}
-          </button>
-        </div>
+        {!readOnly ? (
+          <div className="form-actions">
+            <button type="submit" disabled={pending}>
+              {pending ? t.common.loading : isEdit ? t.bills.saveChanges : t.bills.save}
+            </button>
+          </div>
+        ) : null}
+        </fieldset>
       </form>
     </>
   );

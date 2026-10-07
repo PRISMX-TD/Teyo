@@ -1,6 +1,6 @@
 'use server';
 
-import { exportSchema } from '@/lib/schemas';
+import { exportSchema, parseOrThrow } from '@/lib/schemas';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
@@ -9,6 +9,7 @@ import {
   buildCsv,
   buildTransactionDetailRows,
   buildXlsx,
+  ExportError,
   type ExportFormat,
   type ExportKind,
 } from '@/server/services/export-builder';
@@ -45,10 +46,14 @@ const SHEET_NAMES: Record<ExportKind, string> = {
 
 export async function exportReport(orgSlug: string, input: ExportInput): Promise<ExportResult> {
   const context = await requirePermission(orgSlug, 'report:export');
-  const parsed = exportSchema.parse(input);
+  // 裸 .parse() 的 ZodError message 是一坨 JSON（起止日期填反时最常见），
+  // 导出表单会把它原样贴出来。
+  const parsed = parseOrThrow(exportSchema, input, (m) => new Error(m));
 
   // 取数与审计放在同一个事务里：审计写失败时不能把文件发出去，
   // 否则会出现导出了却查不到留痕的记录。
+  // ExportError 只带消息键（见 export-builder.ts），原来没有任何地方调
+  // localize()，用户看到的是「exportTooManyRows {"count":…}」。
   const { headers, rows } = await withTransaction(context.userId, async (tx) => {
     const built =
       parsed.kind === 'transaction-detail'
@@ -90,6 +95,9 @@ export async function exportReport(orgSlug: string, input: ExportInput): Promise
     });
 
     return built;
+  }).catch((error: unknown) => {
+    if (error instanceof ExportError) throw new Error(error.localize(parsed.locale));
+    throw error;
   });
 
   const buffer =

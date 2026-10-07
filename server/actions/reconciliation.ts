@@ -13,8 +13,11 @@ import {
   filterOwnTransactionIds,
   updateReconciliationItem,
   completeReconciliation,
+  getBookBalance,
+  listUnreconciledTransactions,
   ReconciliationError,
 } from '@/server/repositories/reconciliation';
+import { reconciliationSummary } from '@/server/domain/reconciliation';
 import { recordAudit } from '@/server/repositories/audit-logs';
 
 const uuid = z.string().uuid('Pick one of the options in the list.');
@@ -94,6 +97,56 @@ export async function reconcile(
       );
     }
 
+    // 勾上的每一笔都必须还挂在这个资金账户的「未对账」清单上。filterOwn 只
+    // 管公司与作废，管不到「这笔根本不动这个账户」或「它上一张对账单已经
+    // 对过了」——两个标签页各交一次、或者页面开着过夜，同一笔交易会被对进
+    // 两张对账单，清帐合计算两遍。
+    const [unreconciled, bookBalanceMinor] = await Promise.all([
+      listUnreconciledTransactions(tx, context.organizationId, moneyAccount.id),
+      getBookBalance(tx, context.organizationId, moneyAccount.id),
+    ]);
+    const effectById = new Map(unreconciled.map((row) => [row.id, row.effectMinor]));
+    if (parsed.itemIds.some((itemId) => !effectById.has(itemId))) {
+      throw new ReconciliationError(
+        'Some of the selected records are not waiting to be reconciled on this account. ' +
+          'Reload the page and try again.',
+      );
+    }
+
+    const adjustmentById = new Map<string, bigint>();
+    for (const itemId of parsed.itemIds) {
+      // 空输入框就是「没有调整」。之前写的是 `?? '0'`，只兜住了「键不存在」，
+      // 兜不住「键在、值是空串」——而后者恰恰是用户点进输入框又删掉时的样子，
+      // 于是整次对账倒在一句 MoneyError 上。
+      const raw = (parsed.adjustments[itemId] ?? '').trim();
+      adjustmentById.set(
+        itemId,
+        raw === ''
+          ? 0n
+          : parseSignedToMinor(
+              parseOrThrow(signedAmount, raw, (m) => new ReconciliationError(m)),
+              exponent,
+            ),
+      );
+    }
+
+    // 「差额归零才能完成」原来只由界面上那个禁用的按钮守着。这里用同一个
+    // reconciliationSummary 在服务端再算一遍——直接调 Action 的人、或者
+    // 界面与账面在提交前一刻又变了的情况，都不该完成一张对不平的对账单。
+    const { differenceMinor } = reconciliationSummary({
+      bookBalanceMinor,
+      unreconciledEffects: unreconciled.map((row) => row.effectMinor),
+      clearedEffects: parsed.itemIds.map((itemId) => effectById.get(itemId) as bigint),
+      adjustmentMinor: [...adjustmentById.values()].reduce((sum, value) => sum + value, 0n),
+      statementBalanceMinor,
+    });
+    if (differenceMinor !== 0n) {
+      throw new ReconciliationError(
+        'The statement balance does not match the ticked records yet, so this reconciliation ' +
+          'cannot be completed. Reload the page and check the difference.',
+      );
+    }
+
     const { id } = await createReconciliation(tx, {
       organizationId: context.organizationId,
       moneyAccountId: moneyAccount.id,
@@ -103,22 +156,11 @@ export async function reconcile(
     });
 
     for (const itemId of parsed.itemIds) {
-      // 空输入框就是「没有调整」。之前写的是 `?? '0'`，只兜住了「键不存在」，
-      // 兜不住「键在、值是空串」——而后者恰恰是用户点进输入框又删掉时的样子，
-      // 于是整次对账倒在一句 MoneyError 上。
-      const raw = (parsed.adjustments[itemId] ?? '').trim();
-      const adjMinor =
-        raw === ''
-          ? 0n
-          : parseSignedToMinor(
-              parseOrThrow(signedAmount, raw, (m) => new ReconciliationError(m)),
-              exponent,
-            );
       await addReconciliationItem(tx, {
         reconciliationId: id,
         transactionId: itemId,
         isCleared: true,
-        adjustmentMinor: adjMinor,
+        adjustmentMinor: adjustmentById.get(itemId) ?? 0n,
         note: null,
       });
     }

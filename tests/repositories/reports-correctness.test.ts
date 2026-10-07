@@ -29,6 +29,7 @@ import {
   getGeneralLedger,
   getProfitLoss,
   getTrialBalance,
+  getUnclosedEarnings,
 } from '@/server/repositories/reports';
 import {
   checkBalanceSheet,
@@ -989,5 +990,63 @@ describe('I11 - 试算平衡表 vs 资产负债表的交叉校验', () => {
     expect(result.balanced).toBe(false);
     expect(result.differenceMinor).toBe(1n);
     expect(result.mismatchedCodes).toEqual(['accounts-receivable']);
+  });
+});
+
+/**
+ * 「本年利润」必须是全部未结转损益，而不是本财年至今的 netIncome。
+ *
+ * 必须放在文件最末：它往 2020 年记了一笔损益，而前面那几条资产负债表用例
+ * 用的是「2026-01-01 起的 netIncome」——那个口径正是这里要证明不够用的那个。
+ */
+describe('getUnclosedEarnings - 上一财年未年结 / 已年结都配平 (I5)', () => {
+  const asOf = '2026-12-31';
+
+  async function balanceSheetCheck() {
+    return withTransaction(userId, async (tx) => {
+      const earnings = await getUnclosedEarnings(tx, orgId, asOf);
+      const bs = await getBalanceSheet(tx, orgId, asOf, earnings);
+      return checkBalanceSheet(bs);
+    });
+  }
+
+  it('上一财年的利润还挂在损益科目上（没做年结）时仍然配平', async () => {
+    await insertBalancedTransaction({
+      occurredOn: '2020-06-15',
+      amountMinor: 1234500n,
+      debitAccountId: cashId,
+      creditAccountId: salesId,
+    });
+
+    expect((await balanceSheetCheck()).balanced).toBe(true);
+
+    // 对照：只取本财年的 netIncome，那 12,345.00 两边都不在，恰好差这么多。
+    const bs = await withTransaction(userId, async (tx) => {
+      const pl = await getProfitLoss(tx, orgId, '2026-01-01', asOf);
+      return getBalanceSheet(tx, orgId, asOf, pl.netIncome);
+    });
+    expect(checkBalanceSheet(bs).differenceMinor).toBe(1234500n);
+  });
+
+  it('年结之后（损益进了留存收益）依然配平，且不重复计入', async () => {
+    const retainedId = await createScratchAccount('retained-earnings-ue', 'equity');
+    const [txn] = await admin`
+      insert into transactions
+        (organization_id, kind, occurred_on, description, currency,
+         amount_minor, base_amount_minor, exchange_rate, category_id,
+         created_by, client_uuid)
+      values (${orgId}, 'closing', '2020-12-31'::date, 'closing fixture', 'MYR',
+         1234500, 1234500, 1, null, ${userId}, gen_random_uuid())
+      returning id
+    `;
+    await admin`
+      insert into journal_lines
+        (transaction_id, organization_id, account_id, direction, amount_minor, base_amount_minor)
+      values
+        (${txn.id}, ${orgId}, ${salesId}, 'debit', 1234500, 1234500),
+        (${txn.id}, ${orgId}, ${retainedId}, 'credit', 1234500, 1234500)
+    `;
+
+    expect((await balanceSheetCheck()).balanced).toBe(true);
   });
 });

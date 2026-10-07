@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { categorySchema, renameSchema } from '@/lib/schemas';
+import { categorySchema, parseOrThrow, renameSchema } from '@/lib/schemas';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getAccount } from '@/server/repositories/accounts';
@@ -39,7 +39,7 @@ export async function createCategory(
   input: { nameEn?: string; nameZh?: string; kind: 'income' | 'expense'; accountId: string },
 ): Promise<{ id: string }> {
   const context = await requirePermission(orgSlug, 'category:manage');
-  const parsed = categorySchema.parse(input);
+  const parsed = parseOrThrow(categorySchema, input, (m) => new CategoryError(m));
   return createCategoryChecked(orgSlug, context, parsed);
 }
 
@@ -58,12 +58,18 @@ export async function createCategoryFromNamedList(
   if (!input.kind || !input.accountId) {
     throw new CategoryError('Choose income or expense and an account before adding a category.');
   }
-  const parsed = categorySchema.parse({
-    nameEn: input.nameEn,
-    nameZh: input.nameZh,
-    kind: input.kind,
-    accountId: input.accountId,
-  });
+  // 裸 .parse() 抛的 ZodError，message 是一坨 JSON，NamedList 会把它原样
+  // 贴到设置页上（两个名字都没填时最容易撞上）。与 accounts.ts 走同一条通道。
+  const parsed = parseOrThrow(
+    categorySchema,
+    {
+      nameEn: input.nameEn,
+      nameZh: input.nameZh,
+      kind: input.kind,
+      accountId: input.accountId,
+    },
+    (m) => new CategoryError(m),
+  );
   return createCategoryChecked(orgSlug, context, parsed);
 }
 
@@ -123,7 +129,7 @@ export async function renameCategory(
   input: { nameEn?: string; nameZh?: string },
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'category:manage');
-  const parsed = renameSchema.parse(input);
+  const parsed = parseOrThrow(renameSchema, input, (m) => new CategoryError(m));
   const names = {
     nameEn: parsed.nameEn?.trim() || null,
     nameZh: parsed.nameZh?.trim() || null,

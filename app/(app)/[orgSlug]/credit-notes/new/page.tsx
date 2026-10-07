@@ -11,7 +11,7 @@ export default async function NewCreditNotePage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
@@ -21,19 +21,24 @@ export default async function NewCreditNotePage({
         select id, name
         from contacts
         where organization_id = ${context.organizationId}
+          and type in ('customer', 'both')
           and is_active = true
         order by name
       ` as { id: string; name: string }[];
       return rows;
     }),
     withTransaction(context.userId, async (tx) => {
+      // 只列开具过、未作废、未收讫的发票：草稿没进总账，冲减它就是凭空贷
+      // 一笔应收。contact_id / currency 一起带上，表单选中发票时据此把客户
+      // 与币种对齐——createCreditNote 会拒绝两者对不上的组合。
       const rows = await tx`
-        select id, invoice_number, total_minor
+        select id, invoice_number, contact_id, currency
         from invoices
         where organization_id = ${context.organizationId}
-          and status not in ('voided', 'paid')
+          and voided_at is null
+          and status not in ('draft', 'voided', 'paid')
         order by invoice_number
-      ` as { id: string; invoice_number: string; total_minor: bigint }[];
+      ` as { id: string; invoice_number: string; contact_id: string; currency: string }[];
       return rows;
     }),
   ]);

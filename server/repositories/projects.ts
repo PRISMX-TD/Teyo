@@ -144,13 +144,8 @@ export type ProjectProfitability = {
  * 两条查询合并成一条：原来收入与费用各查一次，同一组 join 跑两遍，而它们
  * 唯一的差别是 a.type。
  *
- * ⚠️ 这个函数今天算得出数，但永远是 0：**没有任何地方给 transactions 写
- * project_id**。0009 加了这一列，server/actions/transactions.ts 的入参类型里
- * 没有 projectId，lib/schemas.ts 里也没有，全仓 `grep project_id` 只命中本
- * 文件。也就是说项目盈亏分析是一个实现了一半的功能：查询这一侧是对的（现在
- * 更对了），挂载那一侧根本不存在。已在交付报告中列明需要在 createTransaction /
- * updateTransaction 的入参与 lib/schemas.ts 里补 projectId——那两个文件不在
- * 本次改动范围内。
+ * 挂载那一侧在交易表单上（components/transaction/transaction-form.tsx 的
+ * 项目下拉 -> server/actions/transactions.ts 的 projectId -> transactions.project_id）。
  */
 export async function getProjectProfitability(
   tx: Tx,

@@ -5,7 +5,7 @@ import Link from 'next/link';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import { closeFiscalYear, undoYearEndClose } from '@/server/actions/year_end';
+import { closeFiscalYear, undoYearEndClose } from '@/server/actions/year-end';
 
 /**
  * 年结面板。

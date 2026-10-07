@@ -12,7 +12,7 @@ import {
   parseOfxBuffer,
   parseQifBuffer,
   parseStatementAmountToMinor,
-} from '@/server/services/bank_import_parser';
+} from '@/server/services/bank-import-parser';
 
 const buf = (text: string) => Buffer.from(text, 'utf-8');
 
@@ -176,6 +176,21 @@ describe('parseCsvBuffer - amounts', () => {
     );
     const rows = parseCsvBuffer(withFooter, myr);
     expect(rows).toHaveLength(1);
+    expect(rows[0].amountMinor).toBe(-120000n);
+  });
+
+  it('does not mistake a "Value Date" column for the amount', () => {
+    // /value/ 原来会先命中「Value Date」，整份文件每一行都报「不是金额」。
+    const rows = parseCsvBuffer(
+      buf(
+        [
+          'Transaction Date,Value Date,Description,Debit,Credit',
+          '2026-04-03,2026-04-04,Rent,1200.00,',
+        ].join('\n'),
+      ),
+      myr,
+    );
+    expect(rows[0].date).toBe('2026-04-03');
     expect(rows[0].amountMinor).toBe(-120000n);
   });
 

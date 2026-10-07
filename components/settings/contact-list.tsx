@@ -133,6 +133,20 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
     }
   }
 
+  // 停用 / 启用原来是裸调用：失败时没有任何提示（Promise 被丢掉，变成一条
+  // 未处理的 rejection），用户只看到按钮点了没反应。
+  async function handleToggle(id: string, active: boolean) {
+    setPending(true);
+    setError(null);
+    try {
+      await onToggle(orgSlug, id, active);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
   function startEdit(item: ContactItem) {
     setEditing(item.id);
     setEditName(item.name);
@@ -193,7 +207,7 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
                       onChange={(e) => setEditNotes(e.target.value)}
                       placeholder={t.settings.notes} aria-label={t.settings.notes}
                     />
-                    <button onClick={() => handleUpdate(item.id)} disabled={pending}>
+                    <button onClick={() => handleUpdate(item.id)} disabled={pending || !editName.trim()}>
                       {t.settings.save}
                     </button>
                     <button onClick={() => setEditing(null)}>{t.common.cancel}</button>
@@ -216,12 +230,12 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
                       {/* 第三层：操作按钮 */}
                       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', marginTop: 'var(--space-1)' }}>
                         <button onClick={() => startEdit(item)} className="btn-small">
-                          {t.settings.rename ?? 'Edit'}
+                          {t.common.edit}
                         </button>
                         <button onClick={() => setExpanded(expanded === item.id ? null : item.id)} className="btn-small">
                           {expanded === item.id ? '−' : '+'}
                         </button>
-                        <button onClick={() => onToggle(orgSlug, item.id, !item.isActive)} className="btn-small">
+                        <button onClick={() => handleToggle(item.id, !item.isActive)} disabled={pending} className="btn-small">
                           {t.settings.deactivate}
                         </button>
                       </div>
@@ -255,7 +269,7 @@ export function ContactList({ orgSlug, items, locale, onCreate, onUpdate, onTogg
                   <span className="contact-name">{item.name}</span>
                   <span className="badge">{t.settings.inactive}</span>
                   <span className="badge">{t.settings[TYPE_LABEL_KEYS[item.type]]}</span>
-                  <button onClick={() => onToggle(orgSlug, item.id, true)}>
+                  <button onClick={() => handleToggle(item.id, true)} disabled={pending}>
                     {t.settings.reactivate}
                   </button>
                 </div>

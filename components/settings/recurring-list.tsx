@@ -159,6 +159,11 @@ export function RecurringList({
   // 规则全被挡下的用户和规则全部入账的用户看到的是同一个空界面。
   const [runReport, setRunReport] = useState<RecurringRunReport | null>(null);
   const [runError, setRunError] = useState<string | null>(null);
+  /**
+   * 保存/启停失败时那句话。原来 handleSubmit 只有 try/finally：服务端拒了
+   * （金额不对、科目不属于本公司、角色不够），表单原样留着，一声不吭。
+   */
+  const [formError, setFormError] = useState<string | null>(null);
 
   const closeForm = useCallback(() => {
     setShowForm(false);
@@ -196,6 +201,7 @@ export function RecurringList({
   const handleSubmit = useCallback(async () => {
     if (!form.amount || !form.debitAccountId || !form.creditAccountId) return;
     setSubmitting(true);
+    setFormError(null);
     try {
       if (editingId) {
         await editAction(orgSlug, editingId, {
@@ -229,10 +235,33 @@ export function RecurringList({
         });
       }
       closeForm();
+    } catch (e) {
+      setFormError((e as Error).message);
     } finally {
       setSubmitting(false);
     }
   }, [form, editingId, orgSlug, createAction, editAction, closeForm]);
+
+  const handleToggle = useCallback(
+    async (id: string, active: boolean) => {
+      setFormError(null);
+      try {
+        await toggleAction(orgSlug, id, active);
+      } catch (e) {
+        setFormError((e as Error).message);
+      }
+    },
+    [orgSlug, toggleAction],
+  );
+
+  const kindLabel = (kind: string): string =>
+    kind === 'income'
+      ? t.transaction.income
+      : kind === 'expense'
+        ? t.transaction.expense
+        : kind === 'transfer'
+          ? t.transaction.transfer
+          : t.transaction.journal;
 
   const handleGenerate = useCallback(async () => {
     // 数的是到期的规则条数，不是将要生成的分录笔数——补记会让后者更大。
@@ -270,6 +299,12 @@ export function RecurringList({
           {generating ? t.common.loading : t.recurring.runDue}
         </button>
       </div>
+
+      {formError ? (
+        <p role="alert" className="form-error">
+          {formError}
+        </p>
+      ) : null}
 
       {runError ? (
         <p role="alert" className="form-error">
@@ -498,7 +533,8 @@ export function RecurringList({
       )}
 
       {entries.length === 0 ? (
-        <p className="empty-state">{t.transaction.empty}</p>
+        // 原来借用 t.transaction.empty（「没有符合筛选的记录」），这一页没有筛选。
+        <p className="empty-state">{t.recurring.empty}</p>
       ) : (
         <table className="report-table">
           <thead>
@@ -515,7 +551,7 @@ export function RecurringList({
           <tbody>
             {entries.map((entry) => (
               <tr key={entry.id}>
-                <td>{entry.kind}</td>
+                <td>{kindLabel(entry.kind)}</td>
                 <td>{entry.description}</td>
                 <td className="numeric mono">
                   {(() => {
@@ -541,7 +577,7 @@ export function RecurringList({
                 <td>{entry.nextDueDate}</td>
                 <td>
                   <button
-                    onClick={() => toggleAction(orgSlug, entry.id, !entry.isActive)}
+                    onClick={() => handleToggle(entry.id, !entry.isActive)}
                   >
                     {entry.isActive ? t.settings.active : t.settings.inactive}
                   </button>

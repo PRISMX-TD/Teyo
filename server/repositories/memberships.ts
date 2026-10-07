@@ -56,17 +56,6 @@ export async function findMembership(
   return row ? mapMember(row) : null;
 }
 
-export async function findOwnerMembershipId(
-  tx: Tx,
-  organizationId: string,
-): Promise<string | null> {
-  const rows = await tx`
-    select id from memberships
-    where organization_id = ${organizationId} and role = 'owner'
-  `;
-  return (rows.at(0)?.id as string | undefined) ?? null;
-}
-
 export async function updateMembershipRole(
   tx: Tx,
   membershipId: string,

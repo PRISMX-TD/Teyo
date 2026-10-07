@@ -622,6 +622,91 @@ describe('createPayment — 校验', () => {
   });
 });
 
+describe('createPayment — 单据必须真的欠着这笔钱', () => {
+  it('拒绝核销草稿发票——它没有过账，核销等于凭空贷一笔应收', async () => {
+    const [draft] = await admin`
+      insert into invoices (
+        organization_id, contact_id, invoice_number, status,
+        issue_date, due_date, currency, subtotal_minor, tax_rate_bps, tax_minor, total_minor
+      )
+      values (${org.id}, ${customerId}, ${`INV-DRAFT-${suffix}`}, 'draft',
+        ${DAY}, ${DAY}, 'MYR', 10000, 0, 0, 10000)
+      returning id
+    `;
+
+    await expect(
+      createPayment(org.slug, {
+        contactId: customerId,
+        type: 'received',
+        amount: '100.00',
+        currency: 'MYR',
+        paymentDate: DAY,
+        method: 'bank_transfer',
+        items: [{ invoiceId: draft.id as string, amount: '100.00' }],
+      }),
+    ).rejects.toThrow(/still a draft/);
+  });
+
+  it('拒绝用另一位客户的钱核销这张发票', async () => {
+    const otherCustomer = await createContact(org.id, `Other ${suffix}`);
+    const invoice = await createPostedInvoice({
+      seeded: org,
+      context: ctx,
+      contactId: customerId,
+      number: `INV-OTHER-${suffix}`,
+      currency: 'MYR',
+      totalMinor: 10_000n,
+      rate: '1',
+    });
+
+    await expect(
+      createPayment(org.slug, {
+        contactId: otherCustomer,
+        type: 'received',
+        amount: '100.00',
+        currency: 'MYR',
+        paymentDate: DAY,
+        method: 'bank_transfer',
+        items: [{ invoiceId: invoice.id, amount: '100.00' }],
+      }),
+    ).rejects.toThrow(/different contact/);
+  });
+
+  it('核销金额超过单据剩余时拒绝，而不是把多出来的记成汇兑收益', async () => {
+    const invoice = await createPostedInvoice({
+      seeded: org,
+      context: ctx,
+      contactId: customerId,
+      number: `INV-OVERDOC-${suffix}`,
+      currency: 'MYR',
+      totalMinor: 10_000n,
+      rate: '1',
+    });
+
+    await createPayment(org.slug, {
+      contactId: customerId,
+      type: 'received',
+      amount: '60.00',
+      currency: 'MYR',
+      paymentDate: DAY,
+      method: 'bank_transfer',
+      items: [{ invoiceId: invoice.id, amount: '60.00' }],
+    });
+
+    await expect(
+      createPayment(org.slug, {
+        contactId: customerId,
+        type: 'received',
+        amount: '50.00',
+        currency: 'MYR',
+        paymentDate: DAY,
+        method: 'bank_transfer',
+        items: [{ invoiceId: invoice.id, amount: '50.00' }],
+      }),
+    ).rejects.toThrow(/only has 40\.00 MYR left/);
+  });
+});
+
 describe('审计与作废', () => {
   it('createPayment 写一条 payment.created 审计，且 after 是 jsonb 对象而不是字符串', async () => {
     const invoice = await createPostedInvoice({

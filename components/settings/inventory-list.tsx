@@ -4,6 +4,7 @@ import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
+import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { ModalDialog } from '@/components/shell/modal-dialog';
 import type { InventoryItemRow } from '@/server/repositories/inventory';
 import {
@@ -116,7 +117,9 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
         nameZh: nameZh.trim(),
         unit: unit.trim(),
         costMethod,
-        reorderLevel: parseInt(reorderLevel, 10) || 0,
+        // 字符串原样交给服务端的 parseQuantityToScaled：reorder_level 是
+        // numeric(12,4)，parseInt 会把 2.5 截成 2。
+        reorderLevel: reorderLevel.trim() || '0',
         cogsAccountId: cogsAccountId || undefined,
         inventoryAccountId: inventoryAccountId || undefined,
       });
@@ -132,7 +135,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
           costMethod,
           currentQuantity: 0,
           currentAvgCostMinor: 0n,
-          reorderLevel: parseInt(reorderLevel, 10) || 0,
+          reorderLevel: Number(reorderLevel) || 0,
           cogsAccountId: cogsAccountId || null,
           inventoryAccountId: inventoryAccountId || null,
           isActive: true,
@@ -169,7 +172,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
         nameZh: editNameZh.trim(),
         unit: editUnit.trim(),
         costMethod: editCostMethod,
-        reorderLevel: parseInt(editReorderLevel, 10) || 0,
+        reorderLevel: editReorderLevel.trim() || '0',
         cogsAccountId: editCogsAccountId || undefined,
         inventoryAccountId: editInventoryAccountId || undefined,
       });
@@ -183,7 +186,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                 nameZh: editNameZh.trim(),
                 unit: editUnit.trim(),
                 costMethod: editCostMethod,
-                reorderLevel: parseInt(editReorderLevel, 10) || 0,
+                reorderLevel: Number(editReorderLevel) || 0,
                 cogsAccountId: editCogsAccountId || null,
                 inventoryAccountId: editInventoryAccountId || null,
               }
@@ -221,8 +224,14 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
       const result = await recordInventoryTxnAction(orgSlug, {
         inventoryItemId: txnItem.id,
         type: txnType as 'purchase' | 'sale' | 'adjustment' | 'return',
-        quantity: parseFloat(txnQuantity) || 0,
-        unitCostMinor: String(Math.round((parseFloat(txnUnitCost) || 0) * 100)),
+        // 数量原样传字符串（服务端按四位小数定标解析）；单价按本位币的小数位
+        // 转成最小单位。原来是 Math.round(parseFloat(x) * 100)：浮点，且两位
+        // 小数写死——本位币为 JPY 的公司单价会被放大 100 倍。
+        quantity: txnQuantity.trim() || '0',
+        unitCostMinor: parseDecimalToMinor(
+          txnUnitCost.trim() || '0',
+          currencyExponent(baseCurrency),
+        ).toString(),
         notes: txnNotes.trim() || undefined,
       });
       setItems((prev) =>

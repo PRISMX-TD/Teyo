@@ -1,6 +1,5 @@
 'use client';
 
-import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
@@ -27,14 +26,8 @@ type Props = {
   openPrepayments?: OpenPrepaymentView[];
   /** 可供核销的未结单据（发票 + 账单），对话框里按往来对象与币种再过滤。 */
   outstandingDocuments?: OutstandingDocumentView[];
-};
-
-const METHOD_LABELS: Record<string, string> = {
-  cash: 'Cash',
-  bank_transfer: 'Bank Transfer',
-  cheque: 'Cheque',
-  online: 'Online',
-  other: 'Other',
+  /** 核销 / 作废要 transaction:create。viewer 不画这些按钮。 */
+  canWrite: boolean;
 };
 
 export function PaymentList({
@@ -45,6 +38,7 @@ export function PaymentList({
   contacts,
   openPrepayments,
   outstandingDocuments,
+  canWrite,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
@@ -56,6 +50,15 @@ export function PaymentList({
   const [pendingId, setPendingId] = useState<string | null>(null);
   /** 正在核销的那一笔预收款；null 表示对话框关着。 */
   const [applying, setApplying] = useState<OpenPrepaymentView | null>(null);
+
+  // 收付方式原来是一张写死的英文表，中文界面上这一列全是英文。
+  const methodLabels: Record<string, string> = {
+    cash: i18n.payments.methodCash,
+    bank_transfer: i18n.payments.methodBankTransfer,
+    cheque: i18n.payments.methodCheque,
+    online: i18n.payments.methodOnline,
+    other: i18n.payments.methodOther,
+  };
 
   const prepayments = openPrepayments ?? [];
   const documents = outstandingDocuments ?? [];
@@ -84,22 +87,14 @@ export function PaymentList({
     }
   }
 
+  // 「记录收付款」按钮只在页面头部画一次。这里原来又画了一个，于是同一个
+  // 按钮在页面上出现两次。
   if (payments.length === 0) {
-    return (
-      <>
-        <p className="empty-state">{i18n.payments.empty}</p>
-        <Link href={`/${orgSlug}/payments/new`} className="primary-button">
-          {i18n.payments.newTitle}
-        </Link>
-      </>
-    );
+    return <p className="empty-state">{i18n.payments.empty}</p>;
   }
 
   return (
     <>
-      <Link href={`/${orgSlug}/payments/new`} className="primary-button">
-        {i18n.payments.newTitle}
-      </Link>
 
       {error ? (
         <p role="alert" className="form-error">
@@ -138,13 +133,15 @@ export function PaymentList({
                 <strong className="mono">
                   {formatMoney(prepayment.unappliedMinor, prepayment.currency)}
                 </strong>
-                <button
-                  type="button"
-                  className="btn-small"
-                  onClick={() => setApplying(prepayment)}
-                >
-                  {i18n.payments.apply}
-                </button>
+                {canWrite ? (
+                  <button
+                    type="button"
+                    className="btn-small"
+                    onClick={() => setApplying(prepayment)}
+                  >
+                    {i18n.payments.apply}
+                  </button>
+                ) : null}
               </li>
             ))}
           </ul>
@@ -218,7 +215,7 @@ export function PaymentList({
               <td className="numeric">
                 {formatMoney(p.amountMinor, p.currency)}
               </td>
-              <td>{METHOD_LABELS[p.method] ?? p.method}</td>
+              <td>{methodLabels[p.method] ?? p.method}</td>
               <td>{p.reference ?? '-'}</td>
               <td>
                 {p.voidedAt ? (
@@ -228,7 +225,7 @@ export function PaymentList({
                 )}
               </td>
               <td>
-                {!p.voidedAt ? (
+                {canWrite && !p.voidedAt ? (
                   <button
                     type="button"
                     className="btn-small btn-danger"

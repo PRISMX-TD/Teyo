@@ -4,6 +4,19 @@ import type { NextConfig } from 'next';
 const withSerwist = withSerwistInit({
   swSrc: 'app/sw.ts',
   swDest: 'public/sw.js',
+  // app/sw.ts 的 fallbacks 用 matchPrecache('/offline') 取兜底页——它只会从
+  // **预缓存**里找。而 __SW_MANIFEST 默认只收 _next/static 与 public/ 下的
+  // 文件，不收页面 HTML（构建出的 sw.js 里只有 /offline 的 JS chunk，没有
+  // /offline 本身）。不显式加进来，离线时导航请求的兜底永远落空，用户看到
+  // 的是浏览器自己的断网页。revision 每次部署换一个，保证文案改了会重新缓存。
+  additionalPrecacheEntries: [
+    { url: '/offline', revision: process.env.VERCEL_GIT_COMMIT_SHA ?? crypto.randomUUID() },
+  ],
+  // @serwist/next 默认 reloadOnOnline: true——网络一恢复就 location.reload()。
+  // 这会把用户离线时填到一半的表单整页清掉，并且打断 OfflineBanner 在同一个
+  // 'online' 事件里正在跑的离线队列补发（components/shell/offline-banner.tsx）。
+  // 恢复联网后的处理交给那个组件，这里不要整页刷新。
+  reloadOnOnline: false,
   // 开发时关掉，避免缓存干扰调试
   disable: process.env.NODE_ENV === 'development',
 });

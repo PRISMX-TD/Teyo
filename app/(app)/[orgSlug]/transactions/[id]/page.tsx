@@ -2,9 +2,15 @@ import Link from 'next/link';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { requirePermission } from '@/server/auth/guard';
+import { canEditTransaction } from '@/server/domain/permissions';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { getTransactionDetail, TransactionNotFoundError } from '@/server/repositories/transactions';
+import {
+  findTransactionSource,
+  getTransactionDetail,
+  TransactionNotFoundError,
+  type TransactionSource,
+} from '@/server/repositories/transactions';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
 import { listSelectableCategories, type CategoryRow } from '@/server/repositories/categories';
 import { listAttachments } from '@/server/repositories/attachments';
@@ -32,9 +38,10 @@ export default async function TransactionDetailPage({
   let expenseCategories: CategoryRow[];
   let attachments: Awaited<ReturnType<typeof listAttachments>>;
   let allProjects: Awaited<ReturnType<typeof listProjects>>;
+  let source: TransactionSource | null;
 
   try {
-    [row, accounts, incomeCategories, expenseCategories, attachments, allProjects] =
+    [row, accounts, incomeCategories, expenseCategories, attachments, allProjects, source] =
       await withTransaction(context.userId, async (tx) =>
         Promise.all([
           getTransactionDetail(tx, context.organizationId, id),
@@ -43,6 +50,7 @@ export default async function TransactionDetailPage({
           listSelectableCategories(tx, context.organizationId, 'expense'),
           listAttachments(tx, context.organizationId, id),
           listProjects(tx, context.organizationId),
+          findTransactionSource(tx, context.organizationId, id),
         ]),
       );
   } catch (e) {
@@ -57,6 +65,10 @@ export default async function TransactionDetailPage({
   }
 
   const isVoided = !!row.voidedAt;
+  // 与 updateTransaction / voidTransaction 里的授权是同一条判断。界面上不先判，
+  // viewer（以及看别人记录的 bookkeeper）会拿到一张可编辑的表单和一个作废
+  // 按钮，填完点下去才被服务端拒掉。
+  const canEdit = canEditTransaction(context.role, row.createdBy === context.userId);
   const attachmentItems = attachments.map((at) => ({
     id: at.id,
     fileName: at.fileName,
@@ -64,8 +76,48 @@ export default async function TransactionDetailPage({
     sizeBytes: at.sizeBytes,
   }));
 
-  if (isVoided) {
-    // 已作废的交易：只读展示，不可编辑
+  if (source && !isVoided) {
+    // 单据生成的分录：只读，不给作废按钮也不给编辑表单。改动它必须回到单据
+    // 那一侧（作废发票、撤销年结……），否则单据还停在「已开具 / 已付款」，
+    // 明细账与总账从此对不上。updateTransaction / voidTransaction 对这类
+    // 分录同样会拒（assertNotDocumentGenerated），这里不渲染是为了不让用户
+    // 填完点下去才被拒。
+    //
+    // 这类分录常常不止两行（带税的发票是三行），所以逐行列出，而不是像下面
+    // 凭证分支那样只取第一条借方与第一条贷方。
+    return (
+      <Layout orgSlug={orgSlug} t={t}>
+        <h1>{t.common.viewDetails}</h1>
+        <SourceNote orgSlug={orgSlug} source={source} t={t} />
+        <p className="field-hint">{t.transaction.sourceHint}</p>
+        <article className="record-detail">
+          <dl>
+            <dt>{t.transaction.date}</dt>
+            <dd className="mono">{row.occurredOn}</dd>
+            <dt>{t.transaction.amount}</dt>
+            <dd className="mono amount">{formatMoney(row.amountMinor, row.currency, locale)}</dd>
+            {row.lines.map((line, index) => (
+              <LineEntry key={index} line={line} currency={row.currency} locale={locale} t={t} />
+            ))}
+            <dt>{t.transaction.description}</dt>
+            <dd>{row.description || '—'}</dd>
+            <dt>{t.transaction.createdBy}</dt>
+            <dd>{row.createdByName}</dd>
+          </dl>
+        </article>
+        <AttachmentPanel
+          orgSlug={orgSlug}
+          transactionId={row.id}
+          attachments={attachmentItems}
+          t={t}
+          readOnly={!canEdit}
+        />
+      </Layout>
+    );
+  }
+
+  if (isVoided || (!canEdit && row.kind !== 'journal' && row.kind !== 'closing')) {
+    // 已作废的交易、或者这个人无权改的收支/转账：只读展示，不可编辑
     const kindLabel =
       row.kind === 'income'
         ? t.transaction.income
@@ -79,9 +131,11 @@ export default async function TransactionDetailPage({
 
     return (
       <Layout orgSlug={orgSlug} t={t}>
-        <article className="record-detail voided">
-          <h1>{t.transaction.voided}</h1>
-          {row.voidReason ? <p className="form-error">{row.voidReason}</p> : null}
+        <article className={isVoided ? 'record-detail voided' : 'record-detail'}>
+          <h1>{isVoided ? t.transaction.voided : t.common.viewDetails}</h1>
+          {isVoided && row.voidReason ? <p className="form-error">{row.voidReason}</p> : null}
+          {source ? <SourceNote orgSlug={orgSlug} source={source} t={t} /> : null}
+          {!isVoided ? <p className="field-hint">{t.common.noEditPermission}</p> : null}
           <dl>
             <dt>{t.transaction.kind}</dt>
             <dd>{kindLabel}</dd>
@@ -94,9 +148,19 @@ export default async function TransactionDetailPage({
             <dt>{t.transaction.description}</dt>
             <dd>{row.description || '\u2014'}</dd>
             <dt>{t.transaction.createdBy}</dt>
-            <dd>{row.createdBy}</dd>
+            {/* 原来这里渲染的是 created_by 的 uuid。 */}
+            <dd>{row.createdByName}</dd>
           </dl>
         </article>
+        {!isVoided ? (
+          <AttachmentPanel
+            orgSlug={orgSlug}
+            transactionId={row.id}
+            attachments={attachmentItems}
+            t={t}
+            readOnly
+          />
+        ) : null}
       </Layout>
     );
   }
@@ -114,15 +178,20 @@ export default async function TransactionDetailPage({
     // 两边不会各说各的。updateTransaction 对它也会明确抛错。
     const debitLine = row.lines.find((line) => line.direction === 'debit');
     const creditLine = row.lines.find((line) => line.direction === 'credit');
+    // 只有挂在悬置科目上的才是「不确定」队列里的那种（与 server/repositories/
+    // uncertain.ts 的定义一致）。从记账凭证页录的普通凭证、年结分录原来也一律
+    // 顶着「需要你决定」的标题和那段「作废后重录」的说明。
+    const isSuspense = row.lines.some((line) => line.accountCode === 'suspense');
+    const isClosing = row.kind === 'closing';
 
     return (
       <Layout orgSlug={orgSlug} t={t}>
-        <h1>{t.uncertain.title}</h1>
-        <p className="uncertain-explain">{t.uncertain.explain}</p>
+        <h1>{isSuspense ? t.uncertain.title : isClosing ? t.yearEnd.closingEntry : t.journal.newTitle}</h1>
+        {isSuspense ? <p className="uncertain-explain">{t.uncertain.explain}</p> : null}
         <article className="record-detail">
           <dl>
             <dt>{t.transaction.kind}</dt>
-            <dd>{t.transaction.journal}</dd>
+            <dd>{isClosing ? t.yearEnd.closingEntry : t.transaction.journal}</dd>
             <dt>{t.transaction.date}</dt>
             <dd className="mono">{row.occurredOn}</dd>
             <dt>{t.transaction.amount}</dt>
@@ -151,12 +220,16 @@ export default async function TransactionDetailPage({
             <dd>{row.createdByName}</dd>
           </dl>
         </article>
-        <VoidButton orgSlug={orgSlug} transactionId={row.id} t={t} />
+        {/* 年结分录不能单独作废（voidTransaction 会拒），撤销走年结页。 */}
+        {canEdit && !isClosing ? (
+          <VoidButton orgSlug={orgSlug} transactionId={row.id} t={t} />
+        ) : null}
         <AttachmentPanel
           orgSlug={orgSlug}
           transactionId={row.id}
           attachments={attachmentItems}
           t={t}
+          readOnly={!canEdit}
         />
       </Layout>
     );
@@ -252,6 +325,87 @@ export default async function TransactionDetailPage({
         attachments={attachmentItems}
       />
     </Layout>
+  );
+}
+
+/** 单据详情页的路由。收付款没有详情页，只能落到列表。 */
+function sourceHref(orgSlug: string, source: TransactionSource): string {
+  switch (source.type) {
+    case 'invoice':
+      return `/${orgSlug}/invoices/${source.id}`;
+    case 'bill':
+      return `/${orgSlug}/bills/${source.id}`;
+    case 'credit_note':
+      return `/${orgSlug}/credit-notes/${source.id}`;
+    case 'payment':
+      return `/${orgSlug}/payments`;
+    case 'depreciation':
+    case 'asset_disposal':
+      // findTransactionSource 对这两种给的就是资产 id，不是折旧计划那一行。
+      return `/${orgSlug}/fixed-assets/${source.id}`;
+    case 'year_end':
+      return `/${orgSlug}/settings/year-end`;
+  }
+}
+
+function sourceTypeLabel(t: ReturnType<typeof getMessages>, type: TransactionSource['type']): string {
+  switch (type) {
+    case 'invoice':
+      return t.transaction.sourceInvoice;
+    case 'bill':
+      return t.transaction.sourceBill;
+    case 'credit_note':
+      return t.transaction.sourceCreditNote;
+    case 'payment':
+      return t.transaction.sourcePayment;
+    case 'depreciation':
+      return t.transaction.sourceDepreciation;
+    case 'year_end':
+      return t.transaction.sourceYearEnd;
+    case 'asset_disposal':
+      return t.transaction.sourceAssetDisposal;
+  }
+}
+
+function SourceNote({
+  orgSlug,
+  source,
+  t,
+}: {
+  orgSlug: string;
+  source: TransactionSource;
+  t: ReturnType<typeof getMessages>;
+}) {
+  const typeLabel = sourceTypeLabel(t, source.type);
+  return (
+    <p>
+      {t.transaction.sourceFrom}{' '}
+      <Link href={sourceHref(orgSlug, source)}>
+        {source.label ? `${typeLabel} ${source.label}` : typeLabel}
+      </Link>
+    </p>
+  );
+}
+
+function LineEntry({
+  line,
+  currency,
+  locale,
+  t,
+}: {
+  line: Awaited<ReturnType<typeof getTransactionDetail>>['lines'][number];
+  currency: string;
+  locale: 'en' | 'zh';
+  t: ReturnType<typeof getMessages>;
+}) {
+  return (
+    <>
+      <dt>{line.direction === 'debit' ? t.reports.debit : t.reports.credit}</dt>
+      <dd>
+        {localizedName({ name_en: line.accountNameEn, name_zh: line.accountNameZh }, locale)}{' '}
+        <span className="mono">{formatMoney(line.amountMinor, currency, locale)}</span>
+      </dd>
+    </>
   );
 }
 

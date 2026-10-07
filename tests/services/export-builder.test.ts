@@ -147,6 +147,14 @@ describe('buildCsv', () => {
     expect(text).toContain("'-y");
     expect(text).toContain("'@z");
   });
+
+  // 负数净额（科目汇总里科目落在自然方向反面）不是公式，不能被加单引号变成文本。
+  it('leaves plain negative numbers untouched', () => {
+    const text = buildCsv(['a'], [['-1200.50'], ['-3']]).toString('utf8');
+    expect(text).toContain('\n-1200.50');
+    expect(text).not.toContain("'-1200.50");
+    expect(text).not.toContain("'-3");
+  });
 });
 
 describe('buildXlsx', () => {

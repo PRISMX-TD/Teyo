@@ -5,13 +5,17 @@ import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import type { PurchaseOrderRow } from '@/server/repositories/purchase_orders';
-import { setPoStatusAction } from '@/server/actions/purchase_orders';
+import type { PurchaseOrderRow } from '@/server/repositories/purchase-orders';
+import { setPoStatusAction } from '@/server/actions/purchase-orders';
 
 type Props = {
   orgSlug: string;
   locale: Locale;
   purchaseOrders: PurchaseOrderRow[];
+  /** 公司本位币。合计这一列读的是 base_total_minor，它是本位币。 */
+  baseCurrency: string;
+  /** setPoStatusAction 要 transaction:edit:any；没有的人不画那排必然失败的按钮。 */
+  canChangeStatus: boolean;
 };
 
 const STATUS_CLASS: Record<string, string> = {
@@ -32,7 +36,7 @@ const NEXT_STATUS: Record<string, string[]> = {
   voided: [],
 };
 
-export function PoList({ orgSlug, locale, purchaseOrders: initialPos }: Props) {
+export function PoList({ orgSlug, locale, purchaseOrders: initialPos, baseCurrency, canChangeStatus }: Props) {
   const t = getMessages(locale);
   const [pos, setPos] = useState(initialPos);
   const [pending, setPending] = useState(false);
@@ -88,7 +92,7 @@ export function PoList({ orgSlug, locale, purchaseOrders: initialPos }: Props) {
         </thead>
         <tbody>
           {pos.map((po) => {
-            const next = NEXT_STATUS[po.status] ?? [];
+            const next = canChangeStatus ? (NEXT_STATUS[po.status] ?? []) : [];
             return (
               <tr key={po.id} className={po.status === 'voided' ? 'row-voided' : undefined}>
                 <td>
@@ -103,8 +107,11 @@ export function PoList({ orgSlug, locale, purchaseOrders: initialPos }: Props) {
                 <td>{po.contactName ?? '-'}</td>
                 <td>{po.issueDate}</td>
                 <td>{po.expectedDate ?? '-'}</td>
+                {/* base_total_minor 是本位币（见 server/actions/purchase-orders.ts
+                    的 totalsFor）。原来按单据币种格式化：一张 USD 1,000 的
+                    采购单在 MYR 公司里显示成 US$ 4,350。 */}
                 <td className="numeric money-out">
-                  {formatMoney(po.baseTotalMinor, po.currency)}
+                  {formatMoney(po.baseTotalMinor, baseCurrency, locale)}
                 </td>
                 <td>
                   <span className={STATUS_CLASS[po.status] ?? 'badge'}>

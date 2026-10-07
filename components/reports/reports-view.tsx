@@ -385,10 +385,18 @@ function CashFlowTable({
     invChange: t.reports.invChange,
     deferredRevChange: t.reports.deferredRevChange,
     prepaidChange: t.reports.prepaidChange,
+    // 这四行 getCashFlow 一直在产出，这里却没有文案，界面上直接露出
+    // 'taxPayableChange' 这样的内部键名。
+    taxPayableChange: t.reports.taxPayableChange,
+    taxReceivableChange: t.reports.taxReceivableChange,
+    customerDepositsChange: t.reports.customerDepositsChange,
+    supplierDepositsChange: t.reports.supplierDepositsChange,
+    // 投资段的 label 是科目 code（见 getCashFlow 的 netFlowByCategory），
+    // 种子里软件科目的 code 是 'software-intangible'，不是驼峰。
     equipment: t.reports.equipment_cf,
     furniture: t.reports.furniture_cf,
     vehicles: t.reports.vehicles_cf,
-    softwareIntangible: t.reports.softwareIntangible_cf,
+    'software-intangible': t.reports.softwareIntangible_cf,
     capital: t.reports.capital_cf,
     loans: t.reports.loans_cf,
     ownersDraw: t.reports.ownersDraw_cf,
@@ -824,11 +832,12 @@ function StatementTab({
           {t.reports.to}
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
-        <button onClick={fetchStatement} disabled={!contactId || loading}>
+        <button onClick={fetchStatement} disabled={!contactId || loading || from > to}>
           {loading ? t.common.loading : title}
         </button>
       </div>
 
+      {from > to && <p className="hint">{t.reports.rangeBackwards}</p>}
       {error && <p className="error-message">{error}</p>}
 
       {/*

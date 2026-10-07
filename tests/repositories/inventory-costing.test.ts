@@ -24,7 +24,7 @@ vi.mock('@/server/auth/session', () => ({
 
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
-const { createInventoryItem, recordInventoryTxnAction } = await import(
+const { createInventoryItem, recordInventoryTxnAction, toggleInventoryItemActive } = await import(
   '@/server/actions/inventory'
 );
 
@@ -298,6 +298,46 @@ describe('加权平均成本：小数数量不再被四舍五入', () => {
     expect(valued?.quantityScaled).toBe(5000n);
     // 0.5 × 10.00 = 5.00。旧写法 avgCost * BigInt(Math.round(0.5)) 给 1000（10.00）。
     expect(valued?.totalValueMinor).toBe(500n);
+  });
+
+  it('出库数量超过在库数量被拒，一行都不写', async () => {
+    const itemId = await newItem(`oversell-${suffix}`);
+    await record({
+      inventoryItemId: itemId,
+      type: 'purchase',
+      quantityScaled: parseQuantityToScaled('2'),
+      unitCostMinor: 100n,
+      createdBy: ownerId,
+    });
+
+    await expect(
+      record({
+        inventoryItemId: itemId,
+        type: 'sale',
+        quantityScaled: parseQuantityToScaled('2.5'),
+        unitCostMinor: 0n,
+        createdBy: ownerId,
+      }),
+    ).rejects.toThrow(/in stock/i);
+
+    expect(Number((await itemRow(itemId)).current_quantity)).toBe(2);
+    expect(await txnRows(itemId)).toHaveLength(1);
+  });
+
+  it('停用但仍有在库数量的物料仍然计入估值', async () => {
+    const itemId = await newItem(`inactive-val-${suffix}`);
+    await record({
+      inventoryItemId: itemId,
+      type: 'purchase',
+      quantityScaled: parseQuantityToScaled('3'),
+      unitCostMinor: 200n,
+      createdBy: ownerId,
+    });
+    currentUserId = ownerId;
+    await toggleInventoryItemActive(org.slug, itemId, false);
+
+    const rows = await withTransaction(ownerId, (tx) => getInventoryValuation(tx, org.id));
+    expect(rows.find((r) => r.itemId === itemId)?.totalValueMinor).toBe(600n);
   });
 
   it('负数量被当场拒绝', async () => {

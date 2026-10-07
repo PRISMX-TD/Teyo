@@ -17,7 +17,7 @@ vi.mock('@/server/auth/session', () => ({
 vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
 const { createFixedAsset, postDepreciationAction, updateFixedAssetAction } = await import(
-  '@/server/actions/fixed_assets'
+  '@/server/actions/fixed-assets'
 );
 
 const suffix = randomUUID().slice(0, 8);

@@ -37,6 +37,12 @@ export type BillListRow = {
   transactionId: string | null;
   voidedAt: string | null;
   createdAt: string;
+  /**
+   * 这张账单是从哪张采购单转来的（0031）。手工录的账单为 null。
+   * 采购单号一并带出，详情页上「来自 PO-00012」要说得出是哪一张。
+   */
+  purchaseOrderId: string | null;
+  purchaseOrderNumber: string | null;
 };
 
 export type BillDetail = BillListRow & {
@@ -75,6 +81,12 @@ export type NewBillRow = {
    */
   taxRateId: string | null;
   notes: string | null;
+  /**
+   * 来源采购单（0031）。归属、状态、供应商与币种由 server/actions/bills.ts
+   * 的 assertPurchaseOrderBillable 校验——与 tax_rate_id 同理，外键不保证
+   * 那张采购单属于本公司。
+   */
+  purchaseOrderId?: string | null;
 };
 
 export type NewBillItemRow = {
@@ -123,6 +135,8 @@ function mapListRow(row: Record<string, unknown>): BillListRow {
     transactionId: (row.transaction_id as string | null) ?? null,
     voidedAt: row.voided_at ? (row.voided_at as Date).toISOString() : null,
     createdAt: (row.created_at as Date).toISOString(),
+    purchaseOrderId: (row.purchase_order_id as string | null) ?? null,
+    purchaseOrderNumber: (row.purchase_order_number as string | null) ?? null,
   };
 }
 
@@ -136,9 +150,12 @@ export async function listBills(
       b.currency, b.subtotal_minor, b.tax_rate_bps, b.tax_minor, b.tax_rate_id,
       b.total_minor, b.notes, b.contact_id,
       b.transaction_id, b.voided_at, b.created_at,
+      b.purchase_order_id, po.po_number as purchase_order_number,
       c.name as contact_name
     from bills b
     join contacts c on c.id = b.contact_id
+    left join purchase_orders po
+      on po.id = b.purchase_order_id and po.organization_id = b.organization_id
     where b.organization_id = ${organizationId}
     order by b.created_at desc
   `;
@@ -157,9 +174,12 @@ export async function getBill(
       b.currency, b.subtotal_minor, b.tax_rate_bps, b.tax_minor, b.tax_rate_id,
       b.total_minor, b.notes, b.contact_id,
       b.transaction_id, b.voided_at, b.created_at,
+      b.purchase_order_id, po.po_number as purchase_order_number,
       c.name as contact_name
     from bills b
     join contacts c on c.id = b.contact_id
+    left join purchase_orders po
+      on po.id = b.purchase_order_id and po.organization_id = b.organization_id
     where b.id = ${id} and b.organization_id = ${organizationId}
   `;
 
@@ -170,7 +190,7 @@ export async function getBill(
     select id, bill_id, description, amount_minor
     from bill_items
     where bill_id = ${id}
-    order by id
+    order by position nulls last, id
   `;
 
   return {
@@ -192,7 +212,8 @@ export async function insertBill(
     insert into bills (
       organization_id, contact_id, bill_number, status,
       issue_date, due_date, currency, subtotal_minor,
-      tax_rate_bps, tax_minor, total_minor, tax_rate_id, notes
+      tax_rate_bps, tax_minor, total_minor, tax_rate_id, notes,
+      purchase_order_id
     )
     values (
       ${row.organizationId},
@@ -207,7 +228,8 @@ export async function insertBill(
       ${row.taxMinor.toString()},
       ${row.totalMinor.toString()},
       ${row.taxRateId},
-      ${row.notes}
+      ${row.notes},
+      ${row.purchaseOrderId ?? null}
     )
     returning id
   `;
@@ -222,14 +244,17 @@ export async function insertBillItems(
 
   await tx`
     insert into bill_items ${tx(
-      items.map((item) => ({
+      // position = 提交顺序的下标，理由见 invoices.ts 的 insertInvoiceItems。
+      items.map((item, index) => ({
         bill_id: item.billId,
         description: item.description,
         amount_minor: item.amountMinor.toString(),
+        position: index,
       })),
       'bill_id',
       'description',
       'amount_minor',
+      'position',
     )}
   `;
 }
@@ -340,4 +365,31 @@ export async function getNextBillNumber(
 
   const next = BigInt(rows[0].last as string) + 1n;
   return `BILL-${next.toString().padStart(5, '0')}`;
+}
+
+/**
+ * 某张采购单名下仍然有效（未作废）的那张账单。
+ *
+ * 「这张采购单已经转过账单了」只认未作废的账单：转出来的账单被作废之后，
+ * 采购单要能再转一次（见 server/actions/bills.ts 的 voidBill）。作废的那张
+ * 保留 purchase_order_id 不清——它确实是从这张采购单转出来的，审计上要查得到。
+ */
+export async function findActiveBillForPurchaseOrder(
+  tx: Tx,
+  organizationId: string,
+  purchaseOrderId: string,
+): Promise<{ id: string; billNumber: string | null } | null> {
+  const rows = await tx`
+    select id, bill_number
+    from bills
+    where organization_id = ${organizationId}
+      and purchase_order_id = ${purchaseOrderId}
+      and voided_at is null
+      and status <> 'voided'
+    order by created_at desc
+    limit 1
+  `;
+  const row = rows.at(0);
+  if (!row) return null;
+  return { id: row.id as string, billNumber: (row.bill_number as string | null) ?? null };
 }

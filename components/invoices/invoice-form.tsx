@@ -31,6 +31,11 @@ type Props = {
   baseCurrency: string;
   /** 有值即编辑模式。null/undefined 是新建。 */
   invoice?: InvoiceDetail | null;
+  /**
+   * 只读：这个角色改不了（updateInvoice 要 transaction:edit:any），或者
+   * 发票已经收讫。画一张填得动却必然保存失败的表单，等于让用户白填一遍。
+   */
+  readOnly?: boolean;
 };
 
 type LineItem = {
@@ -72,6 +77,7 @@ export function InvoiceForm({
   currencies,
   baseCurrency,
   invoice = null,
+  readOnly = false,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
@@ -186,6 +192,9 @@ export function InvoiceForm({
       {lifecycle}
 
       <form onSubmit={handleSubmit} className="transaction-form">
+        {/* display: contents 让这一层不参与 .transaction-form 的排版，
+            只负责把 disabled 传给里面每一个控件。 */}
+        <fieldset disabled={readOnly} style={{ display: 'contents' }}>
         <label htmlFor="contactId">{t.invoices.customer}</label>
         <select
           id="contactId"
@@ -325,11 +334,15 @@ export function InvoiceForm({
           </p>
         ) : null}
 
-        <div className="form-actions">
-          <button type="submit" disabled={pending}>
-            {pending ? t.common.loading : isEdit ? t.invoices.saveChanges : t.invoices.save}
-          </button>
-        </div>
+        </fieldset>
+
+        {readOnly ? null : (
+          <div className="form-actions">
+            <button type="submit" disabled={pending}>
+              {pending ? t.common.loading : isEdit ? t.invoices.saveChanges : t.invoices.save}
+            </button>
+          </div>
+        )}
       </form>
     </>
   );

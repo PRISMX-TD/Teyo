@@ -142,7 +142,7 @@ async function insertBalanced(
  * 测试用的年结分录写入口。
  *
  * 生产代码里这一步该走 postJournal，但记账边界现在还表达不了 kind =
- * 'closing' 的 n 行分录（见 server/actions/year_end.ts 上 postClosingEntry
+ * 'closing' 的 n 行分录（见 server/actions/year-end.ts 上 postClosingEntry
  * 的注释）。这里用被测事务自己的 tx 直接插——**不是** admin 连接：走 tx
  * 意味着这几行同样要过 RLS（owner 身份）与 journal_lines 的延迟配平触发器，
  * 于是「年结分录真的能落库、真的配平」这件事仍然被测到，只有「谁来写」

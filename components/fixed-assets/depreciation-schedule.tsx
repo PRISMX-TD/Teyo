@@ -3,8 +3,8 @@
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { formatMoney, toIsoDate } from '@/lib/format';
-import { postDepreciationAction } from '@/server/actions/fixed_assets';
-import type { FixedAssetRow, DepreciationScheduleRow } from '@/server/repositories/fixed_assets';
+import { postDepreciationAction } from '@/server/actions/fixed-assets';
+import type { FixedAssetRow, DepreciationScheduleRow } from '@/server/repositories/fixed-assets';
 
 type Props = {
   orgSlug: string;
@@ -46,7 +46,8 @@ export function DepreciationSchedule({ orgSlug, baseCurrency, asset, schedules, 
         <p>{t.fixedAssets.purchaseDate}: {toIsoDate(asset.purchaseDate)}</p>
         <p>{t.fixedAssets.cost}: {formatMoney(asset.costMinor, baseCurrency, locale)}</p>
         <p>{t.fixedAssets.salvageValue}: {formatMoney(asset.salvageValueMinor, baseCurrency, locale)}</p>
-        <p>{t.fixedAssets.usefulLife}: {asset.usefulLifeMonths} months</p>
+        {/* 标签里已经写着「（月）」，原来再拼一个写死的英文 months。 */}
+        <p>{t.fixedAssets.usefulLife}: {asset.usefulLifeMonths}</p>
         <p>{t.fixedAssets.method}: {methodLabel(asset.method)}</p>
       </div>
 
@@ -83,7 +84,9 @@ export function DepreciationSchedule({ orgSlug, baseCurrency, asset, schedules, 
                   )}
                 </td>
                 <td>
-                  {!row.isPosted ? (
+                  {/* 金额为零的期间（年限缩短后被清零的那些）与已处置资产的
+                      期间，服务端一定会拒，不画按钮。 */}
+                  {!row.isPosted && row.depreciationMinor > 0n && asset.isActive ? (
                     <button
                       onClick={() => handlePost(row.period)}
                       disabled={pending}

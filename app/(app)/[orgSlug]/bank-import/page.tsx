@@ -5,7 +5,7 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
-import { listImportedTransactions } from '@/server/repositories/bank_import';
+import { listImportedTransactions } from '@/server/repositories/bank-import';
 import { listSelectableCategories } from '@/server/repositories/categories';
 import { listTransactions } from '@/server/repositories/transactions';
 import type { TransactionListRow } from '@/server/repositories/transactions';

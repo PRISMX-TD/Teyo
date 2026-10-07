@@ -91,6 +91,7 @@ export default async function GeneralSettingsPage({
               action={async () => {
                 'use server';
                 await updatePeriodLock(orgSlug, { lockedUntil: null });
+                redirect(`/${orgSlug}/settings/general?saved=lock`);
               }}
             >
               <button type="submit" className="btn-danger">
@@ -117,17 +118,22 @@ export default async function GeneralSettingsPage({
           }}
         >
           <label htmlFor="name">{t.settings.name}</label>
-          <input id="name" name="name" required defaultValue={settings.name} />
+          <input id="name" name="name" required maxLength={120} defaultValue={settings.name} />
 
           <label htmlFor="timezone">{t.onboarding.timezone}</label>
           <select id="timezone" name="timezone" defaultValue={settings.timezone}>
             <option value="Asia/Kuala_Lumpur">Asia/Kuala Lumpur (GMT+8)</option>
             <option value="Asia/Singapore">Asia/Singapore (GMT+8)</option>
             <option value="Asia/Shanghai">Asia/Shanghai (GMT+8)</option>
+            {/* 库里的时区不在上面三个里时（比如回退值 UTC），不补这一项的话
+                下拉会显示第一项，一保存就把时区静默改成吉隆坡。 */}
+            {['Asia/Kuala_Lumpur', 'Asia/Singapore', 'Asia/Shanghai'].includes(settings.timezone) ? null : (
+              <option value={settings.timezone}>{settings.timezone}</option>
+            )}
           </select>
 
           <label htmlFor="industry">{t.onboarding.industry}</label>
-          <input id="industry" name="industry" defaultValue={settings.industry ?? ''} />
+          <input id="industry" name="industry" maxLength={60} defaultValue={settings.industry ?? ''} />
 
           {/*
             开票方地址。发票单据（invoices/[id]/print）会把它印在公司名下面——

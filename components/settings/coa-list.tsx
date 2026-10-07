@@ -82,6 +82,21 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
     }
   }
 
+  // 停用/恢复原来直接调 toggleAction，没有 await 也没有 catch：停用最后
+  // 一个资金账户时 Action 抛的那句「先加一个再停用」变成一个未处理的
+  // Promise 拒绝，界面上什么都不发生。
+  async function handleToggle(id: string, nextActive: boolean) {
+    setPending(true);
+    setError(null);
+    try {
+      await toggleAction(orgSlug, id, nextActive);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
   const active = items.filter((a) => a.isActive);
   const inactive = items.filter((a) => !a.isActive);
 
@@ -126,7 +141,7 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
                     >
                       {t.settings.rename}
                     </button>
-                    <button onClick={() => toggleAction(orgSlug, item.id, !item.isActive)}>
+                    <button onClick={() => handleToggle(item.id, !item.isActive)} disabled={pending}>
                       {item.isActive ? t.settings.deactivate : t.settings.reactivate}
                     </button>
                   </div>
@@ -146,7 +161,7 @@ export function CoAList({ orgSlug, items, locale, createAction, renameAction, to
                 <span className="coa-code">{item.code}</span>
                 <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</span>
                 <span className="badge">{t.settings.inactive}</span>
-                <button onClick={() => toggleAction(orgSlug, item.id, true)}>
+                <button onClick={() => handleToggle(item.id, true)} disabled={pending}>
                   {t.settings.reactivate}
                 </button>
               </div>

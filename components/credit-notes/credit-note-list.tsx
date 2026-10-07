@@ -4,13 +4,15 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
+import { interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import type { CreditNoteListRow } from '@/server/repositories/credit_notes';
+import type { CreditNoteListRow } from '@/server/repositories/credit-notes';
 import {
   issueCreditNote,
   applyCreditNote,
   voidCreditNote,
-} from '@/server/actions/credit_notes';
+} from '@/server/actions/credit-notes';
+import { DocumentVoidDialog } from '@/components/invoices/document-void-dialog';
 
 type Props = {
   orgSlug: string;
@@ -19,6 +21,8 @@ type Props = {
   baseCurrency: string;
   i18n: Messages;
   creditNotes: CreditNoteListRow[];
+  /** 签发 / 抵扣 / 作废都要 transaction:create。viewer 不画这些按钮。 */
+  canWrite: boolean;
 };
 
 const STATUS_CLASS: Record<string, string> = {
@@ -28,10 +32,21 @@ const STATUS_CLASS: Record<string, string> = {
   voided: 'badge badge-voided',
 };
 
-export function CreditNoteList({ orgSlug, locale, baseCurrency, i18n, creditNotes }: Props) {
+export function CreditNoteList({
+  orgSlug,
+  locale,
+  baseCurrency,
+  i18n,
+  creditNotes,
+  canWrite,
+}: Props) {
   const router = useRouter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // 作废原来是点一下就生效：不可逆、不问一句、也不留理由。与发票一样走
+  // DocumentVoidDialog，理由跟着分录一起留下。
+  const [voidTarget, setVoidTarget] = useState<CreditNoteListRow | null>(null);
+  const [voidError, setVoidError] = useState<string | null>(null);
 
   if (creditNotes.length === 0) {
     return <p className="empty-state">{i18n.creditNotes.empty}</p>;
@@ -44,19 +59,34 @@ export function CreditNoteList({ orgSlug, locale, baseCurrency, i18n, creditNote
     voided: i18n.creditNotes.statusVoided,
   };
 
-  async function handleAction(id: string, action: 'issue' | 'apply' | 'void') {
+  async function handleAction(id: string, action: 'issue' | 'apply') {
     setPendingId(id);
     setError(null);
     try {
       if (action === 'issue') await issueCreditNote(orgSlug, id);
-      else if (action === 'apply') await applyCreditNote(orgSlug, id);
-      else if (action === 'void') await voidCreditNote(orgSlug, id);
+      else await applyCreditNote(orgSlug, id);
       router.refresh();
     } catch (e) {
       // 原来这里是 `catch { /* ignore */ }`。签发一张贷项通知单会过账，
       // 于是期间封账、科目没配、金额为零、权限不足都会抛错——而用户看到的
       // 只是「点了没反应」，他会再点一次，然后再一次。必须说出来。
       setError((e as Error).message);
+    } finally {
+      setPendingId(null);
+    }
+  }
+
+  async function handleVoid(reason: string) {
+    const target = voidTarget;
+    if (!target) return;
+    setPendingId(target.id);
+    setVoidError(null);
+    try {
+      await voidCreditNote(orgSlug, target.id, reason);
+      setVoidTarget(null);
+      router.refresh();
+    } catch (e) {
+      setVoidError((e as Error).message);
     } finally {
       setPendingId(null);
     }
@@ -95,12 +125,20 @@ export function CreditNoteList({ orgSlug, locale, baseCurrency, i18n, creditNote
               <Link href={`/${orgSlug}/credit-notes/${cn.id}`}>{cn.cnNumber}</Link>
             </td>
             <td>{cn.contactName}</td>
-            <td>{cn.invoiceId ? `#${cn.invoiceId.slice(0, 8)}...` : '-'}</td>
+            <td>
+              {cn.invoiceId ? (
+                <Link href={`/${orgSlug}/invoices/${cn.invoiceId}`}>
+                  {cn.invoiceNumber ?? i18n.common.viewDetails}
+                </Link>
+              ) : (
+                i18n.creditNotes.standalone
+              )}
+            </td>
             <td>{cn.issueDate}</td>
             {/*
               原来是 formatMoney(cn.baseAmountMinor, cn.currency)：拿本位币的
               金额套单据自己的币种。createCreditNote 修过 base_amount_minor 之后
-              那一列装的确实是本位币（见 server/actions/credit_notes.ts 的 B2），
+              那一列装的确实是本位币（见 server/actions/credit-notes.ts 的 B2），
               于是一张 1,000 美元、汇率 4.7 的贷项通知单在马币公司的列表上会
               显示成「US$4,700.00」——币种错，而且零小数币种连数字都会差 100 倍。
             */}
@@ -113,40 +151,38 @@ export function CreditNoteList({ orgSlug, locale, baseCurrency, i18n, creditNote
               </span>
             </td>
             <td>
-              {cn.status === 'draft' ? (
+              {canWrite && cn.status !== 'voided' ? (
                 <span className="action-group">
-                  <button
-                    type="button"
-                    className="btn-small"
-                    disabled={pendingId === cn.id}
-                    onClick={() => handleAction(cn.id, 'issue')}
-                  >
-                    {i18n.creditNotes.issue}
-                  </button>
+                  {cn.status === 'draft' ? (
+                    <button
+                      type="button"
+                      className="btn-small"
+                      disabled={pendingId === cn.id}
+                      onClick={() => handleAction(cn.id, 'issue')}
+                    >
+                      {i18n.creditNotes.issue}
+                    </button>
+                  ) : null}
+                  {cn.status === 'issued' ? (
+                    <button
+                      type="button"
+                      className="btn-small"
+                      disabled={pendingId === cn.id}
+                      onClick={() => handleAction(cn.id, 'apply')}
+                    >
+                      {i18n.creditNotes.apply}
+                    </button>
+                  ) : null}
+                  {/* 已抵扣的也能作废：服务端一直允许，原来只是界面上没有入口，
+                      一张抵扣错了的贷项通知单就再也撤不回来。 */}
                   <button
                     type="button"
                     className="btn-small btn-danger"
                     disabled={pendingId === cn.id}
-                    onClick={() => handleAction(cn.id, 'void')}
-                  >
-                    {i18n.transaction.void}
-                  </button>
-                </span>
-              ) : cn.status === 'issued' ? (
-                <span className="action-group">
-                  <button
-                    type="button"
-                    className="btn-small"
-                    disabled={pendingId === cn.id}
-                    onClick={() => handleAction(cn.id, 'apply')}
-                  >
-                    {i18n.creditNotes.apply}
-                  </button>
-                  <button
-                    type="button"
-                    className="btn-small btn-danger"
-                    disabled={pendingId === cn.id}
-                    onClick={() => handleAction(cn.id, 'void')}
+                    onClick={() => {
+                      setVoidError(null);
+                      setVoidTarget(cn);
+                    }}
                   >
                     {i18n.transaction.void}
                   </button>
@@ -157,6 +193,23 @@ export function CreditNoteList({ orgSlug, locale, baseCurrency, i18n, creditNote
         ))}
       </tbody>
     </table>
+
+    <DocumentVoidDialog
+      open={voidTarget !== null}
+      title={interpolate(i18n.creditNotes.voidTitle, { number: voidTarget?.cnNumber ?? '' })}
+      reasonLabel={i18n.invoices.voidReason}
+      reasonHint={i18n.invoices.voidReasonHint}
+      requiredMessage={i18n.creditNotes.voidReasonRequired}
+      confirmLabel={i18n.creditNotes.voidConfirm}
+      cancelLabel={i18n.common.cancel}
+      pending={pendingId !== null}
+      error={voidError}
+      onCancel={() => {
+        setVoidTarget(null);
+        setVoidError(null);
+      }}
+      onConfirm={handleVoid}
+    />
     </>
   );
 }

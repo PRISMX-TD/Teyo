@@ -102,6 +102,24 @@ export function NamedList({
     }
   }
 
+  // 与 handleRename 同一个理由：停用/恢复失败时要把错误显示出来，而不是
+  // 留一个未处理的 Promise 拒绝。
+  async function handleToggle(id: string, nextActive: boolean) {
+    setPending(true);
+    setError(null);
+    try {
+      await onToggle(orgSlug, id, nextActive);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setPending(false);
+    }
+  }
+
+  // kind 原来原样拼进括号里，中文界面上显示的是「(expense)」。
+  const kindLabel = (kind: string) =>
+    kind === 'income' ? t.settings.kindIncome : kind === 'expense' ? t.settings.kindExpense : kind;
+
   return (
     <div className="named-list">
       {items.map((item) => (
@@ -125,12 +143,12 @@ export function NamedList({
             </div>
           ) : (
             <div className="list-item-line">
-              <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}{item.kind ? ` (${item.kind})` : ''}{item.extra ? ` (${item.extra})` : ''}</span>
+              <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}{item.kind ? ` (${kindLabel(item.kind)})` : ''}{item.extra ? ` (${item.extra})` : ''}</span>
               {!item.isActive ? <span className="badge">{t.settings.inactive}</span> : null}
               <button onClick={() => { setEditing(item.id); setEditEn(item.nameEn ?? ''); setEditZh(item.nameZh ?? ''); }}>
                 {t.settings.rename}
               </button>
-              <button onClick={() => onToggle(orgSlug, item.id, !item.isActive)}>
+              <button onClick={() => handleToggle(item.id, !item.isActive)} disabled={pending}>
                 {item.isActive ? t.settings.deactivate : t.settings.reactivate}
               </button>
             </div>

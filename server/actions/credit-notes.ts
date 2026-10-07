@@ -13,11 +13,17 @@ import {
   requireAccount,
   resolvePostingAccounts,
 } from '@/server/services/posting-accounts';
-import { postDocument, voidDocumentPosting } from '@/server/services/document-posting';
+import {
+  lineAmountMinor,
+  postDocument,
+  voidDocumentPosting,
+  withDocumentNumberRetry,
+} from '@/server/services/document-posting';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
   loadInvoicesForSettlement,
   refreshSettlementStatuses,
+  sumDeductedByDocument,
 } from '@/server/repositories/payments';
 import {
   creditNoteAmountsMinor,
@@ -32,7 +38,7 @@ import {
   updateCreditNote,
   type CreditNoteDetail,
   type NewCreditNoteItemRow,
-} from '@/server/repositories/credit_notes';
+} from '@/server/repositories/credit-notes';
 
 const creditNoteItemSchema = z.object({
   description: z.string().min(1),
@@ -81,7 +87,7 @@ const CREDIT_NOTE_MANUAL_RATE_ENTRY = 'available' as const;
  * B4：税额也在这里第一次真正被算出来。credit_note_items.tax_rate_id 这一列
  * 从 0009 起就在，但此前没有任何地方读过它——含税的贷项通知单少冲一截应收，
  * 而销项税也没有被冲回去。税额走整数 half-up，见
- * server/repositories/credit_notes.ts 的 creditNoteAmountsMinor。
+ * server/repositories/credit-notes.ts 的 creditNoteAmountsMinor。
  */
 export async function createCreditNote(
   orgSlug: string,
@@ -97,71 +103,81 @@ export async function createCreditNote(
 
   const items = input.items.map((item) => creditNoteItemSchema.parse(item));
 
-  const result = await withTransaction(context.userId, async (tx) => {
-    const cnNumber = await getNextCnNumber(tx, context.organizationId);
-    const currency = input.currency || context.baseCurrency;
+  // 单号是「读最大号 + 1」，并发创建会撞 credit_notes_org_number，与发票
+  // 同一个处理：整笔重来。见 withDocumentNumberRetry。
+  const result = await withDocumentNumberRetry('credit_notes_org_number', () =>
+    withTransaction(context.userId, async (tx) => {
+      const cnNumber = await getNextCnNumber(tx, context.organizationId);
+      const currency = input.currency || context.baseCurrency;
 
-    const { scaledRate } = await resolveRate(tx, {
-      currency,
-      baseCurrency: context.baseCurrency,
-      occurredOn: input.issueDate,
-      manualRate: input.exchangeRate,
-      manualRateEntry: CREDIT_NOTE_MANUAL_RATE_ENTRY,
-    });
-
-    const priced = await priceItems(tx, context, currency, items);
-
-    const baseAmountMinor = convertToBaseMinor({
-      amountMinor: priced.totals.totalMinor,
-      currency,
-      baseCurrency: context.baseCurrency,
-      scaledRate,
-    });
-
-    const { id } = await insertCreditNote(tx, {
-      organizationId: context.organizationId,
-      invoiceId: input.invoiceId ?? null,
-      contactId: input.contactId,
-      cnNumber,
-      status: 'draft',
-      issueDate: input.issueDate,
-      currency,
-      // B7：exchange_rate 是放大 10^8 的 bigint，scaledRate 正是那个表示法。
-      exchangeRate: scaledRate,
-      baseAmountMinor,
-      reason: input.reason?.trim() || null,
-      notes: input.notes?.trim() || null,
-      createdBy: context.userId,
-    });
-
-    await insertCreditNoteItems(
-      tx,
-      priced.rows.map((row) => ({ ...row, creditNoteId: id })),
-    );
-
-    await recordAudit(tx, {
-      organizationId: context.organizationId,
-      actorUserId: context.userId,
-      action: 'credit_note.created',
-      entityType: 'credit_note',
-      entityId: id,
-      after: {
-        cnNumber,
+      await assertInvoiceLink(tx, context, {
         invoiceId: input.invoiceId ?? null,
         contactId: input.contactId,
+        currency,
+      });
+
+      const { scaledRate } = await resolveRate(tx, {
+        currency,
+        baseCurrency: context.baseCurrency,
+        occurredOn: input.issueDate,
+        manualRate: input.exchangeRate,
+        manualRateEntry: CREDIT_NOTE_MANUAL_RATE_ENTRY,
+      });
+
+      const priced = await priceItems(tx, context, currency, items);
+
+      const baseAmountMinor = convertToBaseMinor({
+        amountMinor: priced.totals.totalMinor,
+        currency,
+        baseCurrency: context.baseCurrency,
+        scaledRate,
+      });
+
+      const { id } = await insertCreditNote(tx, {
+        organizationId: context.organizationId,
+        invoiceId: input.invoiceId ?? null,
+        contactId: input.contactId,
+        cnNumber,
+        status: 'draft',
         issueDate: input.issueDate,
         currency,
-        // bigint 不能直接进 JSON，统一转字符串，保持 jsonb 可查询。
-        netMinor: priced.totals.netMinor.toString(),
-        taxMinor: priced.totals.taxMinor.toString(),
-        totalMinor: priced.totals.totalMinor.toString(),
-        baseAmountMinor: baseAmountMinor.toString(),
-        exchangeRate: scaledRate.toString(),
-      },
-    });
+        // B7：exchange_rate 是放大 10^8 的 bigint，scaledRate 正是那个表示法。
+        exchangeRate: scaledRate,
+        baseAmountMinor,
+        reason: input.reason?.trim() || null,
+        notes: input.notes?.trim() || null,
+        createdBy: context.userId,
+      });
 
-    return { id };
-  });
+      await insertCreditNoteItems(
+        tx,
+        priced.rows.map((row) => ({ ...row, creditNoteId: id })),
+      );
+
+      await recordAudit(tx, {
+        organizationId: context.organizationId,
+        actorUserId: context.userId,
+        action: 'credit_note.created',
+        entityType: 'credit_note',
+        entityId: id,
+        after: {
+          cnNumber,
+          invoiceId: input.invoiceId ?? null,
+          contactId: input.contactId,
+          issueDate: input.issueDate,
+          currency,
+          // bigint 不能直接进 JSON，统一转字符串，保持 jsonb 可查询。
+          netMinor: priced.totals.netMinor.toString(),
+          taxMinor: priced.totals.taxMinor.toString(),
+          totalMinor: priced.totals.totalMinor.toString(),
+          baseAmountMinor: baseAmountMinor.toString(),
+          exchangeRate: scaledRate.toString(),
+        },
+      });
+
+      return { id };
+    }),
+  );
 
   revalidatePath(`/${orgSlug}/credit-notes`);
   return result;
@@ -206,6 +222,12 @@ export async function updateCreditNoteAction(
         'Changing the currency of a credit note requires re-entering its line amounts.',
       );
     }
+
+    await assertInvoiceLink(tx, context, {
+      invoiceId: input.invoiceId !== undefined ? input.invoiceId : existing.invoiceId,
+      contactId: input.contactId ?? existing.contactId,
+      currency,
+    });
 
     const fields: Parameters<typeof updateCreditNote>[3] = {};
 
@@ -311,6 +333,32 @@ export async function issueCreditNote(
     const totals = creditNoteAmountsMinor(creditNote.items);
     if (totals.totalMinor <= 0n) {
       throw new LedgerError('Transaction amount must be greater than zero.');
+    }
+
+    // 草稿期间那张发票可能已经被作废、收讫或换了客户——在这里再查一遍，
+    // 并且冲减额不得超过发票还欠的钱：超出的部分会把这张发票的应收冲成
+    // 负数，而账上没有任何地方能把它退给客户。
+    if (creditNote.invoiceId !== null) {
+      await assertInvoiceLink(tx, context, {
+        invoiceId: creditNote.invoiceId,
+        contactId: creditNote.contactId,
+        currency: creditNote.currency,
+      });
+      const invoice = (
+        await loadInvoicesForSettlement(tx, context.organizationId, [creditNote.invoiceId])
+      ).get(creditNote.invoiceId);
+      const deducted =
+        (
+          await sumDeductedByDocument(tx, context.organizationId, 'invoice', [
+            creditNote.invoiceId,
+          ])
+        ).get(creditNote.invoiceId) ?? 0n;
+      if (invoice && totals.totalMinor > invoice.totalMinor - deducted) {
+        throw new LedgerError(
+          `Credit note ${creditNote.cnNumber} is for more than invoice ${invoice.number} still owes. ` +
+            'Reduce the amount, or raise it as a standalone credit note.',
+        );
+      }
     }
 
     const accounts = await resolvePostingAccounts(tx, context.organizationId, [
@@ -428,6 +476,7 @@ export async function applyCreditNote(
 export async function voidCreditNote(
   orgSlug: string,
   id: string,
+  reason?: string,
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'transaction:create');
 
@@ -443,7 +492,9 @@ export async function voidCreditNote(
       // 等于改动已经出过报表的那个月。
       await voidDocumentPosting(tx, context, {
         transactionId: creditNote.transactionId,
-        reason: `Credit note ${creditNote.cnNumber} voided`,
+        // 界面上的作废对话框要求写理由，它跟着分录一起留下；没给（旧调用方）
+        // 时退回一句固定的说明——transactions 的 CHECK 要求理由非空白。
+        reason: reason?.trim() || `Credit note ${creditNote.cnNumber} voided`,
       });
     }
 
@@ -468,8 +519,8 @@ export async function voidCreditNote(
 /**
  * 明细定价：数量 × 单价，再按行取税率。
  *
- * 数量是 numeric(12,4)，用「整数部分 × 10^4 + 小数部分」的大整数乘法算，
- * 全程不经浮点——这一段沿用既有写法，它本来就是对的。
+ * 数量是 numeric(12,4)，金额由 lineAmountMinor 算（整数 half-up，与发票同一个
+ * 实现），全程不经浮点。
  *
  * 税率从库里查，而不是信任入参带来的任何数字：tax_rate_id 的外键不保证那条
  * 税率属于本公司（外键不受 RLS 约束），查不到就抛错，绝不静默当成 0%——
@@ -495,9 +546,10 @@ async function priceItems(
     const quantity = item.quantity || '1';
     const unitPriceMinor = parseDecimalToMinor(item.unitPrice || '0', exponent);
 
-    const [whole, fraction = ''] = quantity.split('.');
-    const scaledQuantity = BigInt(whole) * 10000n + BigInt(fraction.padEnd(4, '0').slice(0, 4));
-    const amountMinor = (unitPriceMinor * scaledQuantity) / 10000n;
+    // 原来是手搓的「整数部分 × 10^4 + 小数部分」再向零截断：数量 '1.5' 乘
+    // 单价 3.33 得 4.99 而不是 5.00，'abc' 抛的是一个看不懂的 SyntaxError。
+    // 与发票共用 lineAmountMinor（half-up，数量走 parseDecimalToMinor 校验）。
+    const amountMinor = lineAmountMinor(unitPriceMinor, quantity);
 
     const taxRateId = item.taxRateId ?? null;
     if (taxRateId !== null && !rateBpsById.has(taxRateId)) {
@@ -523,6 +575,42 @@ async function priceItems(
       priced.map((entry) => ({ amountMinor: entry.row.amountMinor, taxRateBps: entry.taxRateBps })),
     ),
   };
+}
+
+/**
+ * 贷项通知单挂的那张发票必须是本公司的、已开具未作废的、同一位客户、同一币种。
+ *
+ * 原来 invoice_id 原样入库，一样都不查：外键不保证发票属于本公司（外键不受
+ * RLS 约束）；挂在别的客户的发票上，两个人的对账单都对不上；币种不同时，
+ * refreshSettlementStatuses 会把 USD 的冲减额与 MYR 的发票总额直接相加比大小。
+ */
+async function assertInvoiceLink(
+  tx: Tx,
+  context: OrgContext,
+  args: { invoiceId: string | null; contactId: string; currency: string },
+): Promise<void> {
+  if (args.invoiceId === null) return;
+
+  const invoice = (
+    await loadInvoicesForSettlement(tx, context.organizationId, [args.invoiceId])
+  ).get(args.invoiceId);
+  if (!invoice) {
+    throw new AuthError('not_found', 'The invoice this credit note applies to was not found.');
+  }
+  if (invoice.status === 'voided' || invoice.voidedAt !== null) {
+    throw new LedgerError(`Invoice ${invoice.number} is voided; a credit note can no longer be applied to it.`);
+  }
+  if (invoice.status === 'draft') {
+    throw new LedgerError(`Invoice ${invoice.number} is still a draft. Issue it before crediting it.`);
+  }
+  if (invoice.contactId !== args.contactId) {
+    throw new LedgerError(`Invoice ${invoice.number} was issued to a different customer.`);
+  }
+  if (invoice.currency !== args.currency) {
+    throw new LedgerError(
+      `Invoice ${invoice.number} is in ${invoice.currency}; the credit note must be in the same currency.`,
+    );
+  }
 }
 
 async function requireCreditNote(

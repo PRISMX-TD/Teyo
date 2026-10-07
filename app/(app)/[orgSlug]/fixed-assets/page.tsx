@@ -5,7 +5,7 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listAllAccounts } from '@/server/repositories/accounts';
-import { listFixedAssets } from '@/server/repositories/fixed_assets';
+import { listFixedAssets } from '@/server/repositories/fixed-assets';
 
 export default async function FixedAssetsPage({
   params,

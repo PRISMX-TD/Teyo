@@ -3,19 +3,26 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { requirePermission } from '@/server/auth/guard';
-import { withTransaction } from '@/server/db/transaction';
+import { withTransaction, type Tx } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
   insertFixedAsset,
   updateFixedAsset,
-  disposeFixedAsset,
   generateDepreciationSchedule,
   getFixedAsset,
   loadDepreciationPosting,
   markDepreciationPosted,
+  loadDisposalPosting,
+  assertMoneyAccountInOrg,
+  markAssetDisposed,
+  reactivateDisposedAsset,
   type DepreciationMethod,
-} from '@/server/repositories/fixed_assets';
+} from '@/server/repositories/fixed-assets';
+import { findAccountByCode } from '@/server/repositories/accounts';
 import { postJournal } from '@/server/posting/post-journal';
+import { assetDisposalTotal } from '@/server/domain/posting-templates';
+import { LedgerError } from '@/server/domain/ledger';
+import { voidDocumentPosting } from '@/server/services/document-posting';
 import { parseRateToScaled, convertToBaseMinor } from '@/server/domain/exchange-rate';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 
@@ -72,6 +79,37 @@ function parseAmountMinor(value: string, currency: string): bigint {
   return parseDecimalToMinor(value, currencyExponent(currency));
 }
 
+/**
+ * 三个科目必须属于本公司。
+ *
+ * fixed_assets 上那三条外键只保证科目存在，不管它属于哪家公司，而 RLS 不对
+ * 外键校验生效——与 server/posting/insert.ts 的 assertAccountsBelongToOrg
+ * 是同一类洞。不在这里拦，别家公司的科目名会经详情页那三个 join 显示出来，
+ * 而第一期折旧要到过账时才被拒。
+ */
+async function assertAssetAccountsBelongToOrg(
+  tx: Tx,
+  organizationId: string,
+  accountIds: (string | undefined)[],
+): Promise<void> {
+  const ids = [...new Set(accountIds.filter((id): id is string => Boolean(id)))];
+  if (ids.length === 0) return;
+  const rows = await tx`
+    select id from accounts
+    where organization_id = ${organizationId} and id = any(${ids}::uuid[])
+  `;
+  if (rows.length !== ids.length) {
+    throw new Error('One of the selected accounts was not found in this company.');
+  }
+}
+
+/** 残值超过原值，排程里每一期都是 0——保存成功，却永远折不出一分钱。 */
+function assertSalvageWithinCost(costMinor: bigint, salvageValueMinor: bigint): void {
+  if (salvageValueMinor > costMinor) {
+    throw new Error('The salvage value cannot be more than the cost.');
+  }
+}
+
 export async function createFixedAsset(
   orgSlug: string,
   input: z.infer<typeof createFixedAssetSchema>,
@@ -116,6 +154,14 @@ export async function createFixedAsset(
       costMinor = parseAmountMinor(parsed.cost, context.baseCurrency);
     }
 
+    const salvageValueMinor = parseAmountMinor(parsed.salvageValue, context.baseCurrency);
+    assertSalvageWithinCost(costMinor, salvageValueMinor);
+    await assertAssetAccountsBelongToOrg(tx, context.organizationId, [
+      parsed.assetAccountId,
+      parsed.depnExpenseAccountId,
+      parsed.depnAccumAccountId,
+    ]);
+
     const { id } = await insertFixedAsset(tx, {
       organizationId: context.organizationId,
       name: parsed.name,
@@ -124,7 +170,7 @@ export async function createFixedAsset(
       costMinor,
       // 残值与账面原值同为本位币：表单上这一栏的标签写的就是本位币
       // （见 components/fixed-assets/asset-form.tsx），排程表也按本位币摊。
-      salvageValueMinor: parseAmountMinor(parsed.salvageValue, context.baseCurrency),
+      salvageValueMinor,
       usefulLifeMonths: parsed.usefulLifeMonths,
       method: parsed.method as DepreciationMethod,
       decliningRateBps: parsed.decliningRateBps ?? null,
@@ -179,6 +225,11 @@ export async function updateFixedAssetAction(
   const result = await withTransaction(context.userId, async (tx) => {
     const before = await getFixedAsset(tx, context.organizationId, id);
     if (!before) throw new Error('Fixed asset not found.');
+    // 处置分录按处置当时的原值与科目出的。之后再改原值或科目，详情页反推的
+    // 损益、以及撤销处置后的账面都会与那笔分录对不上。要改就先撤销处置。
+    if (!before.isActive) {
+      throw new Error('This asset has been disposed. Undo the disposal before editing it.');
+    }
 
     const updates: Parameters<typeof updateFixedAsset>[3] = {};
     if (parsed.name !== undefined) updates.name = parsed.name;
@@ -198,6 +249,16 @@ export async function updateFixedAssetAction(
     if (parsed.assetAccountId !== undefined) updates.assetAccountId = parsed.assetAccountId;
     if (parsed.depnExpenseAccountId !== undefined) updates.depnExpenseAccountId = parsed.depnExpenseAccountId;
     if (parsed.depnAccumAccountId !== undefined) updates.depnAccumAccountId = parsed.depnAccumAccountId;
+
+    assertSalvageWithinCost(
+      updates.costMinor ?? before.costMinor,
+      updates.salvageValueMinor ?? before.salvageValueMinor,
+    );
+    await assertAssetAccountsBelongToOrg(tx, context.organizationId, [
+      parsed.assetAccountId,
+      parsed.depnExpenseAccountId,
+      parsed.depnAccumAccountId,
+    ]);
 
     await updateFixedAsset(tx, context.organizationId, id, updates);
 
@@ -249,32 +310,198 @@ export async function updateFixedAssetAction(
   return result;
 }
 
+const disposeFixedAssetSchema = z.object({
+  disposalDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  /** 处置收入，本位币十进制字符串；'0' = 报废。 */
+  proceeds: z.string().min(1).default('0'),
+  /** 收款的资金账户。收入为 0 时可以不填。 */
+  moneyAccountId: z.string().uuid().nullable().optional(),
+});
+
+/** 处置损益挂的两个科目。按 code 查，缺哪个列哪个，同 resolvePostingAccounts。 */
+const DISPOSAL_GAIN_CODE = 'other-income';
+const DISPOSAL_LOSS_CODE = 'other-expenses';
+
+async function resolveDisposalAccounts(
+  tx: Tx,
+  organizationId: string,
+): Promise<{ gainAccountId: string; lossAccountId: string }> {
+  const [gain, loss] = await Promise.all([
+    findAccountByCode(tx, organizationId, DISPOSAL_GAIN_CODE),
+    findAccountByCode(tx, organizationId, DISPOSAL_LOSS_CODE),
+  ]);
+  const missing = [gain ? null : DISPOSAL_GAIN_CODE, loss ? null : DISPOSAL_LOSS_CODE].filter(
+    (code): code is string => code !== null,
+  );
+  if (!gain || !loss) {
+    throw new LedgerError(
+      `This company is missing the account(s) needed to post this document: ${missing.join(', ')}. ` +
+        'Ask an owner or admin to restore them under Settings › Chart of accounts.',
+    );
+  }
+  return { gainAccountId: gain.id, lossAccountId: loss.id };
+}
+
+/**
+ * 处置一条固定资产（出售或报废），并出一笔处置分录。
+ *
+ * 原来这里只把 is_active 置为 false：资产原值与累计折旧永远挂在资产负债表上，
+ * 处置损益也从未入账——卖掉一台机器，账上它还在，卖得的钱则没有对应的去处。
+ *
+ * 分录（全部本位币，零金额的行不出）：
+ *   借 累计折旧        截至处置日真正入了账的累计折旧
+ *   借 资金账户        处置收入（> 0 时）
+ *   借 其他费用        处置损失 = 账面净值 - 收入（> 0 时）
+ *     贷 资产科目      原值（cost_minor，本位币，见 0011 迁移）
+ *     贷 其他收入      处置收益 = 收入 - 账面净值（> 0 时）
+ * 过账后这台资产在资产科目与累计折旧科目上的净额都归零。
+ *
+ * 读 -> 记账 -> 标记，三步同一个事务；期间锁由 postJournal 检查。
+ */
 export async function disposeFixedAssetAction(
   orgSlug: string,
   id: string,
-): Promise<void> {
+  input: z.input<typeof disposeFixedAssetSchema>,
+): Promise<{ transactionId: string }> {
   const context = await requirePermission(orgSlug, 'account:manage');
+  const assetId = z.string().uuid().parse(id);
+  const parsed = disposeFixedAssetSchema.parse(input);
 
-  await withTransaction(context.userId, async (tx) => {
-    const existing = await getFixedAsset(tx, context.organizationId, id);
-    if (!existing) throw new Error('Fixed asset not found.');
-    if (!existing.isActive) throw new Error('Asset is already disposed.');
+  const proceedsMinor = parseAmountMinor(parsed.proceeds, context.baseCurrency);
+  const moneyAccountId = proceedsMinor > 0n ? parsed.moneyAccountId ?? null : null;
+  if (proceedsMinor > 0n && !moneyAccountId) {
+    throw new Error('Choose the account that received the sale proceeds.');
+  }
 
-    await disposeFixedAsset(tx, context.organizationId, id);
+  const result = await withTransaction(context.userId, async (tx) => {
+    const pending = await loadDisposalPosting(
+      tx,
+      context.organizationId,
+      assetId,
+      parsed.disposalDate,
+    );
+    if (moneyAccountId) {
+      await assertMoneyAccountInOrg(tx, context.organizationId, moneyAccountId);
+    }
+    const { gainAccountId, lossAccountId } = await resolveDisposalAccounts(
+      tx,
+      context.organizationId,
+    );
+
+    const amounts = {
+      costMinor: pending.costMinor,
+      accumulatedMinor: pending.accumulatedMinor,
+      proceedsMinor,
+    };
+
+    const { transactionId } = await postJournal(tx, context, {
+      event: {
+        type: 'asset-disposal',
+        assetAccountId: pending.assetAccountId,
+        accumAccountId: pending.depnAccumAccountId,
+        proceedsAccountId: moneyAccountId,
+        gainAccountId,
+        lossAccountId,
+        ...amounts,
+        amountMinor: assetDisposalTotal(amounts),
+      },
+      occurredOn: parsed.disposalDate,
+      description: `Disposal: ${pending.assetName}`,
+      currency: context.baseCurrency,
+      // 处置恒为本位币，resolveRate 走同币种那一支，够不到汇率报错。
+      manualRateEntry: 'unavailable',
+      categoryId: null,
+      // 幂等靠的是资产行锁加 is_active（见 loadDisposalPosting），不是它。
+      clientUuid: crypto.randomUUID(),
+      sourceType: 'fixed_asset',
+      sourceId: assetId,
+    });
+
+    await markAssetDisposed(tx, context.organizationId, assetId, {
+      transactionId,
+      proceedsMinor,
+    });
 
     await recordAudit(tx, {
       organizationId: context.organizationId,
       actorUserId: context.userId,
       action: 'fixed_asset.disposed',
       entityType: 'fixed_asset',
-      entityId: id,
+      entityId: assetId,
       before: { isActive: true },
-      after: { isActive: false },
+      after: {
+        isActive: false,
+        disposalDate: parsed.disposalDate,
+        disposalTransactionId: transactionId,
+        costMinor: pending.costMinor.toString(),
+        accumulatedMinor: pending.accumulatedMinor.toString(),
+        proceedsMinor: proceedsMinor.toString(),
+        moneyAccountId,
+      },
+    });
+
+    return { transactionId };
+  });
+
+  revalidatePath(`/${orgSlug}/fixed-assets`);
+  revalidatePath(`/${orgSlug}/fixed-assets/${assetId}`);
+  return result;
+}
+
+/**
+ * 撤销处置：作废处置分录，资产回到在用状态。
+ *
+ * 作废走 voidDocumentPosting——与作废发票、账单连带作废分录是同一条路，
+ * 期间锁检查也在那里。0031 之前的旧处置没有分录，直接恢复即可。
+ *
+ * 处置分录被作废之后，那几期因处置而不再能过账的折旧又可以过账了：
+ * loadDepreciationPosting 只看 is_active。
+ */
+export async function undoFixedAssetDisposalAction(
+  orgSlug: string,
+  id: string,
+): Promise<void> {
+  const context = await requirePermission(orgSlug, 'account:manage');
+  const assetId = z.string().uuid().parse(id);
+
+  await withTransaction(context.userId, async (tx) => {
+    // 先锁资产行，与处置共用同一把锁：撤销与再次处置不会交错。
+    await tx`
+      select id from fixed_assets
+      where id = ${assetId} and organization_id = ${context.organizationId}
+      for update
+    `;
+    const existing = await getFixedAsset(tx, context.organizationId, assetId);
+    if (!existing) throw new Error('Fixed asset not found.');
+    if (existing.isActive) throw new Error('This asset has not been disposed.');
+
+    if (existing.disposalTransactionId) {
+      await voidDocumentPosting(tx, context, {
+        transactionId: existing.disposalTransactionId,
+        reason: `Disposal of ${existing.name} undone`,
+      });
+    }
+
+    await reactivateDisposedAsset(tx, context.organizationId, assetId);
+
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'fixed_asset.disposal_undone',
+      entityType: 'fixed_asset',
+      entityId: assetId,
+      before: {
+        isActive: false,
+        disposalTransactionId: existing.disposalTransactionId,
+        disposalProceedsMinor: existing.disposalProceedsMinor?.toString() ?? null,
+      },
+      after: { isActive: true },
     });
   });
 
   revalidatePath(`/${orgSlug}/fixed-assets`);
-  revalidatePath(`/${orgSlug}/fixed-assets/${id}`);
+  revalidatePath(`/${orgSlug}/fixed-assets/${assetId}`);
+  revalidatePath(`/${orgSlug}/transactions`);
 }
 
 /**

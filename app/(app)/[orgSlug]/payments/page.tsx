@@ -2,16 +2,16 @@ import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { listOpenPrepayments, listPayments, sumSettledByDocument } from '@/server/repositories/payments';
+import {
+  listOpenPrepayments,
+  listOutstandingDocuments,
+  listPayments,
+} from '@/server/repositories/payments';
 import { listContacts } from '@/server/repositories/contacts';
-import { listInvoices } from '@/server/repositories/invoices';
-import { listBills } from '@/server/repositories/bills';
 import { PaymentList } from '@/components/payments/payment-list';
 import type { OutstandingDocumentView } from '@/components/payments/prepayment-apply-dialog';
-
-/** 不能再被核销的状态。作废的不算数，已收讫的没有余额。与 payments/new 同一份判断。 */
-const CLOSED_STATUSES = new Set(['voided', 'paid']);
 
 export default async function PaymentsListPage({
   params,
@@ -49,67 +49,37 @@ export default async function PaymentsListPage({
         return { openPrepayments, outstandingDocuments: [] as OutstandingDocumentView[] };
       }
 
-      const [invoices, bills] = await Promise.all([
-        listInvoices(tx, context.organizationId),
-        listBills(tx, context.organizationId),
-      ]);
-
-      const openInvoices = invoices.filter(
-        (row) => !CLOSED_STATUSES.has(row.status) && row.voidedAt === null,
-      );
-      const openBills = bills.filter(
-        (row) => !CLOSED_STATUSES.has(row.status) && row.voidedAt === null,
-      );
-
-      // 已核销金额走 sumSettledByDocument（作废的收付款不计入），而不是各自
-      // 再写一遍 sum：那正是「同一个数有两处实现」的起点。
-      const [invoicePaid, billPaid] = await Promise.all([
-        sumSettledByDocument(
-          tx,
-          context.organizationId,
-          'invoice',
-          openInvoices.map((row) => row.id),
-        ),
-        sumSettledByDocument(
-          tx,
-          context.organizationId,
-          'bill',
-          openBills.map((row) => row.id),
-        ),
-      ]);
-
-      const outstandingDocuments: OutstandingDocumentView[] = [
-        ...openInvoices.map((row) => ({
-          id: row.id,
-          kind: 'invoice' as const,
-          number: row.invoiceNumber,
-          contactId: row.contactId,
-          currency: row.currency,
-          remainingMinor: row.totalMinor - (invoicePaid.get(row.id) ?? 0n),
-        })),
-        ...openBills.map((row) => ({
-          id: row.id,
-          kind: 'bill' as const,
-          number: row.billNumber ?? '—',
-          contactId: row.contactId,
-          currency: row.currency,
-          remainingMinor: row.totalMinor - (billPaid.get(row.id) ?? 0n),
-        })),
-      ].filter((doc) => doc.remainingMinor > 0n);
+      // 与 payments/new 同一份清单（排除草稿、扣掉贷项通知单），见
+      // listOutstandingDocuments 的注释。
+      const outstandingDocuments: OutstandingDocumentView[] = (
+        await listOutstandingDocuments(tx, context.organizationId)
+      ).map((doc) => ({
+        id: doc.id,
+        kind: doc.kind,
+        number: doc.number,
+        contactId: doc.contactId,
+        currency: doc.currency,
+        remainingMinor: doc.remainingMinor,
+      }));
 
       return { openPrepayments, outstandingDocuments };
     }),
   ]);
 
+  // 记录 / 核销 / 作废收付款都要 transaction:create；viewer 只读。
+  const canWrite = can(context.role, 'transaction:create');
+
   return (
     <>
       <div className="page-header">
         <h1>{t.payments.title}</h1>
-        <div className="page-header-actions">
-          <Link href={`/${orgSlug}/payments/new`} className="primary-button">
-            {t.payments.newTitle}
-          </Link>
-        </div>
+        {canWrite ? (
+          <div className="page-header-actions">
+            <Link href={`/${orgSlug}/payments/new`} className="primary-button">
+              {t.payments.newTitle}
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       <PaymentList
@@ -120,6 +90,7 @@ export default async function PaymentsListPage({
         contacts={contacts}
         openPrepayments={prepaymentData.openPrepayments}
         outstandingDocuments={prepaymentData.outstandingDocuments}
+        canWrite={canWrite}
       />
     </>
   );

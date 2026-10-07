@@ -13,7 +13,7 @@ import {
   deletePoItems,
   setPoStatus,
   getNextPoNumber,
-} from '@/server/repositories/purchase_orders';
+} from '@/server/repositories/purchase-orders';
 import {
   RATE_SCALE,
   convertToBaseMinor,
@@ -74,6 +74,30 @@ const updatePoSchema = z.object({
 });
 
 const PO_STATUSES = ['draft', 'sent', 'received', 'billed', 'closed', 'voided'] as const;
+
+/**
+ * 状态只能往前走（可以跳步，例如草稿直接标成已收货），或者作废。
+ *
+ * 原来服务端什么都收：界面上（po-list.tsx 的 NEXT_STATUS）关单、作废之后
+ * 已经没有任何按钮，但 Server Action 是网络端点，一张已作废的采购单可以被
+ * 改回草稿、再改金额。关单与作废都是终态。
+ */
+const PO_FORWARD_ORDER = ['draft', 'sent', 'received', 'billed', 'closed'] as const;
+
+function assertPoTransition(
+  from: (typeof PO_STATUSES)[number],
+  to: (typeof PO_STATUSES)[number],
+): void {
+  if (from === 'voided' || from === 'closed') {
+    throw new LedgerError(`A ${from} purchase order cannot change status any more.`);
+  }
+  if (to === 'voided') return;
+  const fromIndex = PO_FORWARD_ORDER.indexOf(from);
+  const toIndex = PO_FORWARD_ORDER.indexOf(to);
+  if (toIndex <= fromIndex) {
+    throw new LedgerError(`A purchase order cannot go from ${from} back to ${to}.`);
+  }
+}
 
 /**
  * 一张采购单的两个金额：单据币种下的合计，以及折算到本位币之后的合计。
@@ -265,7 +289,7 @@ export async function updatePurchaseOrderAction(
     // 但 Server Action 是一个网络端点：能拿到 orgSlug 和单号的人，直接
     // POST 一份 payload 就绕过了那张只读页面。一张已经收货、甚至已经转成
     // 账单的采购单被改掉金额，不会有任何一处报错——贷项通知单那边
-    // （server/actions/credit_notes.ts:192）一直有这道判断，这里漏了。
+    // （server/actions/credit-notes.ts:192）一直有这道判断，这里漏了。
     if (before.status !== 'draft') {
       throw new LedgerError(
         `Purchase order ${before.poNumber} is no longer a draft and cannot be edited. ` +
@@ -375,6 +399,7 @@ export async function setPoStatusAction(
     // 这里**刻意没有**「只能改草稿」那道判断：状态流转本身就是从 draft 走到
     // sent / received / billed / closed，再加上作废，每一步的起点都不是草稿。
     // 只有改单据内容（updatePurchaseOrderAction）才限草稿。
+    assertPoTransition(before.status, parsedStatus);
     await setPoStatus(tx, context.organizationId, id, parsedStatus);
 
     await recordAudit(tx, {

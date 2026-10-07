@@ -1,6 +1,6 @@
 import { BudgetView } from '@/components/budgets/budget-view';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getBudgetVsActual } from '@/server/repositories/budgets';
@@ -16,9 +16,10 @@ export default async function BudgetsPage({
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const now = new Date();
-  const currentYear = now.getFullYear();
-  const currentMonth = now.getMonth() + 1;
+  // 公司时区下的本月，不是服务端 UTC 的本月（见 server/auth/guard.ts 的 todayInOrg）。
+  const today = todayInOrg(context);
+  const currentYear = Number(today.slice(0, 4));
+  const currentMonth = Number(today.slice(5, 7));
 
   return (
     <>

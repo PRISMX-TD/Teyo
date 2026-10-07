@@ -1,14 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
 
-export type BudgetRow = {
-  id: string;
-  organizationId: string;
-  accountId: string;
-  year: number;
-  month: number;
-  budgetMinor: bigint;
-};
-
 export type BudgetVsActualRow = {
   accountId: string;
   accountCode: string;
@@ -20,36 +11,6 @@ export type BudgetVsActualRow = {
   actualMinor: bigint;
   varianceMinor: bigint;
 };
-
-function mapBudget(row: Record<string, unknown>): BudgetRow {
-  return {
-    id: row.id as string,
-    organizationId: row.organization_id as string,
-    accountId: row.account_id as string,
-    year: Number(row.year),
-    month: Number(row.month),
-    budgetMinor: BigInt(row.budget_minor as string),
-  };
-}
-
-export async function getBudget(
-  tx: Tx,
-  orgId: string,
-  accountId: string,
-  year: number,
-  month: number,
-): Promise<BudgetRow | null> {
-  const rows = await tx`
-    select id, organization_id, account_id, year, month, budget_minor
-    from budgets
-    where organization_id = ${orgId}
-      and account_id = ${accountId}
-      and year = ${year}
-      and month = ${month}
-  `;
-  const row = rows.at(0);
-  return row ? mapBudget(row) : null;
-}
 
 export async function setBudget(
   tx: Tx,
@@ -66,21 +27,6 @@ export async function setBudget(
     on conflict (organization_id, account_id, year, month)
     do update set budget_minor = ${amount.toString()}
   `;
-}
-
-export async function listBudgets(
-  tx: Tx,
-  orgId: string,
-  year: number,
-): Promise<BudgetRow[]> {
-  const rows = await tx`
-    select id, organization_id, account_id, year, month, budget_minor
-    from budgets
-    where organization_id = ${orgId}
-      and year = ${year}
-    order by month, account_id
-  `;
-  return rows.map(mapBudget);
 }
 
 /**
@@ -139,7 +85,7 @@ export function assertBudgetPeriod(year: number, month: number): void {
  *
  * ## 期间口径
  *
- * 半开区间 [月初, 次月初)——预算是按自然月切的，这与 overview.ts 的
+ * 半开区间 [月初, 次月初)——预算是按自然月切的，这与 dashboard.ts 的
  * monthRange 一致。这里刻意**不**改成报表那套闭区间 [from, to]：闭区间需要
  * 算出「这个月的最后一天」，而半开区间只需要「下个月第一天」，后者不必处理
  * 闰年和大小月。两种写法覆盖的日期集合完全相同。
@@ -176,6 +122,10 @@ export async function getBudgetVsActual(
       join transactions t on t.id = l.transaction_id
       where l.organization_id = ${orgId}
         and t.voided_at is null
+        -- 年结分录记在财年最后一天、把每个损益科目冲平。不排除它的话，
+        -- 财年最后一个月每个收入/费用科目的「实际」都会被冲成接近零（甚至
+        -- 反号），与 getProfitLoss 排除它是同一个理由。
+        and t.kind <> 'closing'
         and t.occurred_on >= ${startDate}::date
         and t.occurred_on < ${endDate}::date
       group by l.account_id
@@ -204,7 +154,13 @@ export async function getBudgetVsActual(
 
   return rows.map((r) => {
     const budgetMinor = BigInt(r.budget_minor as string);
-    const actualMinor = BigInt(r.actual_minor as string);
+    // net 是「借 − 贷」。收入、负债、权益的正常余额在贷方，按原样返回的话
+    // 收入科目的实际永远是负数：预算 10,000、实际卖了 8,000，variance 算成
+    // 10,000 − (−8,000) = 18,000。按科目性质翻成「自然方向为正」，与
+    // getProfitLoss / export-builder 的 DEBIT_NATURED 同一条规则。
+    const net = BigInt(r.actual_minor as string);
+    const type = r.type as string;
+    const actualMinor = type === 'asset' || type === 'expense' ? net : -net;
     return {
       accountId: r.account_id as string,
       accountCode: r.account_code as string,

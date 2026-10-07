@@ -20,7 +20,7 @@ export type TransactionKind = 'income' | 'expense' | 'transfer' | 'journal' | 'c
 /**
  * 用户能直接创建的交易类型。
  *
- * 'closing' 不在此列：年结分录只由 server/actions/year_end.ts 产生，没有
+ * 'closing' 不在此列：年结分录只由 server/actions/year-end.ts 产生，没有
  * 任何表单能填出一笔它。把这件事写成类型而不是靠约定，是因为一旦某个
  * switch 忘了处理 'closing'，TypeScript 只会在**那一处**报错，而正确的
  * 处理方式往往是「这里根本不该收到它」——用 TransactionKind 去接用户输入，

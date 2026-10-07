@@ -78,6 +78,8 @@ export function ReconciliationView({
   const [adjustments, setAdjustments] = useState<Record<string, string>>({});
   const [loading, setLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
+  /** 完成对账失败时那句话。原来 handleSubmit 只有 try/finally，失败了界面上一声不吭。 */
+  const [submitError, setSubmitError] = useState<string | null>(null);
 
   const fetchData = useCallback(
     async (accountId: string) => {
@@ -198,6 +200,7 @@ export function ReconciliationView({
     if (checked.size === 0 && !window.confirm(t.common.confirm + '?')) return;
 
     setSubmitting(true);
+    setSubmitError(null);
     try {
       await reconcileAction(orgSlug, {
         moneyAccountId: selectedAccount,
@@ -210,10 +213,24 @@ export function ReconciliationView({
       if (selectedAccount) {
         fetchData(selectedAccount);
       }
+    } catch (e) {
+      setSubmitError((e as Error).message);
     } finally {
       setSubmitting(false);
     }
   };
+
+  // 表里原来直接印 kind 的枚举值（income / journal），中文界面上也是英文。
+  const kindLabel = (kind: string): string =>
+    kind === 'income'
+      ? t.transaction.income
+      : kind === 'expense'
+        ? t.transaction.expense
+        : kind === 'transfer'
+          ? t.transaction.transfer
+          : kind === 'closing'
+            ? t.yearEnd.closingEntry
+            : t.transaction.journal;
 
   return (
     <div className="reconciliation-view">
@@ -297,6 +314,12 @@ export function ReconciliationView({
             {submitting ? t.common.loading : t.reconciliation.complete}
           </button>
 
+          {submitError ? (
+            <p role="alert" className="form-error">
+              {submitError}
+            </p>
+          ) : null}
+
           {txns.length === 0 ? (
             <p className="empty-state">{t.reconciliation.empty}</p>
           ) : (
@@ -323,7 +346,7 @@ export function ReconciliationView({
                     </td>
                     <td>{txn.occurredOn}</td>
                     <td>{txn.description}</td>
-                    <td>{txn.kind}</td>
+                    <td>{kindLabel(txn.kind)}</td>
                     <td
                       className={`numeric mono ${
                         effectOf(txn) > 0n ? 'positive' : effectOf(txn) < 0n ? 'negative' : ''

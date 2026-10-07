@@ -38,7 +38,9 @@ export default function GlobalError({
   reset: () => void;
 }) {
   return (
-    <html lang={documentLocale()}>
+    // suppressHydrationWarning：服务端没有 document，lang 只能是 en；客户端
+    // 读到的可能是 zh。这个差异是刻意的，不该在错误页上再报一条 hydration 警告。
+    <html lang={documentLocale()} suppressHydrationWarning>
       <body style={{ margin: 0, background: '#0b0a09', color: '#f0ede8' }}>
         <style dangerouslySetInnerHTML={{ __html: LANG_CSS }} />
         <main

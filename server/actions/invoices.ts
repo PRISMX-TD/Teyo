@@ -20,6 +20,11 @@ import {
 } from '@/server/services/document-posting';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
+  loadInvoicesForSettlement,
+  refreshSettlementStatuses,
+  sumDeductedByDocument,
+} from '@/server/repositories/payments';
+import {
   deleteInvoiceItems,
   getInvoice,
   getNextInvoiceNumber,
@@ -393,6 +398,26 @@ export async function updateInvoice(
 
     const { taxRateBps, amounts, items } = computeInvoiceAmounts({ ...input, currency });
 
+    // 已经收过钱（或签过贷项通知单）的发票，有三样东西不能再动：币种（核销
+    // 明细是按原币最小单位记的，换币种等于把 USD 100.00 读成 JPY 10000）、
+    // 客户（那笔收款是 A 付的），以及把总额改到已冲掉的金额以下（应收会被
+    // 冲成负数，而发票状态还停在「已付」）。
+    const deducted = (await sumDeductedByDocument(tx, context.organizationId, 'invoice', [id])).get(id) ?? 0n;
+    if (deducted > 0n) {
+      if (currency !== existing.currency || input.contactId !== existing.contactId) {
+        throw new LedgerError(
+          `Invoice ${existing.invoiceNumber} already has payments or credit notes against it, ` +
+            'so its customer and currency can no longer be changed.',
+        );
+      }
+      if (amounts.totalMinor < deducted) {
+        throw new LedgerError(
+          `Invoice ${existing.invoiceNumber} has already been settled for more than the new total. ` +
+            'Void the payment or credit note first.',
+        );
+      }
+    }
+
     await updateInvoiceRow(tx, context.organizationId, id, {
       contactId: input.contactId,
       issueDate: input.issueDate,
@@ -428,6 +453,15 @@ export async function updateInvoice(
         manualRateEntry: 'unavailable',
       });
     }
+
+    // 总额变了，收讫状态可能跟着变（改小到正好等于已收 → 已付；改大 →
+    // 部分收款）。草稿与作废不受影响，见 settlementStatusFor。
+    await refreshSettlementStatuses(
+      tx,
+      context.organizationId,
+      'invoice',
+      await loadInvoicesForSettlement(tx, context.organizationId, [id]),
+    );
 
     await recordAudit(tx, {
       organizationId: context.organizationId,
@@ -499,6 +533,17 @@ export async function voidInvoice(
 
     if (invoice.status === 'voided' || invoice.voidedAt) {
       throw new AuthError('forbidden', 'This invoice is already voided.');
+    }
+
+    // 有收款或已签发的贷项通知单挂着时不能直接作废：发票那笔应收被冲回去
+    // 了，而收款那笔「贷应收」还在，应收会被冲成负数——账上凭空多出一笔
+    // 欠客户的钱。先作废收款 / 贷项通知单，再作废发票。
+    const deducted = (await sumDeductedByDocument(tx, context.organizationId, 'invoice', [id])).get(id) ?? 0n;
+    if (deducted > 0n) {
+      throw new LedgerError(
+        `Invoice ${invoice.invoiceNumber} has payments or credit notes against it. ` +
+          'Void those first, then void the invoice.',
+      );
     }
 
     // 先作废分录再作废单据。顺序在同一个事务里不影响最终状态，但分录那一步

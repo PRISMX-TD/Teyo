@@ -3,8 +3,9 @@
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { formatMoney, toIsoDate } from '@/lib/format';
-import { postDepreciationAction, disposeFixedAssetAction } from '@/server/actions/fixed_assets';
-import type { FixedAssetRow } from '@/server/repositories/fixed_assets';
+import { postDepreciationAction } from '@/server/actions/fixed-assets';
+import type { FixedAssetRow } from '@/server/repositories/fixed-assets';
+import { todayLocalISO } from '@/lib/date';
 
 type AccountOption = {
   id: string;
@@ -29,20 +30,10 @@ export function AssetList({ orgSlug, baseCurrency, locale, i18n: t, assets }: Pr
     setPending(true);
     setError(null);
     try {
-      const period = new Date().toISOString().slice(0, 7) + '-01';
+      // 本地日期的当月，不是 UTC 的：UTC+8 的月初头八个小时里，
+      // toISOString() 给的还是上个月。
+      const period = todayLocalISO().slice(0, 7) + '-01';
       await postDepreciationAction(orgSlug, assetId, period);
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPending(false);
-    }
-  }
-
-  async function handleDispose(assetId: string) {
-    setPending(true);
-    setError(null);
-    try {
-      await disposeFixedAssetAction(orgSlug, assetId);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -67,7 +58,9 @@ export function AssetList({ orgSlug, baseCurrency, locale, i18n: t, assets }: Pr
                   {asset.name}
                 </a>
                 <span className={`badge ${asset.isActive ? 'badge-success' : 'badge-warning'}`}>
-                  {asset.disposedAt ? t.fixedAssets.dispose : t.settings.active}
+                  {/* 原来处置后显示的是 t.fixedAssets.dispose——那是按钮上的
+                      动词「处置」，不是状态。 */}
+                  {asset.disposedAt ? t.fixedAssets.disposed : t.settings.active}
                 </span>
               </div>
               <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
@@ -82,9 +75,10 @@ export function AssetList({ orgSlug, baseCurrency, locale, i18n: t, assets }: Pr
                     <button onClick={() => handlePost(asset.id)} disabled={pending} className="btn-small">
                       {t.fixedAssets.postDepreciation}
                     </button>
-                    <button onClick={() => handleDispose(asset.id)} disabled={pending} className="btn-small btn-danger">
+                    {/* 处置要填处置日、收入与收款账户并出一笔分录，表单在详情页。 */}
+                    <a href={`/${orgSlug}/fixed-assets/${asset.id}#dispose`} className="btn-small btn-danger">
                       {t.fixedAssets.dispose}
-                    </button>
+                    </a>
                   </>
                 ) : null}
                 <a href={`/${orgSlug}/fixed-assets/${asset.id}`} className="secondary-button btn-small">

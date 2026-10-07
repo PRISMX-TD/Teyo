@@ -39,13 +39,14 @@ async function insertBalancedTransaction(args: {
   debitAccountId: string;
   creditAccountId: string;
   voided?: boolean;
+  kind?: 'transfer' | 'closing';
 }): Promise<void> {
   const [txn] = await admin`
     insert into transactions
       (organization_id, kind, occurred_on, description, currency,
        amount_minor, base_amount_minor, exchange_rate, category_id,
        created_by, client_uuid)
-    values (${orgId}, 'transfer', ${args.occurredOn}::date, 'budget fixture', 'MYR',
+    values (${orgId}, ${args.kind ?? 'transfer'}, ${args.occurredOn}::date, 'budget fixture', 'MYR',
        ${args.amountMinor.toString()}, ${args.amountMinor.toString()}, 1, null,
        ${ownerId}, gen_random_uuid())
     returning id
@@ -112,6 +113,42 @@ beforeAll(async () => {
 afterAll(async () => {
   await resetTestData();
   await admin.end();
+});
+
+describe('getBudgetVsActual - 科目性质与年结分录', () => {
+  it('收入科目的实际取自然方向（贷 − 借）为正，variance 不再被放大', async () => {
+    // 2026-07：卖了 5,000.00（借 cash / 贷 sales）；预算 6,000.00。
+    await insertBalancedTransaction({
+      occurredOn: '2026-07-15',
+      amountMinor: 500000n,
+      debitAccountId: accountsByCode.cash,
+      creditAccountId: accountsByCode.sales,
+    });
+    await withTransaction(ownerId, (tx) =>
+      setBudget(tx, orgId, accountsByCode.sales, 2026, 7, 600000n),
+    );
+
+    const rows = await withTransaction(ownerId, (tx) => getBudgetVsActual(tx, orgId, 2026, 7));
+    const sales = rows.find((r) => r.accountCode === 'sales')!;
+
+    // 旧写法：actual = 借 − 贷 = -500000，variance = 600000 − (−500000) = 1100000。
+    expect(sales.actualMinor).toBe(500000n);
+    expect(sales.varianceMinor).toBe(100000n);
+  });
+
+  it('年结分录不计入实际（否则财年最后一个月的损益科目被冲成零）', async () => {
+    // 2026-07-31 一笔年结，把上面那 5,000 的 sales 冲平（借 sales / 贷 retained-earnings）。
+    await insertBalancedTransaction({
+      occurredOn: '2026-07-31',
+      amountMinor: 500000n,
+      debitAccountId: accountsByCode.sales,
+      creditAccountId: accountsByCode['retained-earnings'],
+      kind: 'closing',
+    });
+
+    const rows = await withTransaction(ownerId, (tx) => getBudgetVsActual(tx, orgId, 2026, 7));
+    expect(rows.find((r) => r.accountCode === 'sales')!.actualMinor).toBe(500000n);
+  });
 });
 
 describe('getBudgetVsActual - 失效 LEFT JOIN 回归', () => {

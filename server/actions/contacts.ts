@@ -1,7 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requirePermission } from '@/server/auth/guard';
+import { AuthError, requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
@@ -10,6 +10,34 @@ import {
   updateContact,
   setContactActive,
 } from '@/server/repositories/contacts';
+
+const CONTACT_TYPES = new Set(['customer', 'vendor', 'both']);
+
+/** 空白串一律存成 null：表单清空一个栏位的意思是「没有」，不是「一个空字符串」。 */
+function blankToNull(value: string | undefined): string | null {
+  const trimmed = value?.trim() ?? '';
+  return trimmed === '' ? null : trimmed;
+}
+
+/**
+ * 名称必填。客户端的「添加」按钮在名称为空时是灰的，但编辑框没有这道挡：
+ * 清空名称再保存，updateContact 的 coalesce('', name) 会照样写进一个空串
+ * ——那个联系人在发票、收款的下拉框里变成一行空白。
+ */
+function requireName(name: string | undefined): string {
+  const trimmed = name?.trim() ?? '';
+  if (trimmed === '') {
+    throw new AuthError('forbidden', 'A contact needs a name.');
+  }
+  return trimmed;
+}
+
+function requireType(type: string): 'customer' | 'vendor' | 'both' {
+  if (!CONTACT_TYPES.has(type)) {
+    throw new AuthError('forbidden', `Unknown contact type: ${type}`);
+  }
+  return type as 'customer' | 'vendor' | 'both';
+}
 
 export async function createContact(
   orgSlug: string,
@@ -25,17 +53,19 @@ export async function createContact(
   },
 ): Promise<{ id: string }> {
   const context = await requirePermission(orgSlug, 'account:manage');
+  const type = requireType(input.type);
+  const name = requireName(input.name);
   const result = await withTransaction(context.userId, async (tx) => {
     const { id } = await insertContact(tx, {
       organizationId: context.organizationId,
-      type: input.type,
-      name: input.name,
-      email: input.email ?? null,
-      phone: input.phone ?? null,
-      address: input.address ?? null,
-      taxId: input.taxId ?? null,
-      paymentTerms: input.paymentTerms ?? null,
-      notes: input.notes ?? null,
+      type,
+      name,
+      email: blankToNull(input.email),
+      phone: blankToNull(input.phone),
+      address: blankToNull(input.address),
+      taxId: blankToNull(input.taxId),
+      paymentTerms: blankToNull(input.paymentTerms),
+      notes: blankToNull(input.notes),
     });
 
     await recordAudit(tx, {
@@ -69,10 +99,18 @@ export async function updateContactAction(
   }>,
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'account:manage');
+  const fields = {
+    ...input,
+    ...(input.name !== undefined ? { name: requireName(input.name) } : {}),
+    ...(input.type !== undefined ? { type: requireType(input.type) } : {}),
+  };
   await withTransaction(context.userId, async (tx) => {
     const before = await getContact(tx, context.organizationId, id);
+    if (!before) {
+      throw new AuthError('not_found', 'Contact not found.');
+    }
 
-    await updateContact(tx, context.organizationId, id, input);
+    await updateContact(tx, context.organizationId, id, fields);
 
     await recordAudit(tx, {
       organizationId: context.organizationId,
@@ -84,7 +122,7 @@ export async function updateContactAction(
         type: before?.type,
         name: before?.name,
       },
-      after: input,
+      after: fields,
     });
   });
 
@@ -99,6 +137,9 @@ export async function toggleContactActive(
   const context = await requirePermission(orgSlug, 'account:manage');
   await withTransaction(context.userId, async (tx) => {
     const before = await getContact(tx, context.organizationId, id);
+    if (!before) {
+      throw new AuthError('not_found', 'Contact not found.');
+    }
 
     await setContactActive(tx, context.organizationId, id, active);
 

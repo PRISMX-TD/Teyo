@@ -264,6 +264,8 @@ export type TransactionDetail = TransactionListRow & {
   }[];
 };
 
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export class TransactionNotFoundError extends Error {
   constructor(message: string) {
     super(message);
@@ -282,6 +284,13 @@ export async function getTransactionDetail(
   organizationId: string,
   id: string,
 ): Promise<TransactionDetail> {
+  // id 来自地址栏（/transactions/<id>）或 Server Action 的入参。不是 uuid 的串
+  // 直接交给 Postgres 会抛 22P02，详情页只认 TransactionNotFoundError，于是
+  // 一个手敲错的链接变成整页 500。语义上它就是「找不到」。
+  if (!UUID_PATTERN.test(id)) {
+    throw new TransactionNotFoundError('This record was not found in this company.');
+  }
+
   const heads = await tx`
     with money_line as (${moneyLineCte(tx, organizationId)})
     select
@@ -409,4 +418,94 @@ export async function markVoided(
     set voided_at = now(), voided_by = ${userId}, void_reason = ${reason}, updated_at = now()
     where id = ${id} and organization_id = ${organizationId}
   `;
+}
+
+export type TransactionSourceType =
+  | 'invoice'
+  | 'bill'
+  | 'credit_note'
+  | 'payment'
+  | 'depreciation'
+  | 'year_end'
+  | 'asset_disposal';
+
+/**
+ * 一笔分录是哪张单据生成的。
+ *
+ * id 是「该链接到的那张单据」的 id，不一定是指向这笔交易的那一行：折旧
+ * 分录指向的是 depreciation_schedules 的某一期，但界面上能打开的只有固定
+ * 资产详情页，所以这里给的是资产 id。label 是给人看的编号（发票号、账单号、
+ * 资产名 + 期间……），可能为空串（账单号是可选列）。
+ */
+export type TransactionSource = {
+  type: TransactionSourceType;
+  id: string;
+  label: string;
+};
+
+/**
+ * 查这笔交易是不是由某张单据生成的。
+ *
+ * transactions 上没有「来源」列，是单据反过来指向交易：invoices / bills /
+ * credit_notes / payments / depreciation_schedules / fiscal_year_closings
+ * 的 transaction_id，以及 fixed_assets.disposal_transaction_id。一条
+ * UNION ALL 查完，每一支都按公司收窄——depreciation_schedules 自己没有
+ * organization_id，借 fixed_assets 那一列收窄。
+ *
+ * 不算来源的：imported_transactions.matched_transaction_id。那是「这条银行
+ * 流水对上了哪笔账」，账本身可能是用户手录的；作废之后由用户在导入页把那
+ * 一行重置回待处理（见 server/repositories/bank-import.ts 的
+ * importedTransactionPostingUuid），不需要在这里拦。
+ */
+export async function findTransactionSource(
+  tx: Tx,
+  organizationId: string,
+  transactionId: string,
+): Promise<TransactionSource | null> {
+  if (!UUID_PATTERN.test(transactionId)) return null;
+
+  const rows = await tx`
+    select 'invoice' as type, i.id, i.invoice_number as label, 1 as rank
+    from invoices i
+    where i.organization_id = ${organizationId} and i.transaction_id = ${transactionId}
+    union all
+    select 'bill', b.id, coalesce(b.bill_number, ''), 2
+    from bills b
+    where b.organization_id = ${organizationId} and b.transaction_id = ${transactionId}
+    union all
+    select 'credit_note', cn.id, cn.cn_number, 3
+    from credit_notes cn
+    where cn.organization_id = ${organizationId} and cn.transaction_id = ${transactionId}
+    union all
+    select 'payment', p.id,
+           coalesce(nullif(btrim(p.reference), ''), to_char(p.payment_date, 'YYYY-MM-DD')), 4
+    from payments p
+    where p.organization_id = ${organizationId} and p.transaction_id = ${transactionId}
+    union all
+    select 'depreciation', fa.id, fa.name || ' · ' || to_char(ds.period, 'YYYY-MM'), 5
+    from depreciation_schedules ds
+    join fixed_assets fa on fa.id = ds.fixed_asset_id
+    where fa.organization_id = ${organizationId} and ds.transaction_id = ${transactionId}
+    union all
+    select 'year_end', fyc.id,
+           to_char(fyc.period_start, 'YYYY-MM-DD') || ' – ' || to_char(fyc.period_end, 'YYYY-MM-DD'),
+           6
+    from fiscal_year_closings fyc
+    where fyc.organization_id = ${organizationId} and fyc.transaction_id = ${transactionId}
+    union all
+    select 'asset_disposal', fa.id, fa.name, 7
+    from fixed_assets fa
+    where fa.organization_id = ${organizationId}
+      and fa.disposal_transaction_id = ${transactionId}
+    order by rank
+    limit 1
+  `;
+
+  const row = rows.at(0);
+  if (!row) return null;
+  return {
+    type: row.type as TransactionSourceType,
+    id: row.id as string,
+    label: (row.label as string | null) ?? '',
+  };
 }

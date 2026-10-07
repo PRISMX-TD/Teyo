@@ -1,6 +1,6 @@
 import type { Tx } from '@/server/db/transaction';
 import { LedgerError } from '@/server/domain/ledger';
-import { sumCreditNotedByInvoice } from '@/server/repositories/credit_notes';
+import { sumCreditNotedByInvoice } from '@/server/repositories/credit-notes';
 
 export type PaymentRow = {
   id: string;
@@ -377,9 +377,13 @@ export type SettlementDocument = {
   kind: SettlementDocumentKind;
   /** 单号，只用于错误文案与凭证摘要。 */
   number: string;
+  /** 开给谁的。收付款只能核销同一位往来对象的单据。 */
+  contactId: string;
   currency: string;
   totalMinor: bigint;
   status: string;
+  /** 单据被作废的时间。status 之外再看一眼它，与 listInvoices 的判断同口径。 */
+  voidedAt: string | null;
   transactionId: string | null;
   /** 过账交易的本位币金额；单据未过账、或那笔交易已作废时为 null。 */
   postedBaseAmountMinor: bigint | null;
@@ -398,9 +402,11 @@ function mapSettlementDocument(
     id: row.id as string,
     kind,
     number: (row.number as string | null) ?? '',
+    contactId: row.contact_id as string,
     currency: row.currency as string,
     totalMinor: BigInt(row.total_minor as string),
     status: row.status as string,
+    voidedAt: row.voided_at ? (row.voided_at as Date).toISOString() : null,
     transactionId: (row.transaction_id as string | null) ?? null,
     postedBaseAmountMinor: postedBase === null ? null : BigInt(postedBase),
     postedAmountMinor: postedAmount === null ? null : BigInt(postedAmount),
@@ -427,8 +433,8 @@ export async function loadInvoicesForSettlement(
 
   const rows = await tx`
     select
-      i.id, i.invoice_number as number, i.currency, i.total_minor, i.status,
-      i.transaction_id,
+      i.id, i.invoice_number as number, i.contact_id, i.currency, i.total_minor, i.status,
+      i.voided_at, i.transaction_id,
       t.base_amount_minor as posted_base_amount_minor,
       t.amount_minor as posted_amount_minor
     from invoices i
@@ -455,8 +461,8 @@ export async function loadBillsForSettlement(
 
   const rows = await tx`
     select
-      b.id, b.bill_number as number, b.currency, b.total_minor, b.status,
-      b.transaction_id,
+      b.id, b.bill_number as number, b.contact_id, b.currency, b.total_minor, b.status,
+      b.voided_at, b.transaction_id,
       t.base_amount_minor as posted_base_amount_minor,
       t.amount_minor as posted_amount_minor
     from bills b
@@ -635,6 +641,107 @@ export async function refreshSettlementStatuses(
     if (status === null) continue;
     await setSettlementStatus(tx, organizationId, kind, id, status);
   }
+}
+
+/**
+ * 每张单据上已经被冲掉多少（原币）：未作废的收付款核销 + 已签发的贷项通知单。
+ *
+ * 这是「还能再收多少」的减数。只看 sumSettledByDocument 会漏掉贷项通知单：
+ * 一张 1,000 的发票签了 200 的贷项通知单，界面上仍然预填 1,000、服务端也
+ * 放行，于是应收被多贷 200，而那 200 在 fx-settlement 的 clamp 之后整个被
+ * 记成汇兑收益——本位币发票也一样。与 refreshSettlementStatuses 同一个口径。
+ */
+export async function sumDeductedByDocument(
+  tx: Tx,
+  organizationId: string,
+  kind: SettlementDocumentKind,
+  ids: readonly string[],
+): Promise<Map<string, bigint>> {
+  const settled = await sumSettledByDocument(tx, organizationId, kind, ids);
+  if (kind === 'bill') return settled;
+
+  const creditNoted = await sumCreditNotedByInvoice(tx, organizationId, ids);
+  const result = new Map(settled);
+  for (const [id, amount] of creditNoted) {
+    result.set(id, (result.get(id) ?? 0n) + amount);
+  }
+  return result;
+}
+
+/** 一张还能被收付款核销的单据，以及它还剩多少（原币）。 */
+export type OutstandingDocument = {
+  id: string;
+  kind: SettlementDocumentKind;
+  number: string;
+  contactId: string;
+  contactName: string;
+  currency: string;
+  totalMinor: bigint;
+  remainingMinor: bigint;
+};
+
+/**
+ * 全公司还有余额、可以被核销的发票与账单。
+ *
+ * 收款页与「核销预收款」对话框原来各自用 listInvoices / listBills 拼这份
+ * 清单，两处都犯了同样两个错：
+ *   - 草稿被列了出来。草稿没有过账，应收从未被借过，核销它就是凭空贷一笔
+ *     应收——账上出现一笔负的应收，而发票照样停在草稿。
+ *   - 余额只扣了收款、没扣贷项通知单，于是预填的金额超过客户实际欠的钱。
+ * 统一放到这里，两个页面与 server/actions/payments.ts 的服务端校验用同一个口径。
+ */
+export async function listOutstandingDocuments(
+  tx: Tx,
+  organizationId: string,
+): Promise<OutstandingDocument[]> {
+  const invoiceRows = await tx`
+    select i.id, i.invoice_number as number, i.contact_id, c.name as contact_name,
+           i.currency, i.total_minor
+    from invoices i
+    join contacts c on c.id = i.contact_id
+    where i.organization_id = ${organizationId}
+      and i.voided_at is null
+      and i.status not in ('draft', 'voided', 'paid')
+    order by i.due_date, i.invoice_number
+  `;
+  const billRows = await tx`
+    select b.id, b.bill_number as number, b.contact_id, c.name as contact_name,
+           b.currency, b.total_minor
+    from bills b
+    join contacts c on c.id = b.contact_id
+    where b.organization_id = ${organizationId}
+      and b.voided_at is null
+      and b.status not in ('draft', 'voided', 'paid')
+    order by b.due_date, b.bill_number
+  `;
+
+  const [invoiceDeducted, billDeducted] = await Promise.all([
+    sumDeductedByDocument(tx, organizationId, 'invoice', invoiceRows.map((r) => r.id as string)),
+    sumDeductedByDocument(tx, organizationId, 'bill', billRows.map((r) => r.id as string)),
+  ]);
+
+  const map = (
+    row: Record<string, unknown>,
+    kind: SettlementDocumentKind,
+    deducted: Map<string, bigint>,
+  ): OutstandingDocument => {
+    const totalMinor = BigInt(row.total_minor as string);
+    return {
+      id: row.id as string,
+      kind,
+      number: (row.number as string | null) ?? '—',
+      contactId: row.contact_id as string,
+      contactName: row.contact_name as string,
+      currency: row.currency as string,
+      totalMinor,
+      remainingMinor: totalMinor - (deducted.get(row.id as string) ?? 0n),
+    };
+  };
+
+  return [
+    ...invoiceRows.map((row) => map(row, 'invoice', invoiceDeducted)),
+    ...billRows.map((row) => map(row, 'bill', billDeducted)),
+  ].filter((doc) => doc.remainingMinor > 0n);
 }
 
 /**

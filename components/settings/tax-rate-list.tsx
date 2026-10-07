@@ -91,7 +91,6 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
     setPending(true);
     setError(null);
     try {
-      setShowAdd(false);
       await createTaxRate(orgSlug, {
         nameEn: nameEn.trim(),
         nameZh: nameZh.trim(),
@@ -102,6 +101,9 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
       setNameZh('');
       setRatePct('6');
       setIsDefault(false);
+      // 成功之后才收起表单。原来先收起再提交，失败时用户填的内容被藏起来，
+      // 只剩一句错误，得重新点「添加」才能看到刚才填了什么。
+      setShowAdd(false);
     } catch (e) {
       setError((e as Error).message);
     } finally {

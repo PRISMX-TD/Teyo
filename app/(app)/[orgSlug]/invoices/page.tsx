@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listInvoices } from '@/server/repositories/invoices';
 import { InvoiceList } from '@/components/invoices/invoice-list';
@@ -26,15 +27,23 @@ export default async function InvoicesListPage({
     listInvoices(tx, context.organizationId),
   );
 
+  // 页面只要 transaction:read（viewer 也进得来），而新建/开具要
+  // transaction:create、编辑/作废要 transaction:edit:any。按钮照角色画，
+  // 否则 viewer 点下去才吃一句权限报错。
+  const canCreate = can(context.role, 'transaction:create');
+  const canEdit = can(context.role, 'transaction:edit:any');
+
   return (
     <>
       <div className="page-header">
         <h1>{t.invoices.title}</h1>
-        <div className="page-header-actions">
-          <Link href={`/${orgSlug}/invoices/new`} className="primary-button">
-            {t.invoices.newTitle}
-          </Link>
-        </div>
+        {canCreate ? (
+          <div className="page-header-actions">
+            <Link href={`/${orgSlug}/invoices/new`} className="primary-button">
+              {t.invoices.newTitle}
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       {saved === '1' ? (
@@ -48,6 +57,8 @@ export default async function InvoicesListPage({
         rows={rows}
         locale={locale}
         emptyLabel={t.invoices.empty}
+        canIssue={canCreate}
+        canEdit={canEdit}
       />
     </>
   );

@@ -2,14 +2,14 @@ import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { getYearEndOverview } from '@/server/actions/year_end';
+import { getYearEndOverview } from '@/server/actions/year-end';
 import { YEAR_END_POSTING_AVAILABLE } from '@/server/services/year-end-close';
 import { YearEndPanel } from '@/components/settings/year-end-panel';
 
 /**
  * 年结页。owner only——requirePermission('period:lock') 与 0024 迁移里
  * fiscal_year_closings 的 insert/delete 策略对齐（那两条策略只认 owner）。
- * 权限选它而不是新增一个 Action 的理由见 server/actions/year_end.ts 顶部。
+ * 权限选它而不是新增一个 Action 的理由见 server/actions/year-end.ts 顶部。
  *
  * 这一页刻意放在设置里而不是报表里：它是一次写操作，而且是这个产品里影响
  * 面最大的一次——它会永久改变用户看到的资产负债表数字。报表页的每一个

@@ -4,7 +4,7 @@ import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 
-/** 有公司就跳第一家公司，没有就跳 /onboarding，只有一家则展示链接。 */
+/** 没有公司跳 /onboarding，只有一家直接进去，多家则列出供选择。 */
 export default async function HomePage({
   searchParams,
 }: {
@@ -18,7 +18,9 @@ export default async function HomePage({
     redirect(notice === 'no_access' ? '/onboarding?notice=no_access' : '/onboarding');
   }
 
-  if (orgs.length === 1) {
+  // 带着 no_access 过来时不直接跳：否则「你已无权访问那家公司」这句提示
+  // 永远显示不出来，用户只会莫名其妙地落到另一家公司。
+  if (orgs.length === 1 && notice !== 'no_access') {
     redirect(`/${orgs[0].slug}`);
   }
 
@@ -43,6 +45,10 @@ export default async function HomePage({
           ))}
         </ul>
       </nav>
+      {/* 不带 new=1 的话，/onboarding 会把已有公司的人直接送回第一家。 */}
+      <p style={{ marginTop: 'var(--space-6)' }}>
+        <Link href="/onboarding?new=1">{t.nav.newCompany}</Link>
+      </p>
     </main>
   );
 }

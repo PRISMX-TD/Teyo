@@ -6,7 +6,7 @@ import { getMessages, type Locale } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
-import { getInvoicePdfData } from '@/server/repositories/invoice_pdf';
+import { getInvoicePdfData } from '@/server/repositories/invoice-pdf';
 
 /**
  * 一张可以直接打印、或用浏览器「另存为 PDF」的发票。
@@ -58,6 +58,16 @@ export default async function InvoicePrintPage({
   // 美元发票会印上马币符号。
   const money = (minor: bigint) => formatMoney(minor, invoice.currency, locale);
 
+  // 状态原来原样印出数据库枚举值（'partially_paid'），中文发票上也是英文。
+  const statusLabel: Record<string, string> = {
+    draft: t.invoices.statusDraft,
+    sent: t.invoices.statusSent,
+    partially_paid: t.invoices.statusPartiallyPaid,
+    paid: t.invoices.statusPaid,
+    overdue: t.invoices.statusOverdue,
+    voided: t.invoices.statusVoided,
+  };
+
   return (
     <div className="invoice-document">
       <div className="page-header no-print">
@@ -90,7 +100,7 @@ export default async function InvoicePrintPage({
             <dt>{t.invoices.dueDate}</dt>
             <dd className="mono">{invoice.dueDate}</dd>
             <dt>{t.invoices.status}</dt>
-            <dd>{invoice.status}</dd>
+            <dd>{statusLabel[invoice.status] ?? invoice.status}</dd>
             <dt>{t.transaction.currency}</dt>
             <dd className="mono">{invoice.currency}</dd>
           </dl>

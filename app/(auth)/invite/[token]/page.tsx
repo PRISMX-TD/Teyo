@@ -29,6 +29,13 @@ export default async function InvitePage({
 
   const preview = await getInvitationPreview(token);
   const org = preview.organizationName;
+  // 角色要按界面语言显示：原来直接插入 'bookkeeper' 这样的库内值，中文页面上也是英文。
+  const roleLabels: Record<string, string> = {
+    owner: t.members.roleOwner,
+    admin: t.members.roleAdmin,
+    bookkeeper: t.members.roleBookkeeper,
+    viewer: t.members.roleViewer,
+  };
 
   async function accept() {
     'use server';
@@ -85,7 +92,9 @@ export default async function InvitePage({
       ) : (
         <>
           <h1>{t.invite.title}</h1>
-          <p>{t.invite.body.replace('{org}', org).replace('{role}', preview.role)}</p>
+          <p>{t.invite.body
+              .replace('{org}', org)
+              .replace('{role}', roleLabels[preview.role] ?? preview.role)}</p>
           {error ? (
             <p role="alert" className="form-error">
               {t.invite.acceptFailed}

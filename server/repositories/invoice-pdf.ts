@@ -69,7 +69,7 @@ export async function getInvoicePdfData(
     select description, quantity::text as quantity, unit_price_minor, amount_minor
     from invoice_items
     where invoice_id = ${invoiceId}
-    order by id
+    order by position nulls last, id
   `;
 
   return {

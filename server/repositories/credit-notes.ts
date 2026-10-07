@@ -5,6 +5,8 @@ export type CreditNoteStatus = 'draft' | 'issued' | 'applied' | 'voided';
 export type CreditNoteListRow = {
   id: string;
   invoiceId: string | null;
+  /** 挂着的那张发票的单号。列表原来只能显示 id 的前八位。 */
+  invoiceNumber: string | null;
   contactId: string;
   contactName: string;
   cnNumber: string;
@@ -108,6 +110,7 @@ function mapListRow(row: Record<string, unknown>): CreditNoteListRow {
   return {
     id: row.id as string,
     invoiceId: (row.invoice_id as string | null) ?? null,
+    invoiceNumber: (row.invoice_number as string | null) ?? null,
     contactId: row.contact_id as string,
     contactName: row.contact_name as string,
     cnNumber: row.cn_number as string,
@@ -148,9 +151,11 @@ export async function listCreditNotes(
       cn.issue_date, cn.currency, cn.exchange_rate, cn.base_amount_minor,
       cn.reason, cn.notes, cn.transaction_id, cn.voided_at,
       cn.created_at, cn.created_by,
-      c.name as contact_name
+      c.name as contact_name,
+      i.invoice_number
     from credit_notes cn
     join contacts c on c.id = cn.contact_id
+    left join invoices i on i.id = cn.invoice_id and i.organization_id = cn.organization_id
     where cn.organization_id = ${organizationId}
     order by cn.created_at desc
   `;
@@ -169,9 +174,11 @@ export async function getCreditNote(
       cn.issue_date, cn.currency, cn.exchange_rate, cn.base_amount_minor,
       cn.reason, cn.notes, cn.transaction_id, cn.voided_at,
       cn.created_at, cn.created_by,
-      c.name as contact_name
+      c.name as contact_name,
+      i.invoice_number
     from credit_notes cn
     join contacts c on c.id = cn.contact_id
+    left join invoices i on i.id = cn.invoice_id and i.organization_id = cn.organization_id
     where cn.id = ${id} and cn.organization_id = ${organizationId}
   `;
 
@@ -192,7 +199,7 @@ export async function getCreditNote(
       on tr.id = cni.tax_rate_id
      and tr.organization_id = ${organizationId}
     where cni.credit_note_id = ${id}
-    order by cni.id
+    order by cni.position nulls last, cni.id
   `;
 
   return {
@@ -347,13 +354,15 @@ export async function insertCreditNoteItems(
 
   await tx`
     insert into credit_note_items ${tx(
-      items.map((item) => ({
+      // position = 提交顺序的下标，理由见 invoices.ts 的 insertInvoiceItems。
+      items.map((item, index) => ({
         credit_note_id: item.creditNoteId,
         description: item.description,
         quantity: item.quantity,
         unit_price_minor: item.unitPriceMinor.toString(),
         amount_minor: item.amountMinor.toString(),
         tax_rate_id: item.taxRateId,
+        position: index,
       })),
       'credit_note_id',
       'description',
@@ -361,6 +370,7 @@ export async function insertCreditNoteItems(
       'unit_price_minor',
       'amount_minor',
       'tax_rate_id',
+      'position',
     )}
   `;
 }
@@ -436,25 +446,27 @@ export async function setCreditNoteTransactionId(
   `;
 }
 
+/**
+ * 下一个贷项通知单号。
+ *
+ * 原来是「按 created_at 取最近一张，解析号码加一」，与 getNextInvoiceNumber
+ * 修之前同一个毛病：最近那张的号码不合 CN-NNNNN 的形状时整个退回
+ * 'CN-00001'——那个号早就被用掉了，于是之后每一次新建都撞
+ * credit_notes_org_number 唯一约束，功能整个停摆。改成在 SQL 里对合规号码的
+ * 数字后缀取 max；并发由调用方的 withDocumentNumberRetry 兜住。
+ * 正则用 [0-9] 而不是 \d，理由见 getNextInvoiceNumber。
+ */
 export async function getNextCnNumber(
   tx: Tx,
   organizationId: string,
 ): Promise<string> {
   const rows = await tx`
-    select cn_number
+    select coalesce(max((substring(cn_number from '^CN-([0-9]+)$'))::bigint), 0) as last
     from credit_notes
     where organization_id = ${organizationId}
-    order by created_at desc
-    limit 1
+      and cn_number ~ '^CN-[0-9]+$'
   `;
 
-  const last = rows.at(0);
-  if (!last) return 'CN-00001';
-
-  const lastNumber = last.cn_number as string;
-  const match = lastNumber.match(/^CN-(\d+)$/);
-  if (!match) return 'CN-00001';
-
-  const next = parseInt(match[1], 10) + 1;
-  return `CN-${String(next).padStart(5, '0')}`;
+  const next = BigInt(rows[0].last as string) + 1n;
+  return `CN-${next.toString().padStart(5, '0')}`;
 }

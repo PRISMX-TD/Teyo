@@ -22,11 +22,17 @@ export function AttachmentPanel({
   transactionId,
   attachments: initial,
   t,
+  readOnly = false,
 }: {
   orgSlug: string;
   transactionId: string;
   attachments: Attachment[];
   t: Messages;
+  /**
+   * 无权改这笔交易的人（viewer、看别人记录的 bookkeeper）只能看凭证。
+   * 上传与删除的按钮对他们只会换来一句服务端拒绝。
+   */
+  readOnly?: boolean;
 }) {
   const [items, setItems] = useState(initial);
   const [uploading, setUploading] = useState(false);
@@ -70,7 +76,12 @@ export function AttachmentPanel({
     }
   }
 
-  async function handleDelete(attachmentId: string) {
+  async function handleDelete(attachmentId: string, fileName: string) {
+    // 删掉的凭证找不回来（库里那一行和存储里的对象都会删），点一下就没了
+    // 太轻了——两个按钮挨在一起，误点的是哪一个只有读屏用户分得清。
+    if (!window.confirm(interpolate(t.transaction.deleteAttachmentConfirm, { name: fileName }))) {
+      return;
+    }
     try {
       await deleteAttachment(orgSlug, attachmentId);
       setItems((prev) => prev.filter((a) => a.id !== attachmentId));
@@ -111,22 +122,34 @@ export function AttachmentPanel({
               >
                 <span aria-hidden="true">{previewId === item.id ? '\u2715' : '\u25b6'}</span>
               </button>
-              <button
-                type="button"
-                className="attachment-delete-btn"
-                aria-label={interpolate(t.transaction.deleteAttachment, { name: item.fileName })}
-                onClick={() => handleDelete(item.id)}
-              >
-                <span aria-hidden="true">&times;</span>
-              </button>
+              {!readOnly ? (
+                <button
+                  type="button"
+                  className="attachment-delete-btn"
+                  aria-label={interpolate(t.transaction.deleteAttachment, { name: item.fileName })}
+                  onClick={() => handleDelete(item.id, item.fileName)}
+                >
+                  <span aria-hidden="true">&times;</span>
+                </button>
+              ) : null}
             </li>
           ))}
         </ul>
       ) : (
-        <p className="text-muted">{t.transaction.empty}</p>
+        // 原来借用的是 t.transaction.empty（「没有符合筛选的记录」），
+        // 这里没有任何筛选。
+        <p className="text-muted">{t.transaction.noReceipts}</p>
       )}
 
-      {previewUrl ? (
+      {previewUrl && previewedItem?.mimeType === 'application/pdf' ? (
+        // PDF 塞进 <img> 只会显示一个破图标。给一个新标签页打开的链接，
+        // 签名 URL 本来就是短时效的，浏览器自带的 PDF 查看器接得住。
+        <div className="attachment-preview">
+          <a href={previewUrl} target="_blank" rel="noopener noreferrer">
+            {previewedItem.fileName}
+          </a>
+        </div>
+      ) : previewUrl ? (
         <div className="attachment-preview">
           {/* alt="" 是「这张图纯装饰，跳过它」的意思。凭证图片恰恰相反——
               它是这笔账的证据，读屏用户至少要知道自己打开的是哪一张。
@@ -146,16 +169,18 @@ export function AttachmentPanel({
         </div>
       ) : null}
 
-      <label className="attachment-upload-label">
-        <input
-          type="file"
-          accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
-          onChange={handleUpload}
-          disabled={uploading}
-          style={{ display: 'none' }}
-        />
-        {uploading ? t.common.loading : `+ ${t.transaction.receipt}`}
-      </label>
+      {!readOnly ? (
+        <label className="attachment-upload-label">
+          <input
+            type="file"
+            accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
+            onChange={handleUpload}
+            disabled={uploading}
+            style={{ display: 'none' }}
+          />
+          {uploading ? t.common.loading : `+ ${t.transaction.receipt}`}
+        </label>
+      ) : null}
 
       {error ? (
         <p role="alert" className="form-error">

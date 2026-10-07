@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { PoForm } from '@/components/purchase-orders/po-form';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -12,7 +13,9 @@ export default async function NewPurchaseOrderPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  // 与 create 那个 action 同一道权限：只读用户进来只会看到一张必然保存
+  // 失败的表单。
+  const context = await requirePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
@@ -36,7 +39,10 @@ export default async function NewPurchaseOrderPage({
     return (
       <>
         <h1>{t.purchaseOrders.newTitle}</h1>
-        <p className="empty-state">You need to add a vendor contact first. Go to Settings → Contacts to manage contacts.</p>
+        <p className="empty-state">
+          {t.purchaseOrders.noVendors}{' '}
+          <Link href={`/${orgSlug}/settings/contacts`}>{t.purchaseOrders.manageContacts}</Link>
+        </p>
       </>
     );
   }

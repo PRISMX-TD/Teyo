@@ -272,7 +272,7 @@ export function TransactionForm({
 
       try {
         await createJournal(orgSlug, journalPayload);
-        router.push(`/${orgSlug}/transactions`);
+        router.push(`/${orgSlug}/transactions?saved=1`);
       } catch (e) {
         const message = (e as Error)?.message ?? '';
         const isNetwork = !isOnline() || neverReachedServer(e);
@@ -375,7 +375,9 @@ export function TransactionForm({
         </div>
       ) : null}
 
-      {!scenario ? (
+      {/* 编辑时不给改类型：updateTransaction 把 kind 钉在原值上，这里换了
+          类型只会让分类下拉换成另一池、保存时被服务端拒掉。 */}
+      {!scenario && !isEdit ? (
         <fieldset>
           <legend>{t.transaction.kind}</legend>
           {KINDS.map((option) => (
@@ -533,7 +535,10 @@ export function TransactionForm({
             ))}
           </select>
         </>
-      ) : scenario && !scenario.needsCategory ? null : (
+      ) : scenario && !scenario.needsCategory && presetCategoryId ? null : (
+        // presetCategoryId 查不到（这家公司没有挂在「进货」科目上的分类）时
+        // 退回分类下拉，否则这张表单交上去必然报「需要分类」，而界面上
+        // 没有任何能补救的地方。
         <>
           {/* Describes the chips + fallback select as a pair, so it is not
               `for`-bound to either one specifically — the select below has
