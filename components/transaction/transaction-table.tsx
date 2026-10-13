@@ -34,7 +34,10 @@ export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLab
       </thead>
       <tbody>
         {rows.map((row) => (
-          <tr key={row.id} className={row.voidedAt ? 'row-voided' : undefined}>
+          // row-link 让手机上的整张卡片都点得进详情页。原来只有备注那几个字是
+          // 链接，备注为空时只剩一个「—」，几乎点不中。链接本身仍然只有一个，
+          // 读屏与键盘走的还是它；为什么只在卡片布局上做，见 globals.css 的 .row-link。
+          <tr key={row.id} className={row.voidedAt ? 'row-link row-voided' : 'row-link'}>
             <td>{row.occurredOn}</td>
             <td>
               <Link href={`/${orgSlug}/transactions/${row.id}`}>

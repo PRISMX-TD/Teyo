@@ -2,7 +2,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { Tx } from '@/server/db/transaction';
 
-export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
+// 上限与类型和浏览器那一侧共用，定义在 lib/upload-rules.ts。
+export { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '@/lib/upload-rules';
 
 /**
  * 签名 URL 有效期（秒）。不能放在 lib/supabase/storage.ts 里作默认参数——
@@ -10,17 +11,17 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
  */
 export const SIGNED_URL_TTL_SECONDS = 300;
 
-export const ALLOWED_ATTACHMENT_TYPES: readonly string[] = [
-  'image/jpeg',
-  'image/png',
-  'image/webp',
-  'image/heic',
-  'application/pdf',
-];
+/**
+ * 附件挂在哪里。一份附件只属于一处，数据库层由 0035 的
+ * attachments_single_owner 约束保证。
+ */
+export type AttachmentOwner =
+  | { type: 'transaction'; id: string }
+  | { type: 'bill'; id: string };
 
 export type AttachmentRow = {
   id: string;
-  transactionId: string;
+  owner: AttachmentOwner;
   storagePath: string;
   fileName: string;
   mimeType: string;
@@ -29,7 +30,7 @@ export type AttachmentRow = {
 };
 
 /**
- * 路径形如 `<orgId>/<transactionId>/<uuid>.<ext>`。
+ * 路径形如 `<orgId>/<ownerId>/<uuid>.<ext>`，ownerId 是交易或账单的 id。
  *
  * 首段必须是 organization_id：Storage 策略取 (storage.foldername(name))[1] 判成员关系，
  * 首段一旦不是公司 id，隔离就没了。
@@ -39,18 +40,18 @@ export type AttachmentRow = {
  */
 export function buildStoragePath(
   organizationId: string,
-  transactionId: string,
+  ownerId: string,
   fileName: string,
 ): string {
   const ext = path.extname(path.basename(fileName)).toLowerCase().replace(/[^.a-z0-9]/g, '');
-  return `${organizationId}/${transactionId}/${randomUUID()}${ext}`;
+  return `${organizationId}/${ownerId}/${randomUUID()}${ext}`;
 }
 
 export async function insertAttachment(
   tx: Tx,
   row: {
     organizationId: string;
-    transactionId: string;
+    owner: AttachmentOwner;
     storagePath: string;
     fileName: string;
     mimeType: string;
@@ -58,11 +59,14 @@ export async function insertAttachment(
     uploadedBy: string;
   },
 ): Promise<{ id: string }> {
+  const transactionId = row.owner.type === 'transaction' ? row.owner.id : null;
+  const billId = row.owner.type === 'bill' ? row.owner.id : null;
   const [inserted] = await tx`
     insert into attachments (
-      organization_id, transaction_id, storage_path, file_name, mime_type, size_bytes, uploaded_by
+      organization_id, transaction_id, bill_id, storage_path, file_name, mime_type, size_bytes,
+      uploaded_by
     ) values (
-      ${row.organizationId}, ${row.transactionId}, ${row.storagePath},
+      ${row.organizationId}, ${transactionId}, ${billId}, ${row.storagePath},
       ${row.fileName}, ${row.mimeType}, ${row.sizeBytes}, ${row.uploadedBy}
     )
     returning id
@@ -71,9 +75,13 @@ export async function insertAttachment(
 }
 
 function mapRow(row: Record<string, unknown>): AttachmentRow {
+  // attachments_single_owner 保证两列恰好一列非空。
+  const owner: AttachmentOwner = row.transaction_id
+    ? { type: 'transaction', id: row.transaction_id as string }
+    : { type: 'bill', id: row.bill_id as string };
   return {
     id: row.id as string,
-    transactionId: row.transaction_id as string,
+    owner,
     storagePath: row.storage_path as string,
     fileName: row.file_name as string,
     mimeType: row.mime_type as string,
@@ -85,15 +93,50 @@ function mapRow(row: Record<string, unknown>): AttachmentRow {
 export async function listAttachments(
   tx: Tx,
   organizationId: string,
-  transactionId: string,
+  owner: AttachmentOwner,
 ): Promise<AttachmentRow[]> {
-  const rows = await tx`
-    select id, transaction_id, storage_path, file_name, mime_type, size_bytes, uploaded_by
-    from attachments
-    where organization_id = ${organizationId} and transaction_id = ${transactionId}
-    order by created_at
-  `;
+  // 两条写死的查询而不是拼列名：列名进 SQL 的路径越少越好，而所属类型
+  // 只有两种。
+  const rows =
+    owner.type === 'transaction'
+      ? await tx`
+          select id, transaction_id, bill_id, storage_path, file_name, mime_type, size_bytes,
+                 uploaded_by
+          from attachments
+          where organization_id = ${organizationId} and transaction_id = ${owner.id}
+          order by created_at
+        `
+      : await tx`
+          select id, transaction_id, bill_id, storage_path, file_name, mime_type, size_bytes,
+                 uploaded_by
+          from attachments
+          where organization_id = ${organizationId} and bill_id = ${owner.id}
+          order by created_at
+        `;
   return rows.map(mapRow);
+}
+
+/**
+ * 把一笔交易的附件整批挪到另一笔上。只给「换类型重录」用：原交易被作废、
+ * 新交易接替它，收据是同一张，不该留在一笔已经作废、页面上连附件区都
+ * 不显示的记录上。
+ *
+ * 存储里的对象不动——路径第二段仍是旧交易的 id，但路径只是对象的键，
+ * Storage 策略只看第一段的公司 id，库里这一行才是「它属于谁」的唯一依据。
+ */
+export async function moveTransactionAttachments(
+  tx: Tx,
+  organizationId: string,
+  fromTransactionId: string,
+  toTransactionId: string,
+): Promise<number> {
+  const rows = await tx`
+    update attachments
+    set transaction_id = ${toTransactionId}
+    where organization_id = ${organizationId} and transaction_id = ${fromTransactionId}
+    returning id
+  `;
+  return rows.length;
 }
 
 export class AttachmentNotFoundError extends Error {
@@ -118,7 +161,7 @@ export async function getAttachment(
   }
 
   const rows = await tx`
-    select id, transaction_id, storage_path, file_name, mime_type, size_bytes, uploaded_by
+    select id, transaction_id, bill_id, storage_path, file_name, mime_type, size_bytes, uploaded_by
     from attachments
     where id = ${attachmentId} and organization_id = ${organizationId}
   `;

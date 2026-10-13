@@ -70,6 +70,15 @@ export const updateOrgSchema = z.object({
    * 越好，而地址在开第一张发票之前都用不上。
    */
   address: z.string().trim().max(300).optional(),
+  /**
+   * 发票上的其余卖方资料（0034）。和 address 一样只在编辑公司资料时出现、
+   * 全部可省；省略即清空，因为设置表单每次都会把这几项一起提交。
+   */
+  registrationNumber: z.string().trim().max(60).optional(),
+  taxNumber: z.string().trim().max(60).optional(),
+  phone: z.string().trim().max(40).optional(),
+  email: z.string().trim().max(254).email().optional(),
+  paymentDetails: z.string().trim().max(500).optional(),
   fiscalYearStartMonth,
 });
 

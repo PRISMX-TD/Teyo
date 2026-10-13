@@ -1,12 +1,14 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { BillForm } from '@/components/bills/bill-form';
+import { AttachmentPanel } from '@/components/transaction/attachment-panel';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getBill } from '@/server/repositories/bills';
+import { listAttachments } from '@/server/repositories/attachments';
 import { listTaxRates } from '@/server/repositories/tax';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
@@ -25,7 +27,7 @@ export default async function BillDetailPage({
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const { bill, contacts, taxRates } = await withTransaction(context.userId, async (tx) => {
+  const { bill, contacts, taxRates, attachments } = await withTransaction(context.userId, async (tx) => {
     const found = await getBill(tx, context.organizationId, id);
     const rows = await tx`
       select id, name
@@ -36,10 +38,17 @@ export default async function BillDetailPage({
       order by name
     ` as { id: string; name: string }[];
     const rates = await listTaxRates(tx, context.organizationId);
-    return { bill: found, contacts: rows, taxRates: rates };
+    // 查不到账单时 found 是 null，下面会 404；这时也就不必去取附件。
+    const files = found
+      ? await listAttachments(tx, context.organizationId, { type: 'bill', id: found.id })
+      : [];
+    return { bill: found, contacts: rows, taxRates: rates, attachments: files };
   });
 
   if (!bill) notFound();
+
+  // updateBill 要 transaction:edit:any，这一页只要 transaction:read。
+  const canEdit = can(context.role, 'transaction:edit:any');
 
   // 停用的供应商要补回下拉框，理由见发票那一侧的同一段注释。
   const contactOptions = contacts.some((c) => c.id === bill.contactId)
@@ -79,8 +88,30 @@ export default async function BillDetailPage({
           rateBps: rate.rateBps,
         }))}
         bill={bill}
-        // updateBill 要 transaction:edit:any，这一页只要 transaction:read。
-        readOnly={!can(context.role, 'transaction:edit:any')}
+        readOnly={!canEdit}
+      />
+
+      {/*
+        供应商寄来的账单原件。挂在账单上而不是它生成的那笔分录上：草稿账单
+        还没有分录，已入账的账单改一次就重过一次账（见 0035 迁移）。
+        改它的门与改账单本身相同；作废的账单只能看，不能再增删。
+      */}
+      <AttachmentPanel
+        orgSlug={orgSlug}
+        owner={{ type: 'bill', id: bill.id }}
+        attachments={attachments.map((file) => ({
+          id: file.id,
+          fileName: file.fileName,
+          mimeType: file.mimeType,
+          sizeBytes: file.sizeBytes,
+        }))}
+        t={t}
+        readOnly={!canEdit || bill.status === 'voided'}
+        labels={{
+          title: t.bills.attachments,
+          empty: t.bills.noAttachments,
+          add: t.bills.addAttachment,
+        }}
       />
     </>
   );

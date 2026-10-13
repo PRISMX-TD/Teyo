@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { createOrgSchema, periodLockSchema, updateOrgSchema } from '@/lib/schemas';
+import { BRANDING_BUCKET, getStorageClient } from '@/lib/supabase/storage';
 import { requirePermission, requireUserId } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
@@ -9,10 +10,13 @@ import {
   generateUniqueSlug,
   getOrganizationSettings,
   insertOrganization,
+  setOrganizationLogoPath,
   setPeriodLock,
   updateOrganizationSettings,
 } from '@/server/repositories/organizations';
 import { seedChartOfAccounts } from '@/server/services/account-seed';
+import { ALLOWED_LOGO_TYPES, MAX_LOGO_BYTES } from '@/lib/upload-rules';
+import { buildLogoPath } from '@/server/services/organization-logo';
 
 export type CreateOrgInput = {
   name: string;
@@ -68,6 +72,11 @@ export async function updateOrganization(
     timezone: string;
     industry?: string;
     address?: string;
+    registrationNumber?: string;
+    taxNumber?: string;
+    phone?: string;
+    email?: string;
+    paymentDetails?: string;
     fiscalYearStartMonth: number | string;
   },
 ): Promise<void> {
@@ -85,6 +94,11 @@ export async function updateOrganization(
       timezone: data.timezone,
       industry: data.industry ?? null,
       address: data.address ?? null,
+      registrationNumber: data.registrationNumber ?? null,
+      taxNumber: data.taxNumber ?? null,
+      phone: data.phone ?? null,
+      email: data.email ?? null,
+      paymentDetails: data.paymentDetails ?? null,
       fiscalYearStartMonth: data.fiscalYearStartMonth,
     });
 
@@ -128,6 +142,82 @@ export async function updatePeriodLock(
       after: { lockedUntil: data.lockedUntil },
     });
   });
+
+  revalidatePath(`/${orgSlug}/settings/general`);
+}
+
+/**
+ * 上传或替换公司 logo。
+ *
+ * 顺序与收据上传（server/actions/attachments.ts）相同：先校验、再写对象、
+ * 再在事务里改库；改库失败就把刚写进去的对象删掉，不留孤儿。
+ *
+ * 旧 logo 在事务提交**之后**才删。反过来的话，删完旧图、改库却失败，
+ * 库里那一行仍然指着一个已经不存在的对象，发票上的 logo 就此变成一个
+ * 永远取不到的签名 URL。旧图删失败不报错：新 logo 已经生效，用户要的
+ * 事情做成了，剩下的只是存储里多一张没人引用的小图。
+ */
+export async function uploadOrganizationLogo(orgSlug: string, file: File): Promise<void> {
+  const context = await requirePermission(orgSlug, 'account:manage');
+
+  if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+    throw new Error('Use a PNG, JPG or WebP image for the logo.');
+  }
+  if (file.size > MAX_LOGO_BYTES) {
+    throw new Error('The logo must be 1 MB or smaller.');
+  }
+
+  const storage = getStorageClient(BRANDING_BUCKET);
+  const logoPath = buildLogoPath(context.organizationId, file.name);
+  await storage.upload(logoPath, file);
+
+  const { previousPath } = await withTransaction(context.userId, async (tx) => {
+    const result = await setOrganizationLogoPath(tx, context.organizationId, logoPath);
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'organization.update',
+      entityType: 'organization',
+      entityId: context.organizationId,
+      before: { logoPath: result.previousPath },
+      after: { logoPath, fileName: file.name, sizeBytes: file.size },
+    });
+    return result;
+  }).catch(async (error: unknown) => {
+    await storage.remove(logoPath).catch(() => {});
+    throw error;
+  });
+
+  if (previousPath) {
+    await storage.remove(previousPath).catch(() => {});
+  }
+
+  revalidatePath(`/${orgSlug}/settings/general`);
+}
+
+/** 去掉 logo。同样是先改库、提交之后再删对象。 */
+export async function removeOrganizationLogo(orgSlug: string): Promise<void> {
+  const context = await requirePermission(orgSlug, 'account:manage');
+
+  const { previousPath } = await withTransaction(context.userId, async (tx) => {
+    const result = await setOrganizationLogoPath(tx, context.organizationId, null);
+    if (result.previousPath) {
+      await recordAudit(tx, {
+        organizationId: context.organizationId,
+        actorUserId: context.userId,
+        action: 'organization.update',
+        entityType: 'organization',
+        entityId: context.organizationId,
+        before: { logoPath: result.previousPath },
+        after: { logoPath: null },
+      });
+    }
+    return result;
+  });
+
+  if (previousPath) {
+    await getStorageClient(BRANDING_BUCKET).remove(previousPath).catch(() => {});
+  }
 
   revalidatePath(`/${orgSlug}/settings/general`);
 }

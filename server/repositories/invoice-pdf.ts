@@ -4,6 +4,13 @@ export type InvoicePdfData = {
   organization: {
     name: string;
     address: string | null;
+    registrationNumber: string | null;
+    taxNumber: string | null;
+    phone: string | null;
+    email: string | null;
+    paymentDetails: string | null;
+    /** branding bucket 里的对象路径，页面自己换签名 URL。 */
+    logoPath: string | null;
   };
   invoice: {
     invoiceNumber: string;
@@ -59,7 +66,9 @@ export async function getInvoicePdfData(
   if (!invoiceRow) return null;
 
   const orgRows = await tx`
-    select name, address from organizations
+    select name, address, registration_number, tax_number, phone, email,
+           payment_details, logo_path
+    from organizations
     where id = ${organizationId}
   `;
   const orgRow = orgRows.at(0);
@@ -76,6 +85,12 @@ export async function getInvoicePdfData(
     organization: {
       name: orgRow.name as string,
       address: (orgRow.address as string | null) ?? null,
+      registrationNumber: (orgRow.registration_number as string | null) ?? null,
+      taxNumber: (orgRow.tax_number as string | null) ?? null,
+      phone: (orgRow.phone as string | null) ?? null,
+      email: (orgRow.email as string | null) ?? null,
+      paymentDetails: (orgRow.payment_details as string | null) ?? null,
+      logoPath: (orgRow.logo_path as string | null) ?? null,
     },
     invoice: {
       invoiceNumber: invoiceRow.invoice_number as string,

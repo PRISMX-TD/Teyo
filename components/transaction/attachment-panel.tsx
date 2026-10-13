@@ -1,8 +1,14 @@
 'use client';
 
 import { useState } from 'react';
-import { uploadAttachment, deleteAttachment, getAttachmentSignedUrl } from '@/server/actions/attachments';
+import {
+  deleteAttachment,
+  getAttachmentSignedUrl,
+  uploadAttachment,
+  uploadBillAttachment,
+} from '@/server/actions/attachments';
 import { interpolate, type Messages } from '@/lib/i18n';
+import { ALLOWED_ATTACHMENT_TYPES, MAX_ATTACHMENT_BYTES } from '@/lib/upload-rules';
 
 type Attachment = {
   id: string;
@@ -11,21 +17,37 @@ type Attachment = {
   sizeBytes: number;
 };
 
-function fmtSize(bytes: number): string {
+export function formatFileSize(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * 选完文件当场判一次类型和大小，规则与服务端是同一份（lib/upload-rules.ts）。
+ * 不过的返回一句说明，过的返回 null。新建交易的表单也用它。
+ */
+export function attachmentIssue(file: File, t: Messages): string | null {
+  if (!ALLOWED_ATTACHMENT_TYPES.includes(file.type)) {
+    return interpolate(t.transaction.receiptWrongType, { name: file.name });
+  }
+  if (file.size > MAX_ATTACHMENT_BYTES) {
+    return interpolate(t.transaction.receiptTooLarge, { name: file.name });
+  }
+  return null;
+}
+
 export function AttachmentPanel({
   orgSlug,
-  transactionId,
+  owner,
   attachments: initial,
   t,
   readOnly = false,
+  labels,
 }: {
   orgSlug: string;
-  transactionId: string;
+  /** 附件挂在哪：一笔交易，或一张供应商账单。 */
+  owner: { type: 'transaction' | 'bill'; id: string };
   attachments: Attachment[];
   t: Messages;
   /**
@@ -33,7 +55,14 @@ export function AttachmentPanel({
    * 上传与删除的按钮对他们只会换来一句服务端拒绝。
    */
   readOnly?: boolean;
+  /** 标题、空状态与上传按钮的文案。缺省是交易那一套「收据」。 */
+  labels?: { title: string; empty: string; add: string };
 }) {
+  const text = labels ?? {
+    title: t.transaction.receipt,
+    empty: t.transaction.noReceipts,
+    add: t.transaction.receiptAdd,
+  };
   const [items, setItems] = useState(initial);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,23 +70,44 @@ export function AttachmentPanel({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const previewedItem = items.find((item) => item.id === previewId) ?? null;
 
+  /**
+   * 一次可以选好几个文件（一张收据拍了正反两面、一份账单分了几页），逐个上传。
+   * 不并发：Server Action 的请求体上限是 12MB，几张照片一起发很容易撞上，
+   * 而一个一个传时哪一张失败了也说得清。前面传成功的不会因为后面某一张
+   * 失败而被撤回——它们已经是完整的凭证了。
+   */
   async function handleUpload(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0];
-    if (!file) return;
+    const input = e.target;
+    const files = Array.from(input.files ?? []);
+    if (files.length === 0) return;
 
     setUploading(true);
     setError(null);
+    const problems: string[] = [];
     try {
-      const result = await uploadAttachment(orgSlug, transactionId, file);
-      setItems((prev) => [
-        ...prev,
-        { id: result.id, fileName: file.name, mimeType: file.type, sizeBytes: file.size },
-      ]);
-    } catch (err) {
-      setError((err as Error).message);
+      for (const file of files) {
+        const issue = attachmentIssue(file, t);
+        if (issue) {
+          problems.push(issue);
+          continue;
+        }
+        try {
+          const result =
+            owner.type === 'transaction'
+              ? await uploadAttachment(orgSlug, owner.id, file)
+              : await uploadBillAttachment(orgSlug, owner.id, file);
+          setItems((prev) => [
+            ...prev,
+            { id: result.id, fileName: file.name, mimeType: file.type, sizeBytes: file.size },
+          ]);
+        } catch (err) {
+          problems.push(`${file.name}: ${(err as Error).message}`);
+        }
+      }
     } finally {
       setUploading(false);
-      if (e.target) e.target.value = '';
+      input.value = '';
+      if (problems.length > 0) setError(problems.join('\n'));
     }
   }
 
@@ -96,14 +146,14 @@ export function AttachmentPanel({
 
   return (
     <section className="attachment-panel">
-      <h2>{t.transaction.receipt}</h2>
+      <h2>{text.title}</h2>
 
       {items.length > 0 ? (
         <ul className="attachment-list">
           {items.map((item) => (
             <li key={item.id}>
               <span className="attachment-name">{item.fileName}</span>
-              <span className="attachment-size">{fmtSize(item.sizeBytes)}</span>
+              <span className="attachment-size">{formatFileSize(item.sizeBytes)}</span>
               {/* \u8fd9\u4e24\u4e2a\u6309\u94ae\u7684\u53ef\u89c1\u5185\u5bb9\u53ea\u6709 \u2715 / \u25b6 / \u00d7 \u4e09\u4e2a\u7b26\u53f7\uff0c\u8bfb\u5c4f\u5ff5\u51fa\u6765
                   \u5c31\u662f\u300c\u6309\u94ae\u300d\u300c\u6309\u94ae\u300d\u2014\u2014\u4e00\u884c\u91cc\u6709\u4e24\u4e2a\u540c\u540d\u6309\u94ae\uff0c\u5176\u4e2d\u4e00\u4e2a\u4f1a
                   \u6c38\u4e45\u5220\u6389\u51ed\u8bc1\u3002aria-label \u5e26\u4e0a\u6587\u4ef6\u540d\uff0c\u624d\u5206\u5f97\u6e05\u5220\u7684\u662f\u54ea\u5f20\u3002
@@ -138,7 +188,7 @@ export function AttachmentPanel({
       ) : (
         // 原来借用的是 t.transaction.empty（「没有符合筛选的记录」），
         // 这里没有任何筛选。
-        <p className="text-muted">{t.transaction.noReceipts}</p>
+        <p className="text-muted">{text.empty}</p>
       )}
 
       {previewUrl && previewedItem?.mimeType === 'application/pdf' ? (
@@ -170,20 +220,25 @@ export function AttachmentPanel({
       ) : null}
 
       {!readOnly ? (
-        <label className="attachment-upload-label">
-          <input
-            type="file"
-            accept="image/jpeg,image/png,image/webp,image/heic,application/pdf"
-            onChange={handleUpload}
-            disabled={uploading}
-            style={{ display: 'none' }}
-          />
-          {uploading ? t.common.loading : `+ ${t.transaction.receipt}`}
-        </label>
+        <div className="attachment-panel-actions">
+          {/* 原来这个文件框带着 style={{ display: 'none' }}，把 globals.css 里
+              给它写好的视觉隐藏规则盖掉了：display:none 的输入框不进 Tab 顺序，
+              键盘用户根本够不到上传。 */}
+          <label className="attachment-upload-label">
+            <input
+              type="file"
+              multiple
+              accept={ALLOWED_ATTACHMENT_TYPES.join(',')}
+              onChange={handleUpload}
+              disabled={uploading}
+            />
+            {uploading ? t.common.loading : `+ ${text.add}`}
+          </label>
+        </div>
       ) : null}
 
       {error ? (
-        <p role="alert" className="form-error">
+        <p role="alert" className="form-error attachment-errors">
           {error}
         </p>
       ) : null}

@@ -1,0 +1,290 @@
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { randomUUID } from 'node:crypto';
+import { admin } from '@/tests/helpers/db';
+import {
+  createTestOrgWithSeed,
+  createTestUser,
+  joinOrg,
+  resetTestData,
+} from '@/tests/helpers/test-db';
+
+let currentUserId: string | null = null;
+
+vi.mock('@/server/auth/session', () => ({
+  getCurrentUserId: () => Promise.resolve(currentUserId),
+}));
+
+vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
+
+/**
+ * 内存版 Storage，按 bucket 分开记。logo 必须写进 branding，不能落进收据的
+ * receipts bucket——那边的上限和类型是给收据定的。
+ */
+const objects = new Map<string, { bucket: string; size: number; contentType: string }>();
+let signedUrlFails = false;
+
+vi.mock('@/lib/supabase/storage', () => ({
+  RECEIPTS_BUCKET: 'receipts',
+  BRANDING_BUCKET: 'branding',
+  getStorageClient: (bucket = 'receipts') => ({
+    upload: async (path: string, file: File) => {
+      objects.set(path, { bucket, size: file.size, contentType: file.type });
+      return { path };
+    },
+    createSignedUrl: async (path: string, expiresIn: number) => {
+      if (signedUrlFails || !objects.has(path)) throw new Error('object not found');
+      return `https://storage.test/${bucket}/${path}?expires=${expiresIn}`;
+    },
+    remove: async (path: string) => {
+      objects.delete(path);
+    },
+  }),
+}));
+
+const { removeOrganizationLogo, updateOrganization, uploadOrganizationLogo } = await import(
+  '@/server/actions/organizations'
+);
+const { createInvoice } = await import('@/server/actions/invoices');
+const { getInvoicePdfData } = await import('@/server/repositories/invoice-pdf');
+const { getLogoSignedUrl, LOGO_SIGNED_URL_TTL_SECONDS } = await import(
+  '@/server/services/organization-logo'
+);
+const { withTransaction } = await import('@/server/db/transaction');
+
+let ownerId: string;
+let adminId: string;
+let bookkeeperId: string;
+let orgId: string;
+let orgSlug: string;
+let customerId: string;
+
+const suffix = randomUUID().slice(0, 8);
+
+function image(name = 'logo.png', type = 'image/png', bytes = 4096): File {
+  return new File([new Uint8Array(bytes)], name, { type });
+}
+
+async function logoPath(): Promise<string | null> {
+  const [row] = await admin`select logo_path from organizations where id = ${orgId}`;
+  return (row.logo_path as string | null) ?? null;
+}
+
+const BASE_SETTINGS = {
+  name: 'Profile Co',
+  timezone: 'Asia/Kuala_Lumpur',
+  fiscalYearStartMonth: '1',
+};
+
+beforeAll(async () => {
+  await resetTestData();
+  ownerId = await createTestUser(`owner-prof-${suffix}@example.com`, 'Owner');
+  adminId = await createTestUser(`admin-prof-${suffix}@example.com`, 'Admin');
+  bookkeeperId = await createTestUser(`book-prof-${suffix}@example.com`, 'Bookkeeper');
+
+  const org = await createTestOrgWithSeed(ownerId, 'Profile Co', `profile-co-${suffix}`, 'MYR');
+  orgId = org.id;
+  orgSlug = org.slug;
+  await joinOrg(adminId, orgId, 'admin');
+  await joinOrg(bookkeeperId, orgId, 'bookkeeper');
+
+  const [contact] = await admin`
+    insert into contacts (organization_id, type, name, address)
+    values (${orgId}, 'customer', 'Customer Sdn Bhd', ${'Lot 1\nJalan Dua'})
+    returning id
+  `;
+  customerId = contact.id as string;
+});
+
+beforeEach(() => {
+  signedUrlFails = false;
+});
+
+afterAll(async () => {
+  await resetTestData();
+  await admin.end();
+});
+
+describe('updateOrganization: seller details for invoices', () => {
+  it('saves every invoice field the form sends', async () => {
+    currentUserId = ownerId;
+    await updateOrganization(orgSlug, {
+      ...BASE_SETTINGS,
+      address: 'Lot 5, Jalan Tiga\n50000 Kuala Lumpur',
+      registrationNumber: '202401012345 (1234567-X)',
+      taxNumber: 'W10-1808-32000123',
+      phone: '+60 3-1234 5678',
+      email: 'billing@profile.example',
+      paymentDetails: 'Maybank\nProfile Co Sdn Bhd\n5123 4567 8901',
+    });
+
+    const [row] = await admin`
+      select address, registration_number, tax_number, phone, email, payment_details
+      from organizations where id = ${orgId}
+    `;
+    expect(row).toEqual({
+      address: 'Lot 5, Jalan Tiga\n50000 Kuala Lumpur',
+      registration_number: '202401012345 (1234567-X)',
+      tax_number: 'W10-1808-32000123',
+      phone: '+60 3-1234 5678',
+      email: 'billing@profile.example',
+      payment_details: 'Maybank\nProfile Co Sdn Bhd\n5123 4567 8901',
+    });
+  });
+
+  it('clears a field the form leaves blank', async () => {
+    currentUserId = ownerId;
+    await updateOrganization(orgSlug, { ...BASE_SETTINGS, taxNumber: 'SST-1' });
+    await updateOrganization(orgSlug, { ...BASE_SETTINGS });
+
+    const [row] = await admin`select tax_number, phone from organizations where id = ${orgId}`;
+    expect(row.tax_number).toBeNull();
+    expect(row.phone).toBeNull();
+  });
+
+  it('rejects an email that is not an email address', async () => {
+    currentUserId = ownerId;
+    await expect(
+      updateOrganization(orgSlug, { ...BASE_SETTINGS, email: 'not an email' }),
+    ).rejects.toThrow();
+  });
+
+  it('puts the seller details on the printable invoice data', async () => {
+    currentUserId = ownerId;
+    await updateOrganization(orgSlug, {
+      ...BASE_SETTINGS,
+      registrationNumber: 'REG-42',
+      taxNumber: 'TAX-42',
+      paymentDetails: 'Bank: Test Bank',
+    });
+    const { id } = await createInvoice(orgSlug, {
+      contactId: customerId,
+      issueDate: '2033-04-01',
+      dueDate: '2033-05-01',
+      currency: 'MYR',
+      taxRatePercent: '0',
+      items: [{ description: 'Design work', quantity: '1', unitPrice: '500.00' }],
+    });
+
+    const data = await withTransaction(ownerId, (tx) => getInvoicePdfData(tx, orgId, id));
+    expect(data?.organization).toMatchObject({
+      name: 'Profile Co',
+      registrationNumber: 'REG-42',
+      taxNumber: 'TAX-42',
+      paymentDetails: 'Bank: Test Bank',
+      logoPath: null,
+    });
+  });
+});
+
+describe('uploadOrganizationLogo', () => {
+  it('stores the logo in the branding bucket under the company folder', async () => {
+    currentUserId = ownerId;
+    await uploadOrganizationLogo(orgSlug, image());
+
+    const path = await logoPath();
+    expect(path).not.toBeNull();
+    expect(path!.startsWith(`${orgId}/logo-`)).toBe(true);
+    expect(path).toMatch(/\.png$/);
+    expect(objects.get(path!)?.bucket).toBe('branding');
+  });
+
+  it('replaces the previous logo and removes the old object', async () => {
+    currentUserId = ownerId;
+    await uploadOrganizationLogo(orgSlug, image('first.png'));
+    const first = await logoPath();
+
+    await uploadOrganizationLogo(orgSlug, image('second.webp', 'image/webp'));
+    const second = await logoPath();
+
+    expect(second).not.toBe(first);
+    expect(second).toMatch(/\.webp$/);
+    expect(objects.has(first!)).toBe(false);
+    expect(objects.has(second!)).toBe(true);
+  });
+
+  it('writes the change to the audit log', async () => {
+    currentUserId = ownerId;
+    const before = await logoPath();
+    await uploadOrganizationLogo(orgSlug, image('audited.jpg', 'image/jpeg'));
+    const after = await logoPath();
+
+    const [log] = await admin`
+      select action, before, after from audit_logs
+      where organization_id = ${orgId} and action = 'organization.update'
+        and after ->> 'logoPath' = ${after}
+    `;
+    expect(log.before).toEqual({ logoPath: before });
+    expect(log.after).toMatchObject({ logoPath: after, fileName: 'audited.jpg' });
+  });
+
+  it('lets an admin change the logo', async () => {
+    currentUserId = adminId;
+    await expect(uploadOrganizationLogo(orgSlug, image('by-admin.png'))).resolves.toBeUndefined();
+  });
+
+  it('does not let a bookkeeper change the logo', async () => {
+    currentUserId = bookkeeperId;
+    const before = await logoPath();
+    await expect(uploadOrganizationLogo(orgSlug, image())).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    expect(await logoPath()).toBe(before);
+  });
+
+  it('rejects an SVG, which can carry script', async () => {
+    currentUserId = ownerId;
+    const before = objects.size;
+    await expect(
+      uploadOrganizationLogo(orgSlug, image('logo.svg', 'image/svg+xml')),
+    ).rejects.toThrow(/PNG, JPG or WebP/);
+    expect(objects.size).toBe(before);
+  });
+
+  it('rejects a logo over 1 MB', async () => {
+    currentUserId = ownerId;
+    await expect(
+      uploadOrganizationLogo(orgSlug, image('huge.png', 'image/png', 1024 * 1024 + 1)),
+    ).rejects.toThrow(/1 MB/);
+  });
+});
+
+describe('removeOrganizationLogo', () => {
+  it('clears the logo and deletes the stored object', async () => {
+    currentUserId = ownerId;
+    await uploadOrganizationLogo(orgSlug, image('to-remove.png'));
+    const path = await logoPath();
+
+    await removeOrganizationLogo(orgSlug);
+
+    expect(await logoPath()).toBeNull();
+    expect(objects.has(path!)).toBe(false);
+  });
+
+  it('is a no-op when there is no logo', async () => {
+    currentUserId = ownerId;
+    await removeOrganizationLogo(orgSlug);
+    await expect(removeOrganizationLogo(orgSlug)).resolves.toBeUndefined();
+    expect(await logoPath()).toBeNull();
+  });
+});
+
+describe('getLogoSignedUrl', () => {
+  it('returns null when there is no logo', async () => {
+    await expect(getLogoSignedUrl(null)).resolves.toBeNull();
+  });
+
+  it('signs a branding-bucket url with the logo ttl', async () => {
+    currentUserId = ownerId;
+    await uploadOrganizationLogo(orgSlug, image('signed.png'));
+    const url = await getLogoSignedUrl(await logoPath());
+    expect(url).toContain('/branding/');
+    expect(url).toContain(`expires=${LOGO_SIGNED_URL_TTL_SECONDS}`);
+  });
+
+  it('degrades to no logo instead of breaking the invoice when storage fails', async () => {
+    currentUserId = ownerId;
+    await uploadOrganizationLogo(orgSlug, image('flaky.png'));
+    signedUrlFails = true;
+    await expect(getLogoSignedUrl(await logoPath())).resolves.toBeNull();
+  });
+});

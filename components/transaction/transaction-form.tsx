@@ -1,20 +1,28 @@
 'use client';
 
 import { useId, useMemo, useState } from 'react';
+import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate, localizedName } from '@/lib/i18n';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { ModalDialog } from '@/components/shell/modal-dialog';
 import { RateField } from '@/components/transaction/rate-field';
-import { AttachmentPanel } from '@/components/transaction/attachment-panel';
+import {
+  AttachmentPanel,
+  attachmentIssue,
+  formatFileSize,
+} from '@/components/transaction/attachment-panel';
 import { CategoryChips } from '@/components/transaction/category-chips';
 import {
   createJournal,
   createTransaction,
+  replaceTransaction,
   updateTransaction,
   voidTransaction,
 } from '@/server/actions/transactions';
+import { uploadAttachment } from '@/server/actions/attachments';
+import { ALLOWED_ATTACHMENT_TYPES } from '@/lib/upload-rules';
 import { enqueueOfflineTransaction, isOnline, neverReachedServer } from '@/lib/offline-queue';
 import type { Scenario } from '@/server/domain/scenario';
 import { todayLocalISO } from '@/lib/date';
@@ -75,7 +83,16 @@ type Props = {
   projects?: ProjectOption[];
   /** 编辑模式时传入已有数据 */
   mode?: 'create' | 'edit';
+  /**
+   * 编辑时是这笔交易本身；换类型重录（replacing）时是被替换那一笔，用来预填
+   * 日期、金额、账户与备注，kind 则已经换成了新的类型。
+   */
   initialData?: EditData;
+  /**
+   * 换类型重录：新建模式，但保存走 replaceTransaction——新建这一笔、作废
+   * replacing.id 那一笔、把收据挪过来，一个事务。类型由页面定死，不给选。
+   */
+  replacing?: { id: string };
   attachments?: Attachment[];
   /** 场景卡片选中的场景（Task 14）。存在时表单按场景收窄字段。 */
   scenario?: Scenario;
@@ -112,6 +129,7 @@ export function TransactionForm({
   scenario,
   presetCategoryId,
   presetAccountId,
+  replacing,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
@@ -151,6 +169,14 @@ export function TransactionForm({
   const [direction, setDirection] = useState<'in' | 'out' | null>(null);
   const voidReasonId = useId();
   const amountErrorId = useId();
+
+  // 新建时就能挂上的收据。交易还没有 id，文件先留在浏览器里，保存成功之后
+  // 再逐张上传——见 finishCreate。
+  const [pendingFiles, setPendingFiles] = useState<File[]>([]);
+  const [pendingIssue, setPendingIssue] = useState<string | null>(null);
+  // 离线存下的那一笔带不走收据（离线队列只存表单字段），要明说，不能让
+  // 用户以为收据也一起排了队。
+  const [receiptsLeftBehind, setReceiptsLeftBehind] = useState(false);
 
   /**
    * 金额的即时校验。
@@ -224,6 +250,54 @@ export function TransactionForm({
     setAmount('');
     setCategoryId('');
     setDirection(null);
+    setPendingFiles([]);
+    setPendingIssue(null);
+    setReceiptsLeftBehind(false);
+  }
+
+  function addPendingFiles(event: React.ChangeEvent<HTMLInputElement>) {
+    const input = event.target;
+    const accepted: File[] = [];
+    const issues: string[] = [];
+    for (const file of Array.from(input.files ?? [])) {
+      const issue = attachmentIssue(file, t);
+      if (issue) issues.push(issue);
+      else accepted.push(file);
+    }
+    setPendingFiles((prev) => [...prev, ...accepted]);
+    setPendingIssue(issues.length > 0 ? issues.join('\n') : null);
+    input.value = '';
+  }
+
+  /**
+   * 交易已经入账之后，把选好的收据逐张传上去，再离开这一页。
+   *
+   * 收据传不上去不能让这笔账跟着失败：它已经是一笔完整的记录了。失败的那几张
+   * 带着张数跳到这笔记录的详情页，那里就是同一个附件面板，用户当场补传。
+   * 不并发上传，理由见 AttachmentPanel 的 handleUpload。
+   */
+  async function finishCreate(transactionId: string) {
+    let failed = 0;
+    for (const file of pendingFiles) {
+      try {
+        await uploadAttachment(orgSlug, transactionId, file);
+      } catch {
+        failed += 1;
+      }
+    }
+    if (failed > 0) {
+      router.push(`/${orgSlug}/transactions/${transactionId}?receiptsFailed=${failed}`);
+      return;
+    }
+    router.push(`/${orgSlug}/transactions?saved=1`);
+  }
+
+  /** 网络断了、这一笔进了离线队列：收据留不住，清掉并说明。 */
+  function dropPendingFilesForOffline() {
+    if (pendingFiles.length > 0) {
+      setReceiptsLeftBehind(true);
+      setPendingFiles([]);
+    }
   }
 
   const categories = kind === 'income' ? incomeCategories : expenseCategories;
@@ -271,8 +345,8 @@ export function TransactionForm({
       };
 
       try {
-        await createJournal(orgSlug, journalPayload);
-        router.push(`/${orgSlug}/transactions?saved=1`);
+        const created = await createJournal(orgSlug, journalPayload);
+        await finishCreate(created.id);
       } catch (e) {
         const message = (e as Error)?.message ?? '';
         const isNetwork = !isOnline() || neverReachedServer(e);
@@ -282,6 +356,7 @@ export function TransactionForm({
           // this branch used to return before ever reaching it, so a lost
           // response here meant a silently dropped entry instead of a queued one.
           await enqueueOfflineTransaction(orgSlug, journalPayload);
+          dropPendingFilesForOffline();
           setSavedOffline(true);
           return;
         }
@@ -319,24 +394,33 @@ export function TransactionForm({
     };
 
     try {
-      if (isEdit && initialData) {
-        await updateTransaction(orgSlug, initialData.id, payload);
-      } else {
-        await createTransaction(orgSlug, payload);
-      }
       // 在线保存此前一句回执都没有——只有离线那一支渲染了 savedOffline，
       // 于是「存进设备」有反馈、「真的存进账本」反而没有。?saved=1 让列表页
       // 接手说这句话；在这张表单上闪一下再跳走，用户看不见。
-      router.push(`/${orgSlug}/transactions?saved=1`);
+      if (isEdit && initialData) {
+        await updateTransaction(orgSlug, initialData.id, payload);
+        router.push(`/${orgSlug}/transactions?saved=1`);
+      } else {
+        const created = replacing
+          ? await replaceTransaction(orgSlug, replacing.id, {
+              ...payload,
+              voidReason: interpolate(t.transaction.replaceVoidReason, { kind: kindLabels[kind] }),
+            })
+          : await createTransaction(orgSlug, payload);
+        await finishCreate(created.id);
+      }
     } catch (e) {
       const message = (e as Error)?.message ?? '';
       const isNetwork = !isOnline() || neverReachedServer(e);
 
-      if (isNetwork && !isEdit) {
+      // 换类型重录不进离线队列：它要作废另一笔记录，和编辑一样需要当场确认
+      // 原记录还是保存那一刻的样子。
+      if (isNetwork && !isEdit && !replacing) {
         // clientUuid is fixed for the lifetime of this form instance and the
         // server dedupes on it, so replaying this entry from the queue is safe.
         // Offline is create-only: editing needs conflict-merge UI, deferred per spec.
         await enqueueOfflineTransaction(orgSlug, payload);
+        dropPendingFilesForOffline();
         setSavedOffline(true);
         return;
       }
@@ -367,6 +451,7 @@ export function TransactionForm({
       {savedOffline ? (
         <div role="status" className="form-success">
           <p>{t.transaction.savedOffline}</p>
+          {receiptsLeftBehind ? <p>{t.transaction.receiptsNotSavedOffline}</p> : null}
           {/* 提交按钮此刻是 disabled 的（同一笔不能排两次队），所以这个
               出口必须和提示待在一起——否则用户只能自己导航离开。 */}
           <button type="button" className="text-button" onClick={startAnotherEntry}>
@@ -376,8 +461,22 @@ export function TransactionForm({
       ) : null}
 
       {/* 编辑时不给改类型：updateTransaction 把 kind 钉在原值上，这里换了
-          类型只会让分类下拉换成另一池、保存时被服务端拒掉。 */}
-      {!scenario && !isEdit ? (
+          类型只会让分类下拉换成另一池、保存时被服务端拒掉。真要换类型走下面
+          那几个链接——换类型重录的页面把类型定死，这里同样不给选。 */}
+      {isEdit && initialData ? (
+        <p className="change-kind">
+          {t.transaction.changeKindHint}{' '}
+          {KINDS.filter((option) => option !== initialData.kind).map((option, index) => (
+            <span key={option}>
+              {index > 0 ? ' · ' : null}
+              <Link href={`/${orgSlug}/transactions/new?replace=${initialData.id}&kind=${option}`}>
+                {interpolate(t.transaction.changeKindTo, { kind: kindLabels[option] })}
+              </Link>
+            </span>
+          ))}
+        </p>
+      ) : null}
+      {!scenario && !isEdit && !replacing ? (
         <fieldset>
           <legend>{t.transaction.kind}</legend>
           {KINDS.map((option) => (
@@ -456,8 +555,8 @@ export function TransactionForm({
             occurredOn={occurredOn}
             amount={amount}
             locale={locale}
-            initialRate={isEdit ? initialData?.exchangeRate : undefined}
-            initialSource={isEdit ? initialData?.rateSource : undefined}
+            initialRate={isEdit || replacing ? initialData?.exchangeRate : undefined}
+            initialSource={isEdit || replacing ? initialData?.rateSource : undefined}
           />
         </>
       ) : null}
@@ -596,6 +695,53 @@ export function TransactionForm({
       <label htmlFor="description">{t.transaction.description}</label>
       <input id="description" name="description" maxLength={500} defaultValue={initialData?.description ?? undefined} />
 
+      {/*
+        新建时就能把收据挂上：站在柜台前录一笔，顺手拍张照，不必存完再进
+        详情页找附件区。文件框不带 name，不会跟着表单字段一起提交——它们在
+        finishCreate 里另行上传。编辑时不在这里：那时交易已经有 id，下面
+        AttachmentPanel 选完即传。
+      */}
+      {!isEdit ? (
+        <fieldset className="pending-receipts-field">
+          <legend>{t.transaction.receipt}</legend>
+          {pendingFiles.length > 0 ? (
+            <ul className="pending-receipts">
+              {pendingFiles.map((file, index) => (
+                <li key={`${file.name}-${file.size}-${index}`}>
+                  <span className="attachment-name">{file.name}</span>
+                  <span className="attachment-size">{formatFileSize(file.size)}</span>
+                  <button
+                    type="button"
+                    className="attachment-delete-btn"
+                    aria-label={interpolate(t.transaction.receiptRemovePending, { name: file.name })}
+                    onClick={() =>
+                      setPendingFiles((prev) => prev.filter((_, position) => position !== index))
+                    }
+                  >
+                    <span aria-hidden="true">&times;</span>
+                  </button>
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          <label className="attachment-upload-label">
+            <input
+              type="file"
+              multiple
+              accept={ALLOWED_ATTACHMENT_TYPES.join(',')}
+              onChange={addPendingFiles}
+              disabled={pending || savedOffline}
+            />
+            {`+ ${t.transaction.receiptAdd}`}
+          </label>
+          {pendingIssue ? (
+            <p role="alert" className="field-error attachment-errors">
+              {pendingIssue}
+            </p>
+          ) : null}
+        </fieldset>
+      ) : null}
+
       {error ? (
         <p role="alert" className="form-error">
           {error}
@@ -665,7 +811,7 @@ export function TransactionForm({
     {isEdit && initialData ? (
       <AttachmentPanel
         orgSlug={orgSlug}
-        transactionId={initialData.id}
+        owner={{ type: 'transaction', id: initialData.id }}
         attachments={attachments}
         t={t}
       />

@@ -165,8 +165,9 @@ describe('uploadAttachment', () => {
       code: 'not_found',
     });
 
-    // attachments 没有「organization_id 必须与所属交易一致」的约束，
-    // 所以收窄失守时这里会真的落下一行跨公司的附件。
+    // 收窄失守时，0035 之前这里会真的落下一行跨公司的附件；现在数据库的
+    // 复合外键（attachments_txn_same_org）也会拒，但应用层这一道仍然要先挡住，
+    // 给出的是 not_found 而不是一句外键报错。
     const rows = await admin`select id from attachments where transaction_id = ${foreign.id}`;
     expect(rows).toHaveLength(0);
   });

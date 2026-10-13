@@ -71,6 +71,20 @@ export type OrganizationSettings = {
   /** 开票方地址，印在发票单据上（0026 迁移加的列）。 */
   address: string | null;
   /**
+   * 发票上的其余卖方资料（0034 迁移加的列），全部可空。
+   * 只在「公司资料」页编辑、只在可打印发票上展示。
+   */
+  registrationNumber: string | null;
+  taxNumber: string | null;
+  phone: string | null;
+  email: string | null;
+  paymentDetails: string | null;
+  /**
+   * branding bucket 里的对象路径，不是 URL。私有 bucket，展示时由调用方
+   * 换成短时效签名 URL。只由 setOrganizationLogoPath 写，不经设置表单。
+   */
+  logoPath: string | null;
+  /**
    * 财年起始月（1–12）。0024 迁移加的列，默认 1（日历年）。
    *
    * 读它的唯一原因是：报表默认区间、总账默认区间与年结的期间全都由它决定，
@@ -91,7 +105,8 @@ export async function getOrganizationSettings(
   organizationId: string,
 ): Promise<OrganizationSettings> {
   const rows = await tx`
-    select name, timezone, industry, address, fiscal_year_start_month
+    select name, timezone, industry, address, fiscal_year_start_month,
+           registration_number, tax_number, phone, email, payment_details, logo_path
     from organizations
     where id = ${organizationId}
   `;
@@ -104,6 +119,12 @@ export async function getOrganizationSettings(
     timezone: (row.timezone as string | null) ?? 'UTC',
     industry: (row.industry as string | null) ?? null,
     address: (row.address as string | null) ?? null,
+    registrationNumber: (row.registration_number as string | null) ?? null,
+    taxNumber: (row.tax_number as string | null) ?? null,
+    phone: (row.phone as string | null) ?? null,
+    email: (row.email as string | null) ?? null,
+    paymentDetails: (row.payment_details as string | null) ?? null,
+    logoPath: (row.logo_path as string | null) ?? null,
     // smallint 由驱动解析成 number；列上有 not null default 1 与
     // between 1 and 12 的 CHECK，所以这里不需要再兜底一次。
     fiscalYearStartMonth: row.fiscal_year_start_month as number,
@@ -118,6 +139,11 @@ export async function updateOrganizationSettings(
     timezone: string;
     industry: string | null;
     address: string | null;
+    registrationNumber: string | null;
+    taxNumber: string | null;
+    phone: string | null;
+    email: string | null;
+    paymentDetails: string | null;
     fiscalYearStartMonth: number;
   },
 ): Promise<void> {
@@ -127,9 +153,40 @@ export async function updateOrganizationSettings(
         timezone = ${input.timezone},
         industry = ${input.industry},
         address = ${input.address},
+        registration_number = ${input.registrationNumber},
+        tax_number = ${input.taxNumber},
+        phone = ${input.phone},
+        email = ${input.email},
+        payment_details = ${input.paymentDetails},
         fiscal_year_start_month = ${input.fiscalYearStartMonth}
     where id = ${organizationId}
   `;
+}
+
+/**
+ * 换 logo 或清掉 logo（path 为 null）。返回旧路径，调用方在事务提交之后
+ * 再去存储里删旧对象——顺序理由见 server/actions/organizations.ts。
+ *
+ * `for update` 锁住这一行：两个人同时换 logo 时，后到的那一个读到的旧路径
+ * 是前一个刚写进去的，而不是两人都读到同一个最初的值、各删各的，最后留下
+ * 一个谁都不再引用的孤儿对象。
+ */
+export async function setOrganizationLogoPath(
+  tx: Tx,
+  organizationId: string,
+  logoPath: string | null,
+): Promise<{ previousPath: string | null }> {
+  const rows = await tx`
+    select logo_path from organizations where id = ${organizationId} for update
+  `;
+  const row = rows.at(0);
+  if (!row) {
+    throw new Error(`Organization ${organizationId} not found.`);
+  }
+  await tx`
+    update organizations set logo_path = ${logoPath} where id = ${organizationId}
+  `;
+  return { previousPath: (row.logo_path as string | null) ?? null };
 }
 
 /**

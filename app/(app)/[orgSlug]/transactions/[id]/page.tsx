@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getMessages, localizedName } from '@/lib/i18n';
+import { getMessages, interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { requirePermission } from '@/server/auth/guard';
 import { canEditTransaction } from '@/server/domain/permissions';
@@ -24,10 +24,17 @@ import type { ReactNode } from 'react';
 
 export default async function TransactionDetailPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orgSlug: string; id: string }>;
+  searchParams: Promise<{ receiptsFailed?: string }>;
 }) {
   const { orgSlug, id } = await params;
+  // 新建表单在交易存好、收据却有几张没传上去时跳到这里（见 transaction-form.tsx
+  // 的 finishCreate）。只认正整数，地址栏里随手改出来的别的值一律当作没有。
+  const receiptsFailed = Number((await searchParams).receiptsFailed ?? '');
+  const receiptsFailedNotice =
+    Number.isInteger(receiptsFailed) && receiptsFailed > 0 ? receiptsFailed : null;
   const context = await requirePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
@@ -48,7 +55,7 @@ export default async function TransactionDetailPage({
           listMoneyAccounts(tx, context.organizationId),
           listSelectableCategories(tx, context.organizationId, 'income'),
           listSelectableCategories(tx, context.organizationId, 'expense'),
-          listAttachments(tx, context.organizationId, id),
+          listAttachments(tx, context.organizationId, { type: 'transaction', id }),
           listProjects(tx, context.organizationId),
           findTransactionSource(tx, context.organizationId, id),
         ]),
@@ -107,7 +114,7 @@ export default async function TransactionDetailPage({
         </article>
         <AttachmentPanel
           orgSlug={orgSlug}
-          transactionId={row.id}
+          owner={{ type: 'transaction', id: row.id }}
           attachments={attachmentItems}
           t={t}
           readOnly={!canEdit}
@@ -155,7 +162,7 @@ export default async function TransactionDetailPage({
         {!isVoided ? (
           <AttachmentPanel
             orgSlug={orgSlug}
-            transactionId={row.id}
+            owner={{ type: 'transaction', id: row.id }}
             attachments={attachmentItems}
             t={t}
             readOnly
@@ -187,6 +194,12 @@ export default async function TransactionDetailPage({
     return (
       <Layout orgSlug={orgSlug} t={t}>
         <h1>{isSuspense ? t.uncertain.title : isClosing ? t.yearEnd.closingEntry : t.journal.newTitle}</h1>
+        {/* 「不确定」场景也走新建表单的 finishCreate，收据传失败时同样落到这里。 */}
+        {receiptsFailedNotice !== null ? (
+          <p role="alert" className="form-error">
+            {interpolate(t.transaction.receiptsUploadFailed, { count: receiptsFailedNotice })}
+          </p>
+        ) : null}
         {isSuspense ? <p className="uncertain-explain">{t.uncertain.explain}</p> : null}
         <article className="record-detail">
           <dl>
@@ -226,7 +239,7 @@ export default async function TransactionDetailPage({
         ) : null}
         <AttachmentPanel
           orgSlug={orgSlug}
-          transactionId={row.id}
+          owner={{ type: 'transaction', id: row.id }}
           attachments={attachmentItems}
           t={t}
           readOnly={!canEdit}
@@ -276,6 +289,11 @@ export default async function TransactionDetailPage({
   return (
     <Layout orgSlug={orgSlug} t={t}>
       <h1>{t.transaction.editTitle}</h1>
+      {receiptsFailedNotice !== null ? (
+        <p role="alert" className="form-error">
+          {interpolate(t.transaction.receiptsUploadFailed, { count: receiptsFailedNotice })}
+        </p>
+      ) : null}
       <TransactionForm
         orgSlug={orgSlug}
         baseCurrency={context.baseCurrency}

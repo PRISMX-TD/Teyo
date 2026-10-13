@@ -4,7 +4,7 @@ import { revalidatePath } from 'next/cache';
 import { getStorageClient } from '@/lib/supabase/storage';
 import { withTransaction } from '@/server/db/transaction';
 import { AuthError, requirePermission, type OrgContext } from '@/server/auth/guard';
-import { canEditTransaction } from '@/server/domain/permissions';
+import { can, canEditTransaction } from '@/server/domain/permissions';
 import type { Tx } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
@@ -15,6 +15,7 @@ import {
   deleteAttachmentRow,
   getAttachment,
   insertAttachment,
+  type AttachmentOwner,
 } from '@/server/repositories/attachments';
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -48,9 +49,66 @@ async function assertCanEditTransaction(
   }
 }
 
+/**
+ * 确认这张账单属于本公司、没有作废，且这个人有权改它。
+ *
+ * 门与 updateBill 是同一道：transaction:edit:any（owner / admin）。理由和
+ * 交易那一侧一样——供应商账单的 PDF 就是这张账单的凭证，换掉它等于改账单。
+ * 作废的账单不再收附件：updateBill 对它同样拒绝，往一张已经不算数的账单上
+ * 补凭证只会让人以为它还有效。
+ */
+async function assertCanEditBill(tx: Tx, context: OrgContext, billId: string): Promise<void> {
+  const rows = UUID_PATTERN.test(billId)
+    ? await tx`
+        select voided_at from bills
+        where id = ${billId} and organization_id = ${context.organizationId}
+      `
+    : [];
+  const row = rows.at(0);
+  if (!row) {
+    throw new AuthError('not_found', 'That bill was not found in this company.');
+  }
+  if (!can(context.role, 'transaction:edit:any')) {
+    throw new AuthError('forbidden', 'Your role cannot change the attachments on this bill.');
+  }
+  if (row.voided_at) {
+    throw new AuthError('forbidden', 'This bill is voided and can no longer be changed.');
+  }
+}
+
+function assertCanEditOwner(tx: Tx, context: OrgContext, owner: AttachmentOwner): Promise<void> {
+  return owner.type === 'transaction'
+    ? assertCanEditTransaction(tx, context, owner.id)
+    : assertCanEditBill(tx, context, owner.id);
+}
+
+function ownerPath(orgSlug: string, owner: AttachmentOwner): string {
+  return owner.type === 'transaction'
+    ? `/${orgSlug}/transactions/${owner.id}`
+    : `/${orgSlug}/bills/${owner.id}`;
+}
+
+/** 给一笔交易挂收据。 */
 export async function uploadAttachment(
   orgSlug: string,
   transactionId: string,
+  file: File,
+): Promise<{ id: string }> {
+  return uploadFor(orgSlug, { type: 'transaction', id: transactionId }, file);
+}
+
+/** 给一张供应商账单挂附件（通常是供应商寄来的那份 PDF）。 */
+export async function uploadBillAttachment(
+  orgSlug: string,
+  billId: string,
+  file: File,
+): Promise<{ id: string }> {
+  return uploadFor(orgSlug, { type: 'bill', id: billId }, file);
+}
+
+async function uploadFor(
+  orgSlug: string,
+  owner: AttachmentOwner,
   file: File,
 ): Promise<{ id: string }> {
   const context = await requirePermission(orgSlug, 'transaction:create');
@@ -63,19 +121,18 @@ export async function uploadAttachment(
     throw new Error(`File size ${file.size} exceeds the ${MAX_ATTACHMENT_BYTES} byte limit.`);
   }
 
-  // 先确认交易属于本公司、且这个人能改它，再上传，避免把文件写到不该去的路径。
-  await withTransaction(context.userId, (tx) =>
-    assertCanEditTransaction(tx, context, transactionId),
-  );
+  // 先确认交易（或账单）属于本公司、且这个人能改它，再上传，避免把文件写到
+  // 不该去的路径。
+  await withTransaction(context.userId, (tx) => assertCanEditOwner(tx, context, owner));
 
-  const storagePath = buildStoragePath(context.organizationId, transactionId, file.name);
+  const storagePath = buildStoragePath(context.organizationId, owner.id, file.name);
   const storage = getStorageClient();
   await storage.upload(storagePath, file);
 
   const result = await withTransaction(context.userId, async (tx) => {
     const inserted = await insertAttachment(tx, {
       organizationId: context.organizationId,
-      transactionId,
+      owner,
       storagePath,
       fileName: file.name,
       mimeType: file.type,
@@ -86,10 +143,13 @@ export async function uploadAttachment(
     await recordAudit(tx, {
       organizationId: context.organizationId,
       actorUserId: context.userId,
-      action: 'transaction.updated',
+      action: owner.type === 'transaction' ? 'transaction.updated' : 'bill.updated',
       entityType: 'attachment',
       entityId: inserted.id,
-      after: { transactionId, fileName: file.name, sizeBytes: file.size },
+      after:
+        owner.type === 'transaction'
+          ? { transactionId: owner.id, fileName: file.name, sizeBytes: file.size }
+          : { billId: owner.id, fileName: file.name, sizeBytes: file.size },
     });
 
     return inserted;
@@ -100,7 +160,7 @@ export async function uploadAttachment(
     throw error;
   });
 
-  revalidatePath(`/${orgSlug}/transactions/${transactionId}`);
+  revalidatePath(ownerPath(orgSlug, owner));
   return result;
 }
 
@@ -130,7 +190,7 @@ export async function deleteAttachment(orgSlug: string, attachmentId: string): P
 
   const attachment = await withTransaction(context.userId, async (tx) => {
     const found = await getAttachment(tx, context.organizationId, attachmentId);
-    await assertCanEditTransaction(tx, context, found.transactionId);
+    await assertCanEditOwner(tx, context, found.owner);
     return found;
   });
 
@@ -139,7 +199,7 @@ export async function deleteAttachment(orgSlug: string, attachmentId: string): P
     await recordAudit(tx, {
       organizationId: context.organizationId,
       actorUserId: context.userId,
-      action: 'transaction.updated',
+      action: attachment.owner.type === 'transaction' ? 'transaction.updated' : 'bill.updated',
       entityType: 'attachment',
       entityId: attachmentId,
       before: { fileName: attachment.fileName },
@@ -149,5 +209,5 @@ export async function deleteAttachment(orgSlug: string, attachmentId: string): P
 
   await getStorageClient().remove(attachment.storagePath);
 
-  revalidatePath(`/${orgSlug}/transactions/${attachment.transactionId}`);
+  revalidatePath(ownerPath(orgSlug, attachment.owner));
 }

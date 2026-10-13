@@ -18,7 +18,8 @@ import { canEditTransaction } from '@/server/domain/permissions';
 import { findAccount, getMoneyAccount } from '@/server/repositories/accounts';
 import { getCategoryWithAccount } from '@/server/repositories/categories';
 import { recordAudit } from '@/server/repositories/audit-logs';
-import { AuthError } from '@/server/auth/guard';
+import { AuthError, type OrgContext } from '@/server/auth/guard';
+import { moveTransactionAttachments } from '@/server/repositories/attachments';
 import {
   findTransactionByClientUuid,
   findTransactionSource,
@@ -152,48 +153,62 @@ export async function createTransaction(
   // 期间锁定在进事务前先判，省掉一次注定要回滚的写入。
   assertPeriodOpen(parsed.occurredOn, context.lockedUntil, context.role);
 
-  const result = await withTransaction(context.userId, async (tx) => {
-    // 幂等短路留在解析入参之前，而不是全部交给 postJournal 的第 2 步：
-    // 离线队列重放的是几分钟前就已入账成功的那一笔，若期间分类被停用或
-    // 删除，先解析入参会让这次重放报错——用户看到的是一条明明成功过的
-    // 记录突然失败。postJournal 里的那次查询仍在，是结构性兜底。
-    const existing = await findTransactionByClientUuid(
-      tx,
-      context.organizationId,
-      parsed.clientUuid,
-    );
-    if (existing) {
-      return { id: existing.id, deduplicated: true };
-    }
-
-    const moneyAccount = await getMoneyAccount(tx, context.organizationId, parsed.moneyAccountId);
-    const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, {
-      kind: parsed.kind,
-      moneyAccountId: moneyAccount.id,
-      counterAccountId: parsed.counterAccountId,
-      categoryId: parsed.categoryId,
-    });
-
-    const amountMinor = parseDecimalToMinor(parsed.amount, currencyExponent(parsed.currency));
-
-    const posted = await postJournal(tx, context, {
-      event: toPostingEvent(parsed.kind, moneyAccount.id, counterAccountId, amountMinor),
-      occurredOn: parsed.occurredOn,
-      description: parsed.description,
-      currency: parsed.currency,
-      manualRate: parsed.exchangeRate,
-      // 交易表单上就有 RateField，查不到缓存汇率时让用户当场填一个。
-      manualRateEntry: 'available',
-      categoryId: parsed.categoryId ?? null,
-      projectId: parsed.projectId ?? null,
-      clientUuid: parsed.clientUuid,
-    });
-
-    return { id: posted.transactionId, deduplicated: posted.deduplicated };
-  });
+  const result = await withTransaction(context.userId, (tx) =>
+    insertUserEntry(tx, context, parsed),
+  );
 
   revalidatePath(`/${orgSlug}/transactions`);
   return result;
+}
+
+type ParsedCreateTransaction = ReturnType<typeof createTransactionSchema.parse>;
+
+/**
+ * createTransaction 在事务里的那一段，replaceTransaction 也用它——两条路径
+ * 建出来的交易必须是同一个形状，不能一条带项目、另一条漏掉。
+ */
+async function insertUserEntry(
+  tx: Tx,
+  context: OrgContext,
+  parsed: ParsedCreateTransaction,
+): Promise<{ id: string; deduplicated: boolean }> {
+  // 幂等短路留在解析入参之前，而不是全部交给 postJournal 的第 2 步：
+  // 离线队列重放的是几分钟前就已入账成功的那一笔，若期间分类被停用或
+  // 删除，先解析入参会让这次重放报错——用户看到的是一条明明成功过的
+  // 记录突然失败。postJournal 里的那次查询仍在，是结构性兜底。
+  const existing = await findTransactionByClientUuid(
+    tx,
+    context.organizationId,
+    parsed.clientUuid,
+  );
+  if (existing) {
+    return { id: existing.id, deduplicated: true };
+  }
+
+  const moneyAccount = await getMoneyAccount(tx, context.organizationId, parsed.moneyAccountId);
+  const counterAccountId = await resolveCounterAccountId(tx, context.organizationId, {
+    kind: parsed.kind,
+    moneyAccountId: moneyAccount.id,
+    counterAccountId: parsed.counterAccountId,
+    categoryId: parsed.categoryId,
+  });
+
+  const amountMinor = parseDecimalToMinor(parsed.amount, currencyExponent(parsed.currency));
+
+  const posted = await postJournal(tx, context, {
+    event: toPostingEvent(parsed.kind, moneyAccount.id, counterAccountId, amountMinor),
+    occurredOn: parsed.occurredOn,
+    description: parsed.description,
+    currency: parsed.currency,
+    manualRate: parsed.exchangeRate,
+    // 交易表单上就有 RateField，查不到缓存汇率时让用户当场填一个。
+    manualRateEntry: 'available',
+    categoryId: parsed.categoryId ?? null,
+    projectId: parsed.projectId ?? null,
+    clientUuid: parsed.clientUuid,
+  });
+
+  return { id: posted.transactionId, deduplicated: posted.deduplicated };
 }
 
 export type CreateJournalInput = {
@@ -471,47 +486,134 @@ export async function voidTransaction(
     (m) => new LedgerError(m),
   );
 
-  await withTransaction(context.userId, async (tx) => {
-    const existing = await getTransactionDetail(tx, context.organizationId, id);
-
-    if (existing.voidedAt) {
-      throw new AuthError('forbidden', 'This record is already voided.');
-    }
-
-    if (!canEditTransaction(context.role, existing.createdBy === context.userId)) {
-      throw new AuthError('forbidden', 'Your role cannot void this record.');
-    }
-
-    // 年结分录不能单独作废，理由与 updateTransaction 里那一条相同：作废它等于
-    // 把一整年的损益结转悄悄撤掉，而 fiscal_year_closings 里那条登记还在，
-    // 两边从此各说各的。撤销只能走 undoFiscalYearCloseAction。
-    if (existing.kind === 'closing') {
-      throw new LedgerError(
-        'Year-end closing entries cannot be voided. Undo the year-end close instead.',
-      );
-    }
-
-    // 其余单据生成的分录（发票、账单、收付款、折旧……）同理，见
-    // assertNotDocumentGenerated。年结分录在 fiscal_year_closings 里也有登记，
-    // 上面那条已经先给出了更具体的说法。
-    await assertNotDocumentGenerated(tx, context.organizationId, id, 'voided');
-
-    assertPeriodOpen(existing.occurredOn, context.lockedUntil, context.role);
-
-    await markVoided(tx, context.organizationId, id, context.userId, cleanReason);
-
-    await recordAudit(tx, {
-      organizationId: context.organizationId,
-      actorUserId: context.userId,
-      action: 'transaction.voided',
-      entityType: 'transaction',
-      entityId: id,
-      before: { voidedAt: null },
-      after: { voidedAt: new Date().toISOString(), voidReason: cleanReason },
-    });
-  });
+  await withTransaction(context.userId, (tx) => voidUserEntry(tx, context, id, cleanReason));
 
   revalidatePath(`/${orgSlug}`);
   revalidatePath(`/${orgSlug}/transactions`);
   revalidatePath(`/${orgSlug}/transactions/${id}`);
+}
+
+/**
+ * voidTransaction 在事务里的那一段。replaceTransaction 作废原交易时走同一条，
+ * 所以「已作废的不能再作废」「年结与单据分录不能单独作废」「封账期内不能动」
+ * 这几道门不会因为换了个入口就少一道。
+ *
+ * extraAudit 并进审计记录的 after：换类型重录时记下接替它的那一笔是谁。
+ */
+async function voidUserEntry(
+  tx: Tx,
+  context: OrgContext,
+  id: string,
+  cleanReason: string,
+  extraAudit: Record<string, unknown> = {},
+): Promise<void> {
+  const existing = await getTransactionDetail(tx, context.organizationId, id);
+
+  if (existing.voidedAt) {
+    throw new AuthError('forbidden', 'This record is already voided.');
+  }
+
+  if (!canEditTransaction(context.role, existing.createdBy === context.userId)) {
+    throw new AuthError('forbidden', 'Your role cannot void this record.');
+  }
+
+  // 年结分录不能单独作废，理由与 updateTransaction 里那一条相同：作废它等于
+  // 把一整年的损益结转悄悄撤掉，而 fiscal_year_closings 里那条登记还在，
+  // 两边从此各说各的。撤销只能走 undoFiscalYearCloseAction。
+  if (existing.kind === 'closing') {
+    throw new LedgerError(
+      'Year-end closing entries cannot be voided. Undo the year-end close instead.',
+    );
+  }
+
+  // 其余单据生成的分录（发票、账单、收付款、折旧……）同理，见
+  // assertNotDocumentGenerated。年结分录在 fiscal_year_closings 里也有登记，
+  // 上面那条已经先给出了更具体的说法。
+  await assertNotDocumentGenerated(tx, context.organizationId, id, 'voided');
+
+  assertPeriodOpen(existing.occurredOn, context.lockedUntil, context.role);
+
+  await markVoided(tx, context.organizationId, id, context.userId, cleanReason);
+
+  await recordAudit(tx, {
+    organizationId: context.organizationId,
+    actorUserId: context.userId,
+    action: 'transaction.voided',
+    entityType: 'transaction',
+    entityId: id,
+    before: { voidedAt: null },
+    after: { voidedAt: new Date().toISOString(), voidReason: cleanReason, ...extraAudit },
+  });
+}
+
+export type ReplaceTransactionInput = CreateTransactionInput & {
+  /** 写进原交易的作废理由。表单按当前语言拼好，服务端照常校验。 */
+  voidReason: string;
+};
+
+/**
+ * 换类型重录：新建一笔、把收据挪过去、作废原来那笔，三件事一个事务。
+ *
+ * updateTransaction 不让改 kind（理由在那里：换了 kind 就是换了一笔账，分录
+ * 方向、分类与对方账户全得重来）。于是想把记成「支出」的一笔改成「转账」，
+ * 原来只能自己先作废、再从头录一遍——中间任何一步断了，作废了却没重录、
+ * 或者重录了却忘了作废，账上就少一笔或多一笔，而且没有任何东西会提醒他。
+ * 放进同一个事务，这两种半途状态就不存在了。
+ *
+ * 审计里仍然是两条独立的记录（新建一条、transaction.voided 一条），作废那条
+ * 的 after 记着 replacedBy，日后查得到这两笔说的是同一件事。
+ *
+ * 幂等：clientUuid 撞上已有记录时直接返回它，不再作废第二次——那一笔若是
+ * 由这里建出来的，原交易在同一个事务里已经作废了。
+ */
+export async function replaceTransaction(
+  orgSlug: string,
+  originalId: string,
+  input: ReplaceTransactionInput,
+): Promise<{ id: string; deduplicated: boolean }> {
+  const context = await requirePermission(orgSlug, 'transaction:create');
+
+  const { voidReason, ...entry } = input;
+  const parsed = parseOrThrow(createTransactionSchema, entry, (m) => new LedgerError(m));
+  const { reason: cleanReason } = parseOrThrow(
+    voidTransactionSchema,
+    { id: originalId, reason: voidReason },
+    (m) => new LedgerError(m),
+  );
+  assertPeriodOpen(parsed.occurredOn, context.lockedUntil, context.role);
+
+  const result = await withTransaction(context.userId, async (tx) => {
+    const original = await getTransactionDetail(tx, context.organizationId, originalId);
+    // 单据生成的分录排在 kind 判断之前，理由同 updateTransaction：它们的 kind
+    // 都是 journal，不先拦，用户听到的是下面那句「只有收支转能换」——说的
+    // 是对的，却没告诉他该回哪张单据去改。
+    await assertNotDocumentGenerated(tx, context.organizationId, originalId, 'edited');
+    // 凭证与年结分录没有「收、支、转」可换。年结 voidUserEntry 自己会拒；凭证
+    // 在这里先挡，它在界面上本来就没有换类型的入口。
+    if (original.kind === 'journal' || original.kind === 'closing') {
+      throw new LedgerError(
+        'Only money-in, money-out and transfer records can be re-entered as another type.',
+      );
+    }
+
+    const created = await insertUserEntry(tx, context, parsed);
+    if (created.deduplicated) return created;
+
+    const moved = await moveTransactionAttachments(
+      tx,
+      context.organizationId,
+      originalId,
+      created.id,
+    );
+    await voidUserEntry(tx, context, originalId, cleanReason, {
+      replacedBy: created.id,
+      attachmentsMoved: moved,
+    });
+    return created;
+  });
+
+  revalidatePath(`/${orgSlug}`);
+  revalidatePath(`/${orgSlug}/transactions`);
+  revalidatePath(`/${orgSlug}/transactions/${originalId}`);
+  return result;
 }

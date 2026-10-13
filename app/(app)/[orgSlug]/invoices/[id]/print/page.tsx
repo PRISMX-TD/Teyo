@@ -2,11 +2,12 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PrintButton } from '@/components/invoices/print-button';
 import { formatMoney } from '@/lib/format';
-import { getMessages, type Locale } from '@/lib/i18n';
+import { getMessages, interpolate, type Locale } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getInvoicePdfData } from '@/server/repositories/invoice-pdf';
+import { getLogoSignedUrl } from '@/server/services/organization-logo';
 
 /**
  * 一张可以直接打印、或用浏览器「另存为 PDF」的发票。
@@ -52,6 +53,7 @@ export default async function InvoicePrintPage({
   if (!data) notFound();
 
   const { organization, invoice, contact, items } = data;
+  const logoUrl = await getLogoSignedUrl(organization.logoPath);
 
   // 发票上的每一个数都是**发票自己的币种**（invoices.subtotal_minor 一类
   // 存的就是原币最小单位），不是本位币。用 baseCurrency 去格式化，一张
@@ -84,12 +86,38 @@ export default async function InvoicePrintPage({
       <article className="printable-invoice">
         <header className="printable-invoice-head">
           <div>
+            {logoUrl ? (
+              // 签名 URL 一小时后失效，next/image 的优化缓存在这里没有意义，
+              // 还得在 next.config.ts 里登记 Supabase 的域名。
+              // eslint-disable-next-line @next/next/no-img-element
+              <img
+                className="printable-invoice-logo"
+                src={logoUrl}
+                alt={interpolate(t.settings.logoAlt, { name: organization.name })}
+              />
+            ) : null}
             <h1>{t.invoices.title}</h1>
             <p className="mono">{invoice.invoiceNumber}</p>
           </div>
           <div className="printable-invoice-org">
             <strong>{organization.name}</strong>
-            {organization.address ? <p>{organization.address}</p> : null}
+            {organization.registrationNumber ? (
+              <p>
+                {t.invoicePdf.registrationNumber}{' '}
+                <span className="mono">{organization.registrationNumber}</span>
+              </p>
+            ) : null}
+            {organization.address ? (
+              <p className="printable-invoice-multiline">{organization.address}</p>
+            ) : null}
+            {organization.phone ? <p>{organization.phone}</p> : null}
+            {organization.email ? <p>{organization.email}</p> : null}
+            {organization.taxNumber ? (
+              <p>
+                {t.invoicePdf.taxNumber}{' '}
+                <span className="mono">{organization.taxNumber}</span>
+              </p>
+            ) : null}
           </div>
         </header>
 
@@ -111,7 +139,7 @@ export default async function InvoicePrintPage({
               <strong>{contact.name}</strong>
             </p>
             {contact.email ? <p>{contact.email}</p> : null}
-            {contact.address ? <p>{contact.address}</p> : null}
+            {contact.address ? <p className="printable-invoice-multiline">{contact.address}</p> : null}
             {contact.taxId ? <p className="mono">{contact.taxId}</p> : null}
           </div>
         </section>
@@ -158,7 +186,15 @@ export default async function InvoicePrintPage({
         {invoice.notes ? (
           <section className="printable-invoice-notes">
             <h2>{t.transaction.description}</h2>
-            <p>{invoice.notes}</p>
+            <p className="printable-invoice-multiline">{invoice.notes}</p>
+          </section>
+        ) : null}
+
+        {/* 收款信息放在最后：客户读完金额，下一眼要找的就是「钱打到哪里」。 */}
+        {organization.paymentDetails ? (
+          <section className="printable-invoice-notes">
+            <h2>{t.invoicePdf.paymentDetails}</h2>
+            <p className="printable-invoice-multiline">{organization.paymentDetails}</p>
           </section>
         ) : null}
       </article>

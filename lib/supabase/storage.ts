@@ -2,6 +2,11 @@ import { createClient } from '@supabase/supabase-js';
 
 export const RECEIPTS_BUCKET = 'receipts';
 
+/** 公司 logo。单独一个 bucket，限 1MB、只收位图（见 0034 迁移）。 */
+export const BRANDING_BUCKET = 'branding';
+
+export type StorageBucket = typeof RECEIPTS_BUCKET | typeof BRANDING_BUCKET;
+
 export type StorageClient = {
   upload(path: string, file: File): Promise<{ path: string }>;
   /**
@@ -19,7 +24,7 @@ export type StorageClient = {
  * 在调用前自行校验，这里只负责执行 Storage 操作。
  * service role 密钥绝不能出现在客户端 bundle 里。
  */
-export function getStorageClient(): StorageClient {
+export function getStorageClient(bucketId: StorageBucket = RECEIPTS_BUCKET): StorageClient {
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
@@ -30,7 +35,7 @@ export function getStorageClient(): StorageClient {
   const client = createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
   });
-  const bucket = client.storage.from(RECEIPTS_BUCKET);
+  const bucket = client.storage.from(bucketId);
 
   return {
     async upload(path, file) {

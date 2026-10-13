@@ -1,8 +1,16 @@
+import Link from 'next/link';
 import { ScenarioPicker } from '@/components/transaction/scenario-picker';
 import { TransactionForm } from '@/components/transaction/transaction-form';
-import { getMessages, type Locale } from '@/lib/i18n';
+import { getMessages, interpolate, type Locale } from '@/lib/i18n';
 import { requirePermission, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
+import { canEditTransaction } from '@/server/domain/permissions';
+import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
+import {
+  findTransactionSource,
+  getTransactionDetail,
+  TransactionNotFoundError,
+} from '@/server/repositories/transactions';
 import { findAccountByCode, listMoneyAccounts } from '@/server/repositories/accounts';
 import {
   listRecentCategories,
@@ -71,6 +79,19 @@ export default async function NewTransactionPage({
   const locale = (await getUserLocale(context.userId)) as Locale;
   const t = getMessages(locale);
 
+  // 换类型重录：从编辑页的「改成收入 / 支出 / 转账」链接进来。
+  if (typeof raw.replace === 'string') {
+    return (
+      <ReplaceEntry
+        orgSlug={orgSlug}
+        context={context}
+        locale={locale}
+        originalId={raw.replace}
+        kindParam={typeof raw.kind === 'string' ? raw.kind : ''}
+      />
+    );
+  }
+
   // Advanced escape hatch: the original, fully manual form — kind radio,
   // category dropdown and all. Reachable from the scenario picker's
   // "skip this" link so an experienced user is never forced through a card.
@@ -138,6 +159,119 @@ export default async function NewTransactionPage({
         scenario={scenario}
         presetCategoryId={presetCategoryId}
         presetAccountId={presetAccountId}
+      />
+    </>
+  );
+}
+
+const USER_KINDS = ['income', 'expense', 'transfer'] as const;
+type UserKind = (typeof USER_KINDS)[number];
+
+/**
+ * 换类型重录的表单：拿原记录预填，类型换成链接上指定的那一种。
+ *
+ * 能不能换，这里按 replaceTransaction 会拒的那几条先判一遍——已作废、无权改、
+ * 凭证或年结、单据生成的分录——判不过就只给一句说明和一个回去的链接，
+ * 而不是让用户把表单填完、点保存才被服务端拒掉。服务端那一道照样在。
+ */
+async function ReplaceEntry({
+  orgSlug,
+  context,
+  locale,
+  originalId,
+  kindParam,
+}: {
+  orgSlug: string;
+  context: OrgContext;
+  locale: Locale;
+  originalId: string;
+  kindParam: string;
+}) {
+  const t = getMessages(locale);
+  const kind = USER_KINDS.find((option) => option === kindParam);
+
+  const loaded = await withTransaction(context.userId, async (tx) => {
+    // 原记录先单独取：查不到时 getTransactionDetail 立刻抛，若和下面几条
+    // 查询放进同一个 Promise.all，事务会在那几条还没跑完时就被提交。
+    let original;
+    try {
+      original = await getTransactionDetail(tx, context.organizationId, originalId);
+    } catch (e) {
+      if (e instanceof TransactionNotFoundError) return null;
+      throw e;
+    }
+    const [source, formData] = await Promise.all([
+      findTransactionSource(tx, context.organizationId, originalId),
+      loadFormData(tx, context.organizationId),
+    ]);
+    return { original, source, formData };
+  });
+
+  const original = loaded?.original;
+  const replaceable =
+    loaded !== null &&
+    original !== undefined &&
+    kind !== undefined &&
+    !original.voidedAt &&
+    loaded.source === null &&
+    original.kind !== kind &&
+    (original.kind === 'income' || original.kind === 'expense' || original.kind === 'transfer') &&
+    canEditTransaction(context.role, original.createdBy === context.userId);
+
+  if (!replaceable || !loaded || !original || !kind) {
+    return (
+      <>
+        <Link href={`/${orgSlug}/transactions/${originalId}`} className="back-link">
+          &larr; {t.common.back}
+        </Link>
+        <p>{t.transaction.replaceUnavailable}</p>
+      </>
+    );
+  }
+
+  const kindLabels: Record<UserKind, string> = {
+    income: t.transaction.income,
+    expense: t.transaction.expense,
+    transfer: t.transaction.transfer,
+  };
+  const { formData } = loaded;
+
+  return (
+    <>
+      <Link href={`/${orgSlug}/transactions/${originalId}`} className="back-link">
+        &larr; {t.transaction.editTitle}
+      </Link>
+      <h1>{interpolate(t.transaction.replaceTitle, { kind: kindLabels[kind] })}</h1>
+      <p className="field-hint">{t.transaction.replaceExplain}</p>
+      <TransactionForm
+        orgSlug={orgSlug}
+        baseCurrency={context.baseCurrency}
+        locale={locale}
+        moneyAccounts={formData.moneyAccounts.map(toOption)}
+        incomeCategories={formData.incomeCategories.map(toOption)}
+        expenseCategories={formData.expenseCategories.map(toOption)}
+        recentIncomeCategories={formData.recentIncomeCategories.map(toOption)}
+        recentExpenseCategories={formData.recentExpenseCategories.map(toOption)}
+        currencies={[...SUPPORTED_CURRENCIES]}
+        projects={formData.projects}
+        replacing={{ id: original.id }}
+        initialData={{
+          id: original.id,
+          occurredOn: original.occurredOn,
+          // 与编辑页同一把尺：按币种的小数位还原，不能 ÷100，见那里的注释。
+          amount: formatMinorToDecimal(original.amountMinor, currencyExponent(original.currency)),
+          currency: original.currency,
+          moneyAccountId: original.moneyAccountId ?? '',
+          // 收入与支出的分类是两个池子，换了类型原来那个分类在新下拉里不存在。
+          categoryId: null,
+          projectId: original.projectId ?? null,
+          // 转账的转出方只有原记录本身就是转账时才有意义——而那时 kind 已经换掉了。
+          counterAccountId: null,
+          description: original.description ?? '',
+          exchangeRate: original.exchangeRate ?? '1',
+          rateSource: original.rateSource,
+          kind,
+        }}
       />
     </>
   );

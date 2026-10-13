@@ -1211,7 +1211,8 @@ a.kpi-lead:hover, a.kpi-item:hover { text-decoration: none; }
 .app-main > section form label { margin-top: var(--space-4); }
 .app-main > section form label:first-of-type { margin-top: 0; }
 .app-main > section form input,
-.app-main > section form select { width: 100%; max-width: 420px; }
+.app-main > section form select,
+.app-main > section form textarea { width: 100%; max-width: 420px; }
 .app-main > section form button[type='submit'] { align-self: flex-start; margin-top: var(--space-5); }
 
 .named-list {
@@ -1628,7 +1629,39 @@ p.report-period {
   transition: border-color var(--dur-fast) var(--ease), background var(--dur-fast) var(--ease);
 }
 .attachment-upload-label:hover { background: var(--bg-hover); border-color: var(--accent); }
-.attachment-upload-label input[type='file'] { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+/* 文件框本身是视觉隐藏的，焦点落在它上面时外面这一圈得亮起来，
+   否则键盘用户按 Tab 走到这里什么也看不见。 */
+.attachment-upload-label:focus-within { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
+.attachment-upload-label input[type='file'] { position: absolute; width: 1px; height: 1px; min-height: 0; padding: 0; border: 0; overflow: hidden; clip-path: inset(50%); }
+/* .transaction-form 给所有输入框 width:100%，特指度比上面那条高，不压回去的话
+   这个看不见的文件框会以整列的宽度绝对定位，在手机上撑出横向滚动。 */
+.transaction-form .attachment-upload-label input[type='file'] { width: 1px; }
+/* label.attachment-upload-label 而不是 .attachment-upload-label：要压过
+   `.transaction-form label:not(.kind-option)` 那条 margin-top（特指度 0,2,1）。 */
+.transaction-form label.attachment-upload-label { align-self: flex-start; margin-top: var(--space-2); }
+.pending-receipts-field { margin-top: var(--space-5); }
+.change-kind { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
+.attachment-errors { white-space: pre-line; }
+.attachment-panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
+.pending-receipts { display: flex; flex-direction: column; gap: var(--space-1); margin: var(--space-2) 0 0; padding: 0; list-style: none; }
+.pending-receipts li { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
+.pending-receipts .attachment-delete-btn { margin-left: auto; }
+
+/* ── 公司 logo（设置 → 公司） ── */
+.logo-uploader-preview {
+  display: flex; align-items: center; justify-content: center;
+  width: 12rem; min-height: 5rem; padding: var(--space-3);
+  /* logo 多半是为白纸设计的。暗色主题下直接放在深底上，深色字的 logo
+     会和背景融成一片——这里垫一块纸色，看到的就是印出来的样子。 */
+  background: #fff;
+  border: 1px solid var(--border-primary); border-radius: var(--radius-md);
+}
+.logo-uploader-preview img { max-width: 100%; max-height: 5rem; object-fit: contain; }
+.logo-uploader-preview .text-muted { color: #666; font-size: var(--text-xs); margin: 0; text-align: center; }
+.logo-uploader-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
+
+.settings-fieldset { margin-top: var(--space-6); }
+.settings-fieldset > .field-hint:first-of-type { margin: 0 0 var(--space-3); }
 
 /* ==========================================================================
    Bank Import
@@ -2002,6 +2035,14 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
     border: 1px solid var(--border-primary); border-radius: var(--radius-md);
   }
   .transaction-table td, .audit-table td { padding: 0; border-bottom: none; }
+  /* 整张卡片可点：把备注那一格里唯一的链接撑满整张卡片。原来只有备注那几个
+     字能点，备注为空时只剩一个「—」，拇指几乎按不中。
+     不给 <tr> 绑点击事件——那样键盘与读屏都看不到它。
+     只在这里（卡片布局）做，不在桌面表格上做：表格行上的 position: relative
+     并不是每个浏览器都认，不认的那一个会把这层 ::after 撑满整张表甚至整页，
+     从此点哪里都进同一笔。这里的 <tr> 是 display: grid，没有这个问题。 */
+  .transaction-table tr.row-link { position: relative; }
+  .transaction-table tr.row-link td:nth-child(2) > a::after { content: ''; position: absolute; inset: 0; }
   .transaction-table td:nth-child(2) { grid-row: 1; grid-column: 1; font-weight: 600; font-size: var(--text-base); }
   .transaction-table td.numeric { grid-row: 1; grid-column: 2; font-size: var(--text-md); font-weight: 600; }
   /* 日期 / 分类 / 账户 / 记录人 四项附属信息。
@@ -2212,6 +2253,11 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
   margin-bottom: var(--space-6);
 }
 .printable-invoice-head h1 { margin: 0; }
+/* 高度定死、宽度随比例：横版 logo 与方形 logo 都落在同一条视线上，
+   不会有哪一张把标题顶到半页以下。 */
+.printable-invoice-logo { display: block; max-height: 4rem; max-width: 14rem; object-fit: contain; margin-bottom: var(--space-4); }
+/* 地址、收款信息、备注都是用户按行写的，保留换行，不保留多余的空格。 */
+.printable-invoice-multiline { white-space: pre-line; }
 .printable-invoice-org { text-align: right; }
 .printable-invoice-org p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-sm); }
 .printable-invoice-meta {

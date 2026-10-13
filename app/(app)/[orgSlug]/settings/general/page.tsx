@@ -6,6 +6,8 @@ import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { updatePeriodLock, updateOrganization } from '@/server/actions/organizations';
 import { getOrganizationSettings, getUserLocale } from '@/server/repositories/organizations';
+import { getLogoSignedUrl } from '@/server/services/organization-logo';
+import { LogoUploader } from '@/components/settings/logo-uploader';
 
 /**
  * 财年起始月的选项。1–12 按顺序列出，标签由 i18n 的 settings.month1..month12
@@ -51,6 +53,7 @@ export default async function GeneralSettingsPage({
   const settings = await withTransaction(context.userId, (tx) =>
     getOrganizationSettings(tx, context.organizationId),
   );
+  const logoUrl = await getLogoSignedUrl(settings.logoPath);
 
   return (
     <>
@@ -112,6 +115,11 @@ export default async function GeneralSettingsPage({
               timezone: String(formData.get('timezone') ?? ''),
               industry: String(formData.get('industry') ?? '') || undefined,
               address: String(formData.get('address') ?? '') || undefined,
+              registrationNumber: String(formData.get('registrationNumber') ?? '') || undefined,
+              taxNumber: String(formData.get('taxNumber') ?? '') || undefined,
+              phone: String(formData.get('phone') ?? '') || undefined,
+              email: String(formData.get('email') ?? '') || undefined,
+              paymentDetails: String(formData.get('paymentDetails') ?? '') || undefined,
               fiscalYearStartMonth: String(formData.get('fiscalYearStartMonth') ?? ''),
             });
             redirect(`/${orgSlug}/settings/general?saved=general`);
@@ -135,21 +143,6 @@ export default async function GeneralSettingsPage({
           <label htmlFor="industry">{t.onboarding.industry}</label>
           <input id="industry" name="industry" maxLength={60} defaultValue={settings.industry ?? ''} />
 
-          {/*
-            开票方地址。发票单据（invoices/[id]/print）会把它印在公司名下面——
-            一张寄给客户的发票上没有开票方地址，很多地方在法律上就不算一张发票。
-            这一列是 0026 迁移补的：在此之前 getInvoicePdfData 一直在
-            `select name, address from organizations`，而那一列根本不存在，
-            于是「下载发票」每一次都撞 42703，从上线起一次都没成功过。
-          */}
-          <label htmlFor="address">{t.settings.companyAddress}</label>
-          <input
-            id="address"
-            name="address"
-            maxLength={300}
-            defaultValue={settings.address ?? ''}
-          />
-
           <label htmlFor="fiscalYearStartMonth">{t.settings.fiscalYearStart}</label>
           <select
             id="fiscalYearStartMonth"
@@ -164,6 +157,83 @@ export default async function GeneralSettingsPage({
           </select>
           <p className="field-hint">{t.settings.fiscalYearStartHint}</p>
 
+          {/*
+            发票上的卖方资料。和公司名、时区放在同一张表单里一起保存：分成两张
+            表单的话，用户改完这一组、点了另一组的保存按钮，这一组就白填了。
+          */}
+          <fieldset className="settings-fieldset">
+            <legend>{t.settings.invoiceProfileTitle}</legend>
+            <p className="field-hint">{t.settings.invoiceProfileHint}</p>
+
+            {/*
+              开票方地址。发票单据（invoices/[id]/print）会把它印在公司名下面——
+              一张寄给客户的发票上没有开票方地址，很多地方在法律上就不算一张发票。
+              这一列是 0026 迁移补的：在此之前 getInvoicePdfData 一直在
+              `select name, address from organizations`，而那一列根本不存在，
+              于是「下载发票」每一次都撞 42703，从上线起一次都没成功过。
+
+              用 textarea：地址通常要分两三行写，单行框里打不出换行，印出来就是
+              挤成一长串的一行。打印页按原样保留换行。
+            */}
+            <label htmlFor="address">{t.settings.companyAddress}</label>
+            <textarea
+              id="address"
+              name="address"
+              rows={3}
+              maxLength={300}
+              defaultValue={settings.address ?? ''}
+            />
+
+            <label htmlFor="registrationNumber">{t.settings.registrationNumber}</label>
+            <input
+              id="registrationNumber"
+              name="registrationNumber"
+              maxLength={60}
+              defaultValue={settings.registrationNumber ?? ''}
+            />
+
+            <label htmlFor="taxNumber">{t.settings.taxNumber}</label>
+            <input
+              id="taxNumber"
+              name="taxNumber"
+              maxLength={60}
+              defaultValue={settings.taxNumber ?? ''}
+            />
+
+            <label htmlFor="phone">{t.settings.phone}</label>
+            <input
+              id="phone"
+              name="phone"
+              type="tel"
+              autoComplete="tel"
+              maxLength={40}
+              defaultValue={settings.phone ?? ''}
+            />
+
+            <label htmlFor="email">{t.settings.companyEmail}</label>
+            <input
+              id="email"
+              name="email"
+              type="email"
+              autoComplete="email"
+              maxLength={254}
+              defaultValue={settings.email ?? ''}
+            />
+
+            <label htmlFor="paymentDetails">{t.settings.paymentDetails}</label>
+            <textarea
+              id="paymentDetails"
+              name="paymentDetails"
+              rows={3}
+              maxLength={500}
+              aria-describedby="paymentDetailsHint"
+              defaultValue={settings.paymentDetails ?? ''}
+            />
+            <p id="paymentDetailsHint" className="field-hint">
+              {t.settings.paymentDetailsHint}
+            </p>
+          </fieldset>
+
           {saved === 'general' ? (
             <p role="status" className="form-success">
               {t.settings.saved}
@@ -172,6 +242,17 @@ export default async function GeneralSettingsPage({
 
           <button type="submit">{t.settings.save}</button>
         </form>
+      </section>
+
+      <section>
+        <h2>{t.settings.logoTitle}</h2>
+        <LogoUploader
+          orgSlug={orgSlug}
+          orgName={settings.name}
+          hasLogo={settings.logoPath !== null}
+          logoUrl={logoUrl}
+          t={t}
+        />
       </section>
     </>
   );
