@@ -710,15 +710,16 @@ export function TransactionForm({
                 <li key={`${file.name}-${file.size}-${index}`}>
                   <span className="attachment-name">{file.name}</span>
                   <span className="attachment-size">{formatFileSize(file.size)}</span>
+                  {/* 写字而不是一个 ×，理由同 attachment-panel.tsx。 */}
                   <button
                     type="button"
-                    className="attachment-delete-btn"
+                    className="btn-small attachment-delete-btn"
                     aria-label={interpolate(t.transaction.receiptRemovePending, { name: file.name })}
                     onClick={() =>
                       setPendingFiles((prev) => prev.filter((_, position) => position !== index))
                     }
                   >
-                    <span aria-hidden="true">&times;</span>
+                    {t.transaction.receiptRemoveShort}
                   </button>
                 </li>
               ))}

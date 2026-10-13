@@ -133,6 +133,10 @@ const en = {
     otherCategory: 'Other category',
     addAnother: 'Add another record',
     previewFailed: 'Could not load that receipt.',
+    previewShort: 'Preview',
+    // 读屏念的是 previewClose（「Close the preview of …」），要以按钮上的字开头。
+    previewHideShort: 'Close',
+    openInNewTab: 'Open {name} in a new tab',
     previewOpen: 'Preview {name}',
     previewClose: 'Close the preview of {name}',
     deleteAttachment: 'Delete {name}',
@@ -153,6 +157,7 @@ const en = {
     sourceAssetDisposal: 'Asset disposal',
     receiptAdd: 'Attach a receipt',
     receiptRemovePending: 'Remove {name}',
+    receiptRemoveShort: 'Remove',
     receiptWrongType: '{name} is not a JPG, PNG, WebP, HEIC or PDF file.',
     receiptTooLarge: '{name} is larger than 10 MB.',
     receiptsUploadFailed:

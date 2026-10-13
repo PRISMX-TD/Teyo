@@ -1627,14 +1627,23 @@ p.report-period {
   text-transform: uppercase; letter-spacing: 0.1em; color: var(--text-tertiary);
   margin-bottom: var(--space-3);
 }
-.attachment-list { display: flex; flex-direction: column; margin-top: var(--space-3); }
+/* list-style: none——原来每一行前面还挂着一个列表圆点。 */
+.attachment-list { display: flex; flex-direction: column; margin: var(--space-3) 0 0; padding: 0; list-style: none; }
 .attachment-list > * { padding: var(--space-2) 0; border-top: 1px solid var(--border-primary); }
 .attachment-list > *:first-child { border-top: none; }
+/* 一行：文件名（太长截断，悬停看全名）、大小，按钮靠右。窄屏放不下时按钮
+   整组换到下一行，不会一个在上一个在下。 */
+.attachment-list > li { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-1) var(--space-2); }
+.attachment-list .attachment-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.attachment-list .attachment-size { margin-left: 0; flex-shrink: 0; }
+.attachment-actions { display: inline-flex; gap: var(--space-2); margin-left: auto; }
+.attachment-preview-pdf { margin: var(--space-3) 0 0; font-size: var(--text-sm); }
+.attachment-preview-pdf a { color: var(--accent); }
 .attachment-name { font-size: var(--text-sm); color: var(--text-primary); }
 .attachment-name a { color: var(--text-primary); }
 .attachment-name a:hover { text-decoration: underline; text-decoration-color: var(--accent); }
 .attachment-size { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-tertiary); margin-left: var(--space-2); }
-.attachment-preview-btn, .attachment-delete-btn { min-height: 32px; padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
+.attachment-preview-btn, .attachment-delete-btn { min-height: 32px; padding: var(--space-1) var(--space-3); font-size: var(--text-xs); }
 .attachment-preview { margin-top: var(--space-3); max-width: 100%; max-height: 400px; border: 1px solid var(--border-primary); border-radius: var(--radius-md); overflow: hidden; }
 .attachment-upload-label {
   display: inline-flex; align-items: center; gap: var(--space-2);

@@ -152,36 +152,40 @@ export function AttachmentPanel({
         <ul className="attachment-list">
           {items.map((item) => (
             <li key={item.id}>
-              <span className="attachment-name">{item.fileName}</span>
+              <span className="attachment-name" title={item.fileName}>
+                {item.fileName}
+              </span>
               <span className="attachment-size">{formatFileSize(item.sizeBytes)}</span>
-              {/* \u8fd9\u4e24\u4e2a\u6309\u94ae\u7684\u53ef\u89c1\u5185\u5bb9\u53ea\u6709 \u2715 / \u25b6 / \u00d7 \u4e09\u4e2a\u7b26\u53f7\uff0c\u8bfb\u5c4f\u5ff5\u51fa\u6765
-                  \u5c31\u662f\u300c\u6309\u94ae\u300d\u300c\u6309\u94ae\u300d\u2014\u2014\u4e00\u884c\u91cc\u6709\u4e24\u4e2a\u540c\u540d\u6309\u94ae\uff0c\u5176\u4e2d\u4e00\u4e2a\u4f1a
-                  \u6c38\u4e45\u5220\u6389\u51ed\u8bc1\u3002aria-label \u5e26\u4e0a\u6587\u4ef6\u540d\uff0c\u624d\u5206\u5f97\u6e05\u5220\u7684\u662f\u54ea\u5f20\u3002
-                  \u7b26\u53f7\u672c\u8eab aria-hidden\uff0c\u5426\u5219\u8bfb\u5c4f\u4f1a\u628a\u6807\u7b7e\u548c\u7b26\u53f7\u5ff5\u4e24\u904d\u3002 */}
-              <button
-                type="button"
-                className="attachment-preview-btn"
-                aria-expanded={previewId === item.id}
-                aria-label={interpolate(
-                  previewId === item.id
-                    ? t.transaction.previewClose
-                    : t.transaction.previewOpen,
-                  { name: item.fileName },
-                )}
-                onClick={() => handlePreview(item.id)}
-              >
-                <span aria-hidden="true">{previewId === item.id ? '\u2715' : '\u25b6'}</span>
-              </button>
-              {!readOnly ? (
+              {/* 按钮上原来只有符号：预览是 ▶、预览打开后变成 ✕，删除是 ×——开着
+                  预览时一行里是两个几乎一样的叉，其中一个会永久删掉凭证。现在写字。
+                  aria-label 仍然带上文件名（以按钮上的字开头，读屏念的与看到的
+                  对得上），一列收据里才分得清删的是哪一张。 */}
+              <span className="attachment-actions">
                 <button
                   type="button"
-                  className="attachment-delete-btn"
-                  aria-label={interpolate(t.transaction.deleteAttachment, { name: item.fileName })}
-                  onClick={() => handleDelete(item.id, item.fileName)}
+                  className="btn-small attachment-preview-btn"
+                  aria-expanded={previewId === item.id}
+                  aria-label={interpolate(
+                    previewId === item.id
+                      ? t.transaction.previewClose
+                      : t.transaction.previewOpen,
+                    { name: item.fileName },
+                  )}
+                  onClick={() => handlePreview(item.id)}
                 >
-                  <span aria-hidden="true">&times;</span>
+                  {previewId === item.id ? t.transaction.previewHideShort : t.transaction.previewShort}
                 </button>
-              ) : null}
+                {!readOnly ? (
+                  <button
+                    type="button"
+                    className="btn-small btn-danger attachment-delete-btn"
+                    aria-label={interpolate(t.transaction.deleteAttachment, { name: item.fileName })}
+                    onClick={() => handleDelete(item.id, item.fileName)}
+                  >
+                    {t.common.delete}
+                  </button>
+                ) : null}
+              </span>
             </li>
           ))}
         </ul>
@@ -194,11 +198,14 @@ export function AttachmentPanel({
       {previewUrl && previewedItem?.mimeType === 'application/pdf' ? (
         // PDF 塞进 <img> 只会显示一个破图标。给一个新标签页打开的链接，
         // 签名 URL 本来就是短时效的，浏览器自带的 PDF 查看器接得住。
-        <div className="attachment-preview">
+        // 原来这里是一个带边框的方框、里面只有文件名，看上去像一个输入框，
+        // 不像能点的东西。
+        <p className="attachment-preview-pdf">
           <a href={previewUrl} target="_blank" rel="noopener noreferrer">
-            {previewedItem.fileName}
+            {interpolate(t.transaction.openInNewTab, { name: previewedItem.fileName })}
+            <span aria-hidden="true"> ↗</span>
           </a>
-        </div>
+        </p>
       ) : previewUrl ? (
         <div className="attachment-preview">
           {/* alt="" 是「这张图纯装饰，跳过它」的意思。凭证图片恰恰相反——
