@@ -20,7 +20,7 @@ export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLab
   }
 
   return (
-    <table className="transaction-table">
+    <table className="transaction-table tx-list">
       <caption className="visually-hidden">{t.transaction.listTitle}</caption>
       <thead>
         <tr>
@@ -39,11 +39,18 @@ export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLab
           // 读屏与键盘走的还是它；为什么只在卡片布局上做，见 globals.css 的 .row-link。
           <tr key={row.id} className={row.voidedAt ? 'row-link row-voided' : 'row-link'}>
             <td>{row.occurredOn}</td>
-            <td>
-              <Link href={`/${orgSlug}/transactions/${row.id}`}>
-                {row.description || '\u2014'}
-              </Link>
-              {row.voidedAt ? <span className="badge">{t.transaction.voided}</span> : null}
+            {/* 备注一行放不下就截成省略号（规则见 globals.css 的 .tx-description），
+                悬停看全文，详情页里是完整的。 */}
+            <td className="tx-description">
+              <div className="tx-description-line">
+                <Link
+                  href={`/${orgSlug}/transactions/${row.id}`}
+                  title={row.description || undefined}
+                >
+                  {row.description || '\u2014'}
+                </Link>
+                {row.voidedAt ? <span className="badge">{t.transaction.voided}</span> : null}
+              </div>
             </td>
             <td>
               {row.categoryId

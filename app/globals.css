@@ -639,6 +639,23 @@ button[type='submit']:disabled { background: var(--bg-elevated); border-color: v
 .numeric { text-align: right; white-space: nowrap; }
 .transaction-table th.numeric, .audit-table th.numeric, .report-table th.numeric { text-align: right; }
 
+/* 流水表的备注一栏（components/transaction/transaction-table.tsx）。
+
+   备注里常有一整串不换行的 TXID、订单号。原来它把这一列撑到页面以外：
+   金额被推出右边，日期、分类、记录人被挤成两行。
+
+   width: 100% + max-width: 0：auto 表格布局下这一列对列宽的贡献是 0，
+   于是其余各列先按内容排好，这一列只拿剩下的宽度，放不下的截成省略号。
+   截断放在里面那一层 flex 上而不是 <td> 上：「已作废」徽章跟在链接后面，
+   不能跟着被截掉。 */
+.transaction-table td.tx-description { width: 100%; max-width: 0; }
+.tx-description-line { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.tx-description-line > a { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tx-description-line > .badge { flex-shrink: 0; }
+/* 备注那一列一占满剩余宽度，其余各列就只剩最窄的宽度可用——日期、「奖励
+   发放」、「Lee Rex」都会被折成两行。它们本来就短，一律不折行。 */
+.tx-list td:not(.tx-description) { white-space: nowrap; }
+
 .money-in { color: var(--green); }
 .money-out { color: var(--red); }
 
@@ -2093,7 +2110,10 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
      并不是每个浏览器都认，不认的那一个会把这层 ::after 撑满整张表甚至整页，
      从此点哪里都进同一笔。这里的 <tr> 是 display: grid，没有这个问题。 */
   .transaction-table tr.row-link { position: relative; }
-  .transaction-table tr.row-link td:nth-child(2) > a::after { content: ''; position: absolute; inset: 0; }
+  .transaction-table tr.row-link td:nth-child(2) a::after { content: ''; position: absolute; inset: 0; }
+  /* 卡片布局里备注格是网格项，桌面那条 max-width: 0 会把它压成零宽。
+     截断照旧由里面那层 .tx-description-line 做。 */
+  .transaction-table td.tx-description { width: auto; max-width: none; min-width: 0; }
   .transaction-table td:nth-child(2) { grid-row: 1; grid-column: 1; font-weight: 600; font-size: var(--text-base); }
   .transaction-table td.numeric { grid-row: 1; grid-column: 2; font-size: var(--text-md); font-weight: 600; }
   /* 日期 / 分类 / 账户 / 记录人 四项附属信息。
