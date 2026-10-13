@@ -8,6 +8,7 @@ import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getBill } from '@/server/repositories/bills';
+import { hasBalanceToSettle, sumDeductedByDocument } from '@/server/repositories/payments';
 import { listAttachments } from '@/server/repositories/attachments';
 import { listTaxRates } from '@/server/repositories/tax';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
@@ -27,8 +28,13 @@ export default async function BillDetailPage({
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const { bill, contacts, taxRates, attachments } = await withTransaction(context.userId, async (tx) => {
+  const { bill, contacts, taxRates, attachments, deductedMinor } = await withTransaction(context.userId, async (tx) => {
     const found = await getBill(tx, context.organizationId, id);
+    const deducted = found
+      ? ((await sumDeductedByDocument(tx, context.organizationId, 'bill', [found.id])).get(
+          found.id,
+        ) ?? 0n)
+      : 0n;
     const rows = await tx`
       select id, name
       from contacts
@@ -42,13 +48,22 @@ export default async function BillDetailPage({
     const files = found
       ? await listAttachments(tx, context.organizationId, { type: 'bill', id: found.id })
       : [];
-    return { bill: found, contacts: rows, taxRates: rates, attachments: files };
+    return {
+      bill: found,
+      contacts: rows,
+      taxRates: rates,
+      attachments: files,
+      deductedMinor: deducted,
+    };
   });
 
   if (!bill) notFound();
 
   // updateBill 要 transaction:edit:any，这一页只要 transaction:read。
   const canEdit = can(context.role, 'transaction:edit:any');
+  // 与发票页的「记录收款」对称，见那里的注释。
+  const mayRecordPayment =
+    can(context.role, 'transaction:create') && hasBalanceToSettle(bill, deductedMinor);
 
   // 停用的供应商要补回下拉框，理由见发票那一侧的同一段注释。
   const contactOptions = contacts.some((c) => c.id === bill.contactId)
@@ -60,6 +75,11 @@ export default async function BillDetailPage({
       <div className="page-header">
         <h1>{interpolate(t.bills.editTitle, { number: bill.billNumber ?? '—' })}</h1>
         <div className="page-header-actions">
+          {mayRecordPayment ? (
+            <Link href={`/${orgSlug}/payments/new?bill=${bill.id}`} className="primary-button">
+              {t.bills.recordPayment}
+            </Link>
+          ) : null}
           {bill.purchaseOrderId ? (
             <Link
               href={`/${orgSlug}/purchase-orders/${bill.purchaseOrderId}`}

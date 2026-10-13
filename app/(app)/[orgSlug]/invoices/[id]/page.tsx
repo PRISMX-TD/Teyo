@@ -7,6 +7,7 @@ import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getInvoice } from '@/server/repositories/invoices';
+import { hasBalanceToSettle, sumDeductedByDocument } from '@/server/repositories/payments';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
 /**
@@ -31,8 +32,13 @@ export default async function InvoiceDetailPage({
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const { invoice, contacts } = await withTransaction(context.userId, async (tx) => {
+  const { invoice, contacts, deductedMinor } = await withTransaction(context.userId, async (tx) => {
     const found = await getInvoice(tx, context.organizationId, id);
+    const deducted = found
+      ? ((await sumDeductedByDocument(tx, context.organizationId, 'invoice', [found.id])).get(
+          found.id,
+        ) ?? 0n)
+      : 0n;
     const rows = await tx`
       select id, name
       from contacts
@@ -41,7 +47,7 @@ export default async function InvoiceDetailPage({
         and is_active = true
       order by name
     ` as { id: string; name: string }[];
-    return { invoice: found, contacts: rows };
+    return { invoice: found, contacts: rows, deductedMinor: deducted };
   });
 
   // getInvoice 已经按 organization_id 过滤过，所以「查不到」与「不是你的」
@@ -60,11 +66,25 @@ export default async function InvoiceDetailPage({
   // 保存失败的表单。
   const mayEdit = can(context.role, 'transaction:edit:any');
 
+  // 「记录收款」：发票还欠着钱、而这个人记得了收款（createPayment 要
+  // transaction:create）才出现。点进去，收付款页按这张发票填好客户、币种
+  // 与金额。
+  const mayRecordPayment =
+    can(context.role, 'transaction:create') && hasBalanceToSettle(invoice, deductedMinor);
+
   return (
     <>
       <div className="page-header">
         <h1>{interpolate(t.invoices.editTitle, { number: invoice.invoiceNumber })}</h1>
         <div className="page-header-actions">
+          {mayRecordPayment ? (
+            <Link
+              href={`/${orgSlug}/payments/new?invoice=${invoice.id}`}
+              className="primary-button"
+            >
+              {t.invoices.recordPayment}
+            </Link>
+          ) : null}
           {/* 打印页此前只能从列表进，详情页上没有入口，而打印页的「返回」
               却指回这里。 */}
           <Link href={`/${orgSlug}/invoices/${invoice.id}/print`} className="text-button">

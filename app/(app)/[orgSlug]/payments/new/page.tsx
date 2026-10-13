@@ -8,10 +8,20 @@ import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
 
 export default async function NewPaymentPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { orgSlug } = await params;
+  const raw = await searchParams;
+  // 从发票页的「记录收款」（或账单页的「记录付款」）进来时带着的那一张。
+  const requested =
+    typeof raw.invoice === 'string'
+      ? { kind: 'invoice' as const, id: raw.invoice }
+      : typeof raw.bill === 'string'
+        ? { kind: 'bill' as const, id: raw.bill }
+        : null;
   const context = await requirePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
@@ -39,8 +49,19 @@ export default async function NewPaymentPage({
 
       const documents = await listOutstandingDocuments(tx, context.organizationId);
 
+      // 停用的往来对象如果还欠着钱，也要在下拉框里：点了它的发票，表单会把
+      // 往来对象切到它，下拉框里没有这一项的话就会落到别人身上。
+      const listed = new Set(contactRows.map((c) => c.id));
+      const missing = new Map<string, string>();
+      for (const doc of documents) {
+        if (!listed.has(doc.contactId)) missing.set(doc.contactId, doc.contactName);
+      }
+
       return {
-        contacts: contactRows,
+        contacts: [
+          ...contactRows,
+          ...[...missing].map(([id, name]) => ({ id, name })),
+        ].sort((a, b) => a.name.localeCompare(b.name)),
         // 表单要的是「总额 + 已付」，这里把已付写成 total − remaining，
         // 余额的口径因此只有 listOutstandingDocuments 一处。
         outstandingInvoices: documents
@@ -53,6 +74,7 @@ export default async function NewPaymentPage({
             totalMinor: doc.totalMinor,
             paidMinor: doc.totalMinor - doc.remainingMinor,
             currency: doc.currency,
+            dueDate: doc.dueDate,
           })),
         outstandingBills: documents
           .filter((doc) => doc.kind === 'bill')
@@ -64,6 +86,7 @@ export default async function NewPaymentPage({
             totalMinor: doc.totalMinor,
             paidMinor: doc.totalMinor - doc.remainingMinor,
             currency: doc.currency,
+            dueDate: doc.dueDate,
           })),
       };
     },
@@ -78,9 +101,20 @@ export default async function NewPaymentPage({
     );
   }
 
+  // 只认未结清单里的那一张：已收讫、作废、草稿的都没有可核销的余额，
+  // 照着它预填只会让用户填完一整张表再被服务端拒。
+  const pool = requested?.kind === 'bill' ? outstandingBills : outstandingInvoices;
+  const initialDocument =
+    requested && pool.some((doc) => doc.id === requested.id) ? requested : null;
+
   return (
     <>
       <h1>{t.payments.newTitle}</h1>
+      {requested && !initialDocument ? (
+        <p role="status" className="hint">
+          {t.payments.prefillUnavailable}
+        </p>
+      ) : null}
       <PaymentForm
         orgSlug={orgSlug}
         locale={locale}
@@ -91,6 +125,7 @@ export default async function NewPaymentPage({
         baseCurrency={context.baseCurrency}
         outstandingInvoices={outstandingInvoices}
         outstandingBills={outstandingBills}
+        initialDocument={initialDocument}
       />
     </>
   );

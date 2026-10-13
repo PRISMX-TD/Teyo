@@ -668,6 +668,23 @@ export async function sumDeductedByDocument(
   return result;
 }
 
+/**
+ * 这张单据还能不能被一笔收付款核销。与 listOutstandingDocuments 的 where
+ * 条件一一对应——发票页上的「记录收款」按钮按它显示，点进去之后收付款页
+ * 按 listOutstandingDocuments 预填；两边口径不同，就会出现按钮点得到、
+ * 进去却什么都没填的情况。
+ */
+export function hasBalanceToSettle(
+  doc: { status: string; voidedAt: string | null; totalMinor: bigint },
+  deductedMinor: bigint,
+): boolean {
+  return (
+    doc.voidedAt === null &&
+    !['draft', 'voided', 'paid'].includes(doc.status) &&
+    doc.totalMinor > deductedMinor
+  );
+}
+
 /** 一张还能被收付款核销的单据，以及它还剩多少（原币）。 */
 export type OutstandingDocument = {
   id: string;
@@ -678,6 +695,8 @@ export type OutstandingDocument = {
   currency: string;
   totalMinor: bigint;
   remainingMinor: bigint;
+  /** YYYY-MM-DD。收付款页上按它排、按它标「已逾期」。 */
+  dueDate: string;
 };
 
 /**
@@ -696,7 +715,7 @@ export async function listOutstandingDocuments(
 ): Promise<OutstandingDocument[]> {
   const invoiceRows = await tx`
     select i.id, i.invoice_number as number, i.contact_id, c.name as contact_name,
-           i.currency, i.total_minor
+           i.currency, i.total_minor, i.due_date
     from invoices i
     join contacts c on c.id = i.contact_id
     where i.organization_id = ${organizationId}
@@ -706,7 +725,7 @@ export async function listOutstandingDocuments(
   `;
   const billRows = await tx`
     select b.id, b.bill_number as number, b.contact_id, c.name as contact_name,
-           b.currency, b.total_minor
+           b.currency, b.total_minor, b.due_date
     from bills b
     join contacts c on c.id = b.contact_id
     where b.organization_id = ${organizationId}
@@ -735,6 +754,7 @@ export async function listOutstandingDocuments(
       currency: row.currency as string,
       totalMinor,
       remainingMinor: totalMinor - (deducted.get(row.id as string) ?? 0n),
+      dueDate: formatDateOnly(row.due_date as Date | string),
     };
   };
 

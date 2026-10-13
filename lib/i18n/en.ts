@@ -576,6 +576,7 @@ const en = {
     noCustomers: 'Add a customer first, then you can invoice them.',
     reference: 'Customer ref. / PO no.',
     referenceHint: 'Optional. The purchase order or reference number your customer gave you — many companies need it before they will pay.',
+    recordPayment: 'Record payment',
   },
   invoicePdf: {
     // 这三个键由「可打印发票」那一项使用
@@ -662,6 +663,7 @@ const en = {
     attachments: 'Attachments',
     noAttachments: 'Nothing attached yet. Keep the vendor’s bill here, as a PDF or a photo.',
     addAttachment: 'Attach a file',
+    recordPayment: 'Record payment',
   },
   arAging: {
     title: 'AR Aging',
@@ -905,6 +907,14 @@ const en = {
     openPrepaymentsEmpty: 'Nothing sitting on account.',
     openPrepaymentsHint:
       'Deposits and advances that have no document yet. Apply one to an invoice or bill once it exists.',
+    quickPickInvoices: 'Invoices waiting for payment',
+    quickPickBills: 'Bills waiting to be paid',
+    quickPickHint:
+      'Click one to fill in who paid, the currency and the amount. Click more from the same contact to settle several with one payment.',
+    dueOn: 'Due {date}',
+    overdueSince: 'Overdue since {date}',
+    prefillUnavailable:
+      'That invoice or bill has nothing left to settle — it is paid, voided or still a draft.',
   },
   creditNotes: {
     title: 'Credit Notes',

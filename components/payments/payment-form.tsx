@@ -9,6 +9,12 @@ import { todayLocalISO } from '@/lib/date';
 import { formatMoney } from '@/lib/format';
 import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
 import { RateField } from '@/components/transaction/rate-field';
+import {
+  isPicked,
+  pickDocument,
+  type PaymentDraft,
+  type PickableDocument,
+} from '@/components/payments/pick-document';
 
 type Contact = { id: string; name: string };
 
@@ -20,6 +26,8 @@ type OutstandingInvoice = {
   totalMinor: bigint;
   paidMinor: bigint;
   currency: string;
+  /** YYYY-MM-DD */
+  dueDate: string;
 };
 
 type OutstandingBill = {
@@ -30,6 +38,8 @@ type OutstandingBill = {
   totalMinor: bigint;
   paidMinor: bigint;
   currency: string;
+  /** YYYY-MM-DD */
+  dueDate: string;
 };
 
 type Props = {
@@ -43,7 +53,48 @@ type Props = {
   baseCurrency: string;
   outstandingInvoices?: OutstandingInvoice[];
   outstandingBills?: OutstandingBill[];
+  /**
+   * 从发票（或账单）页的「记录收款 / 记录付款」进来时带的那一张。表单一打开
+   * 就按它填好方向、往来对象、币种与核销金额，和在页面上点它一下是同一个效果。
+   * 页面已经核实过它在未结清单里；不在的话传 null。
+   */
+  initialDocument?: { kind: 'invoice' | 'bill'; id: string } | null;
 };
+
+/** 一张未结单据在快捷清单里要显示的东西。 */
+type QuickPick = PickableDocument & { number: string; contactName: string; dueDate: string };
+
+function quickPicksOf(
+  invoices: OutstandingInvoice[] | undefined,
+  bills: OutstandingBill[] | undefined,
+): { invoices: QuickPick[]; bills: QuickPick[] } {
+  return {
+    invoices: (invoices ?? [])
+      .filter((inv) => inv.totalMinor - inv.paidMinor > 0n)
+      .map((inv) => ({
+        id: inv.id,
+        kind: 'invoice',
+        contactId: inv.contactId,
+        currency: inv.currency,
+        remainingMinor: inv.totalMinor - inv.paidMinor,
+        number: inv.invoiceNumber,
+        contactName: inv.customerName,
+        dueDate: inv.dueDate,
+      })),
+    bills: (bills ?? [])
+      .filter((bill) => bill.totalMinor - bill.paidMinor > 0n)
+      .map((bill) => ({
+        id: bill.id,
+        kind: 'bill',
+        contactId: bill.contactId,
+        currency: bill.currency,
+        remainingMinor: bill.totalMinor - bill.paidMinor,
+        number: bill.billNumber,
+        contactName: bill.vendorName,
+        dueDate: bill.dueDate,
+      })),
+  };
+}
 
 /**
  * 输入框里那个还没打完的十进制字符串 → 最小单位整数；折不动就当零。
@@ -89,25 +140,44 @@ export function PaymentForm({
   baseCurrency,
   outstandingInvoices,
   outstandingBills,
+  initialDocument = null,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
   const today = todayLocalISO();
 
-  const [paymentType, setPaymentType] = useState<'received' | 'made'>(initialType);
-  const [contactId, setContactId] = useState(contacts[0]?.id ?? '');
+  const quickPicks = useMemo(
+    () => quickPicksOf(outstandingInvoices, outstandingBills),
+    [outstandingInvoices, outstandingBills],
+  );
+
+  // 只在第一次渲染时算：带着某一张单据进来，表单就从「已经点过它」开始。
+  const [initial] = useState<PaymentDraft>(() => {
+    // 缺省本位币，不是 currencies[0]。SUPPORTED_CURRENCIES 的第一项碰巧是
+    // MYR，所以这一处以前「看着是对的」——但它对的是列表顺序，不是这家公司。
+    // 列表一重排就静默改掉所有新收款的币种。
+    const base: PaymentDraft = {
+      type: initialType,
+      contactId: contacts[0]?.id ?? '',
+      currency: baseCurrency,
+      selectedItems: [],
+    };
+    const pool = initialDocument?.kind === 'bill' ? quickPicks.bills : quickPicks.invoices;
+    const doc = initialDocument ? pool.find((d) => d.id === initialDocument.id) : undefined;
+    return doc ? pickDocument(base, doc) : base;
+  });
+
+  const [paymentType, setPaymentType] = useState<'received' | 'made'>(initial.type);
+  const [contactId, setContactId] = useState(initial.contactId);
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState('');
-  // 缺省本位币，不是 currencies[0]。SUPPORTED_CURRENCIES 的第一项碰巧是
-  // MYR，所以这一处以前「看着是对的」——但它对的是列表顺序，不是这家公司。
-  // 列表一重排就静默改掉所有新收款的币种。
-  const [currency, setCurrency] = useState(baseCurrency);
+  const [currency, setCurrency] = useState(initial.currency);
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
   const [notes, setNotes] = useState('');
   const [selectedItems, setSelectedItems] = useState<
     { invoiceId?: string; billId?: string; amount: string }[]
-  >([]);
+  >(initial.selectedItems);
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [pending, setPending] = useState(false);
@@ -181,6 +251,23 @@ export function PaymentForm({
     });
   }
 
+  const draft: PaymentDraft = { type: paymentType, contactId, currency, selectedItems };
+
+  /** 点了快捷清单里的一张单据。规则见 pick-document.ts。 */
+  function pick(doc: QuickPick) {
+    const next = pickDocument(draft, doc);
+    // 换了客户或币种，之前手填的总金额是给另一件事填的，留着只会让「挂账」
+    // 那一截算错。同一位客户再加一张时保留。
+    if (next.type !== paymentType || next.contactId !== contactId || next.currency !== currency) {
+      setAmount('');
+    }
+    setPaymentType(next.type);
+    setContactId(next.contactId);
+    setCurrency(next.currency);
+    setSelectedItems(next.selectedItems);
+    setError(null);
+  }
+
   function updateItemAmount(index: number, value: string) {
     setSelectedItems((prev) =>
       prev.map((item, i) => (i === index ? { ...item, amount: value } : item)),
@@ -242,6 +329,7 @@ export function PaymentForm({
 
   const candidates = paymentType === 'received' ? unpaidInvoices : unpaidBills;
   const noCandidates = candidates.length === 0;
+  const visiblePicks = paymentType === 'received' ? quickPicks.invoices : quickPicks.bills;
 
   /**
    * 一张单据都没勾时，金额栏就是这笔钱的唯一来源，不能留空。
@@ -346,7 +434,57 @@ export function PaymentForm({
         </label>
       </div>
 
-      <label htmlFor="contactId">{i18n.invoices.customer}</label>
+      {/*
+        快捷清单：全公司所有未结的发票（或账单），不分客户、不分币种。点一张，
+        客户、币种、核销金额一起填好——不必先猜对客户、再把币种改对，下面的
+        单据清单才肯列出来。按到期日排，逾期的标出来：先收最该收的那一笔。
+      */}
+      {visiblePicks.length > 0 ? (
+        <section className="payment-quick-pick" aria-labelledby="quickPickTitle">
+          <h2 id="quickPickTitle">
+            {paymentType === 'received'
+              ? i18n.payments.quickPickInvoices
+              : i18n.payments.quickPickBills}
+          </h2>
+          <p className="field-hint">{i18n.payments.quickPickHint}</p>
+          <ul>
+            {visiblePicks.map((doc) => {
+              const picked = isPicked(draft, doc);
+              const overdue = doc.dueDate < today;
+              return (
+                <li key={doc.id}>
+                  <button
+                    type="button"
+                    className="payment-quick-pick-item"
+                    aria-pressed={picked}
+                    onClick={() => pick(doc)}
+                  >
+                    <span className="payment-quick-pick-number mono">{doc.number}</span>
+                    <span className="payment-quick-pick-contact">{doc.contactName}</span>
+                    <span
+                      className={
+                        overdue ? 'payment-quick-pick-due is-overdue' : 'payment-quick-pick-due'
+                      }
+                    >
+                      {overdue
+                        ? interpolate(i18n.payments.overdueSince, { date: doc.dueDate })
+                        : interpolate(i18n.payments.dueOn, { date: doc.dueDate })}
+                    </span>
+                    <span className="payment-quick-pick-amount mono">
+                      {formatMoney(doc.remainingMinor, doc.currency)}
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
+      ) : null}
+
+      {/* 收款的对象是客户，付款的对象是供应商。原来两种都写「客户」。 */}
+      <label htmlFor="contactId">
+        {paymentType === 'received' ? i18n.invoices.customer : i18n.bills.vendor}
+      </label>
       <select
         id="contactId"
         value={contactId}

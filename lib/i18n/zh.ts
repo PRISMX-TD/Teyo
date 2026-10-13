@@ -57,7 +57,8 @@ const zh: Translated<typeof en> = {
     transactions: '流水',
     invoices: '发票',
     bills: '账单',
-    payments: '付款',
+    // 这一页收、付两个方向都管。只写「付款」，用户会以为收到客户的钱不记这里。
+    payments: '收付款',
     creditNotes: '贷项通知单',
     bankImport: '银行导入',
     fixedAssets: '固定资产',
@@ -573,6 +574,7 @@ const zh: Translated<typeof en> = {
     noCustomers: '先添加一个客户，才能给他们开发票。',
     reference: '客户参考号 / PO 号',
     referenceHint: '可不填。客户给你的采购单号或参考号——很多公司要对上这个号才会付款。',
+    recordPayment: '记录收款',
   },
   invoicePdf: {
     print: '打印',
@@ -652,6 +654,7 @@ const zh: Translated<typeof en> = {
     attachments: '附件',
     noAttachments: '还没有附件。可以把供应商的账单 PDF 或照片放在这里。',
     addAttachment: '添加文件',
+    recordPayment: '记录付款',
   },
   arAging: {
     title: '应收账款账龄',
@@ -838,8 +841,8 @@ const zh: Translated<typeof en> = {
     noClient: '无客户',
   },
   payments: {
-    title: '付款',
-    newTitle: '记录付款',
+    title: '收付款',
+    newTitle: '记录收付款',
     received: '收款',
     made: '付款',
     type: '类型',
@@ -857,7 +860,7 @@ const zh: Translated<typeof en> = {
     applyToBills: '应用于账单',
     voided: '已作废',
     empty: '暂无付款记录。',
-    save: '保存付款',
+    save: '保存',
     noContacts: '请先添加联系人。',
     settlementRequired: '请至少勾选下面的一张发票。一笔收款必须说明它核销的是哪一张。',
     settlementRequiredBills: '请至少勾选下面的一张账单。一笔付款必须说明它核销的是哪一张。',
@@ -886,6 +889,12 @@ const zh: Translated<typeof en> = {
     openPrepayments: '挂账的款项',
     openPrepaymentsEmpty: '没有挂账的款项。',
     openPrepaymentsHint: '还没有单据的定金与预付款。等单据出来了，把它核销过去。',
+    quickPickInvoices: '待收款的发票',
+    quickPickBills: '待付款的账单',
+    quickPickHint: '点一张，往来对象、币种和金额会自动填好。再点同一位往来对象的其他单据，可以一笔钱核销几张。',
+    dueOn: '{date} 到期',
+    overdueSince: '已逾期（{date} 到期）',
+    prefillUnavailable: '那张单据已经没有可核销的余额——已结清、已作废，或者还是草稿。',
   },
   creditNotes: {
     title: '贷项通知单',

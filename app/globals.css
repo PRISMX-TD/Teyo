@@ -1733,6 +1733,45 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
 .checkbox-row input[type='checkbox'] { flex-shrink: 0; }
 .checkbox-row > span:last-child { color: var(--text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; margin-left: auto; }
 
+/* ── 收付款页：未结单据的快捷清单（components/payments/payment-form.tsx） ──
+   每一行是一个按钮：点一下，往来对象、币种、核销金额一起填好。清单可能
+   很长，限高滚动，免得把下面的表单推到第二屏。 */
+.payment-quick-pick { margin-top: var(--space-5); }
+.payment-quick-pick h2 { font-size: var(--text-sm); font-weight: 600; color: var(--text-primary); margin: 0; }
+.payment-quick-pick > .field-hint { margin: var(--space-1) 0 var(--space-3); }
+.payment-quick-pick ul {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  max-height: 18rem; overflow-y: auto;
+}
+.transaction-form .payment-quick-pick-item,
+.payment-quick-pick-item {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  grid-template-areas: 'number contact amount' 'due due due';
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  width: 100%;
+  min-height: 0;
+  margin: 0;
+  padding: var(--space-3) var(--space-4);
+  text-align: left;
+  font-weight: 400;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+}
+.payment-quick-pick-item[aria-pressed='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-subtle);
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+.payment-quick-pick-number { grid-area: number; color: var(--text-primary); }
+.payment-quick-pick-contact { grid-area: contact; color: var(--text-primary); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.payment-quick-pick-amount { grid-area: amount; color: var(--text-primary); text-align: right; white-space: nowrap; }
+.payment-quick-pick-due { grid-area: due; font-size: var(--text-xs); color: var(--text-tertiary); }
+.payment-quick-pick-due.is-overdue { color: var(--red); }
+
 /* ==========================================================================
    Asset List
    ========================================================================== */
