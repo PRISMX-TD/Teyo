@@ -42,6 +42,12 @@ const INVOICES = [
   },
 ];
 
+const MONEY_ACCOUNTS = [
+  { id: 'a-cash', code: 'cash', name: '现金' },
+  { id: 'a-bank', code: 'bank', name: '银行' },
+  { id: 'a-maybank', code: 'maybank', name: 'Maybank' },
+];
+
 const BILLS = [
   {
     id: 'bill-1',
@@ -55,7 +61,10 @@ const BILLS = [
   },
 ];
 
-function render(initialDocument: { kind: 'invoice' | 'bill'; id: string } | null = null) {
+function render(
+  initialDocument: { kind: 'invoice' | 'bill'; id: string } | null = null,
+  moneyAccounts = MONEY_ACCOUNTS,
+) {
   return renderToStaticMarkup(
     createElement(PaymentForm, {
       orgSlug: 'acme',
@@ -65,6 +74,7 @@ function render(initialDocument: { kind: 'invoice' | 'bill'; id: string } | null
       type: 'received',
       currencies: ['MYR', 'USD', 'SGD'],
       baseCurrency: 'MYR',
+      moneyAccounts,
       outstandingInvoices: INVOICES,
       outstandingBills: BILLS,
       initialDocument,
@@ -129,6 +139,24 @@ describe('PaymentForm', () => {
   it('leaves the reference empty until a document is ticked', () => {
     const html = render();
     expect(html).toMatch(/<input id="reference"[^>]*value=""/);
+  });
+
+  it('offers every money account, defaulting to the bank for a bank transfer', () => {
+    const html = render();
+    expect(html).toContain(`<label for="moneyAccountId">${zh.payments.moneyAccountReceived}</label>`);
+    expect(html).toContain('>Maybank</option>');
+    expect(selected(html, 'moneyAccountId')).toBe('a-bank');
+  });
+
+  it('calls it the account paid from on a payment made', () => {
+    const html = render({ kind: 'bill', id: 'bill-1' });
+    expect(html).toContain(`<label for="moneyAccountId">${zh.payments.moneyAccountMade}</label>`);
+  });
+
+  it('does not default to an archived built-in bank', () => {
+    // 停用的账户不会传进来；缺省落到第一个不是现金的户口上。
+    const html = render(null, MONEY_ACCOUNTS.filter((account) => account.code !== 'bank'));
+    expect(selected(html, 'moneyAccountId')).toBe('a-maybank');
   });
 
   it('ignores a document it was not given', () => {

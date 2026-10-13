@@ -10,6 +10,11 @@ import { formatMoney } from '@/lib/format';
 import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
 import { RateField } from '@/components/transaction/rate-field';
 import {
+  defaultMoneyAccountId,
+  type MoneyAccountOption,
+  type PaymentMethod,
+} from '@/lib/payment-methods';
+import {
   isPicked,
   MAX_PAYMENT_REFERENCE_LENGTH,
   pickDocument,
@@ -54,6 +59,8 @@ type Props = {
   currencies: string[];
   /** 公司本位币。汇率栏与币种缺省都用它。 */
   baseCurrency: string;
+  /** 启用中的资金账户（现金、各个银行户口、电子钱包），按科目表顺序。 */
+  moneyAccounts: MoneyAccountOption[];
   outstandingInvoices?: OutstandingInvoice[];
   outstandingBills?: OutstandingBill[];
   /**
@@ -141,6 +148,7 @@ export function PaymentForm({
   type: initialType,
   currencies,
   baseCurrency,
+  moneyAccounts,
   outstandingInvoices,
   outstandingBills,
   initialDocument = null,
@@ -175,7 +183,12 @@ export function PaymentForm({
   const [date, setDate] = useState(today);
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState(initial.currency);
-  const [method, setMethod] = useState('bank_transfer');
+  const [method, setMethod] = useState<PaymentMethod>('bank_transfer');
+  // 用户自己选过的账户；没选过时按方式给缺省值（现金 → 现金，其余 → 银行）。
+  // 选过之后再改方式不去动它：多半是先选了「Maybank」再把方式从转账改成
+  // 线上支付，两件事互不相干。
+  const [chosenMoneyAccountId, setChosenMoneyAccountId] = useState<string | null>(null);
+  const moneyAccountId = chosenMoneyAccountId ?? defaultMoneyAccountId(moneyAccounts, method);
   const [reference, setReference] = useState('');
   // 用户自己动过参考号没有。动过之后，再勾、再取消单据都不去改它——那多半
   // 是照着银行流水敲进去的号，被单据号盖掉就白敲了。
@@ -412,7 +425,8 @@ export function PaymentForm({
         currency,
         exchangeRate,
         paymentDate: date,
-        method: method as 'cash' | 'bank_transfer' | 'cheque' | 'online' | 'other',
+        method,
+        moneyAccountId: moneyAccountId || undefined,
         reference: shownReference.trim() || autoReference || undefined,
         notes: notes || undefined,
         items,
@@ -608,13 +622,41 @@ export function PaymentForm({
       />
 
       <label htmlFor="method">{i18n.payments.method}</label>
-      <select id="method" value={method} onChange={(e) => setMethod(e.target.value)}>
+      <select
+        id="method"
+        value={method}
+        onChange={(e) => setMethod(e.target.value as PaymentMethod)}
+      >
         {METHODS.map((m) => (
           <option key={m.value} value={m.value}>
             {i18n.payments[m.key]}
           </option>
         ))}
       </select>
+
+      {/* 钱进出的是哪个户口。原来没有这一栏，非现金的收付款一律进系统自带
+          的「银行」，公司有几个户口时，真正收到钱的那个余额不动、对账对不上。 */}
+      <label htmlFor="moneyAccountId">
+        {paymentType === 'received'
+          ? i18n.payments.moneyAccountReceived
+          : i18n.payments.moneyAccountMade}
+      </label>
+      <select
+        id="moneyAccountId"
+        value={moneyAccountId}
+        onChange={(e) => setChosenMoneyAccountId(e.target.value)}
+        aria-describedby="moneyAccountHint"
+        required
+      >
+        {moneyAccounts.map((account) => (
+          <option key={account.id} value={account.id}>
+            {account.name}
+          </option>
+        ))}
+      </select>
+      <p className="field-hint" id="moneyAccountHint">
+        {i18n.payments.moneyAccountHint}
+      </p>
 
       <label htmlFor="reference">{i18n.payments.reference}</label>
       <input

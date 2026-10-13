@@ -48,6 +48,8 @@ import {
   type PaymentDirection,
 } from '@/server/services/prepayment';
 import { recordAudit } from '@/server/repositories/audit-logs';
+import { getMoneyAccount } from '@/server/repositories/accounts';
+import { MONEY_ACCOUNT_CODE_BY_METHOD, type PaymentMethod } from '@/lib/payment-methods';
 import { findTransactionByClientUuid } from '@/server/repositories/transactions';
 import {
   findMoneyAccountId,
@@ -62,10 +64,8 @@ import {
   sumDeductedByDocument,
   sumSettledByDocument,
   voidPayment,
-  MONEY_ACCOUNT_CODE_BY_METHOD,
   type NewPaymentItem,
   type NewPaymentRow,
-  type PaymentMethod,
   type SettlementDocument,
   type SettlementDocumentKind,
 } from '@/server/repositories/payments';
@@ -96,6 +96,11 @@ const createPaymentSchema = z.object({
   exchangeRate: z.string().optional(),
   paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
   method: z.enum(['cash', 'bank_transfer', 'cheque', 'online', 'other']).default('bank_transfer'),
+  /**
+   * 钱进出的资金账户。表单总会送；不送时按 method 落到系统自带的
+   * 'cash' / 'bank'（lib/payment-methods.ts），与 0037 之前一致。
+   */
+  moneyAccountId: z.string().uuid().optional(),
   reference: z.string().max(200).nullable().optional(),
   notes: z.string().max(2000).nullable().optional(),
   /**
@@ -256,6 +261,21 @@ export async function createPayment(
       documentIds,
     );
 
+    // 3b. 资金账户。要在写表头之前定下来：它存在 payments 上，也是下面
+    // 两条腿共用的那个资金科目。
+    //
+    // 用户选的那个过一遍 getMoneyAccount——属于本公司、是资金账户、没有停用。
+    // 只查「id 存在」不够：记到「销售收入」上分录照样配平，只有看报表的人会
+    // 发现银行余额从来不动；别家公司的科目 id 插进来就是串账（数据库那一层
+    // 由 0037 的复合外键再挡一次）。
+    const moneyAccountId = parsed.moneyAccountId
+      ? (await getMoneyAccount(tx, context.organizationId, parsed.moneyAccountId)).id
+      : await findMoneyAccountId(
+          tx,
+          context.organizationId,
+          MONEY_ACCOUNT_CODE_BY_METHOD[parsed.method as PaymentMethod],
+        );
+
     // 4. 写表头与明细。
     const row: NewPaymentRow = {
       organizationId: context.organizationId,
@@ -270,6 +290,7 @@ export async function createPayment(
       baseAmountMinor,
       paymentDate: parsed.paymentDate,
       method: parsed.method,
+      moneyAccountId,
       reference: parsed.reference ?? null,
       notes: parsed.notes ?? null,
       createdBy: context.userId,
@@ -305,12 +326,6 @@ export async function createPayment(
 
     const accounts = await resolvePostingAccounts(tx, context.organizationId, accountCodes);
     const controlAccountId = requireAccount(accounts, controlCode);
-    const moneyAccountId = await findMoneyAccountId(
-      tx,
-      context.organizationId,
-      MONEY_ACCOUNT_CODE_BY_METHOD[parsed.method as PaymentMethod],
-    );
-
     const description = settlementDescription(parsed.type, parsed.reference ?? null);
     const depositDescriptionText = `${description} — on account`;
     const paymentClientUuid = documentClientUuid({ kind: 'payment', id });
@@ -479,6 +494,7 @@ export async function createPayment(
         contactId: parsed.contactId,
         paymentDate: parsed.paymentDate,
         method: parsed.method,
+        moneyAccountId,
         currency: parsed.currency,
         // bigint 不能直接进 JSON，统一转字符串，保持 jsonb 可查询。
         amountMinor: amountMinor.toString(),

@@ -872,6 +872,11 @@ const en = {
     methodCheque: 'Cheque',
     methodOnline: 'Online',
     methodOther: 'Other',
+    moneyAccountReceived: 'Received into',
+    moneyAccountMade: 'Paid from',
+    moneyAccount: 'Account',
+    moneyAccountHint:
+      'Pick the account the money actually went through, so its balance and bank reconciliation match.',
     reference: 'Reference',
     referenceHintInvoices:
       'The bank or cheque reference, for matching against your statement later. Left blank, the numbers of the invoices you tick are used.',

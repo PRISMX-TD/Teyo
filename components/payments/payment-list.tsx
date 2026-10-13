@@ -3,7 +3,7 @@
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { PaymentRow } from '@/server/repositories/payments';
 import { voidPaymentAction } from '@/server/actions/payments';
@@ -195,6 +195,7 @@ export function PaymentList({
             <th scope="col">{i18n.transaction.kind}</th>
             <th scope="col" className="numeric">{i18n.transaction.amount}</th>
             <th scope="col">{i18n.payments.method}</th>
+            <th scope="col">{i18n.payments.moneyAccount}</th>
             <th scope="col">{i18n.payments.reference}</th>
             <th scope="col">{i18n.invoices.status}</th>
             {/* 空表头的整一列在读屏器里是没有名字的：按列导航时念到这里
@@ -216,6 +217,12 @@ export function PaymentList({
                 {formatMoney(p.amountMinor, p.currency)}
               </td>
               <td>{methodLabels[p.method] ?? p.method}</td>
+              <td>
+                {localizedName(
+                  { name_en: p.moneyAccountNameEn ?? null, name_zh: p.moneyAccountNameZh ?? null },
+                  locale,
+                ) || '-'}
+              </td>
               <td>{p.reference ?? '-'}</td>
               <td>
                 {p.voidedAt ? (

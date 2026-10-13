@@ -1,7 +1,8 @@
 import { PaymentForm } from '@/components/payments/payment-form';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, localizedName } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { listMoneyAccounts } from '@/server/repositories/accounts';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listOutstandingDocuments } from '@/server/repositories/payments';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
@@ -36,7 +37,7 @@ export default async function NewPaymentPage({
    * 一笔应收），余额也扣掉了已签发的贷项通知单——原来这里自己用
    * listInvoices + sumSettledByDocument 拼，这两条都漏了。
    */
-  const { contacts, outstandingInvoices, outstandingBills } = await withTransaction(
+  const { contacts, moneyAccounts, outstandingInvoices, outstandingBills } = await withTransaction(
     context.userId,
     async (tx) => {
       const contactRows = await tx`
@@ -48,6 +49,7 @@ export default async function NewPaymentPage({
       ` as { id: string; name: string }[];
 
       const documents = await listOutstandingDocuments(tx, context.organizationId);
+      const accounts = await listMoneyAccounts(tx, context.organizationId);
 
       // 停用的往来对象如果还欠着钱，也要在下拉框里：点了它的发票，表单会把
       // 往来对象切到它，下拉框里没有这一项的话就会落到别人身上。
@@ -58,6 +60,13 @@ export default async function NewPaymentPage({
       }
 
       return {
+        moneyAccounts: accounts.map((account) => ({
+          id: account.id,
+          code: account.code,
+          name:
+            localizedName({ name_en: account.nameEn, name_zh: account.nameZh }, locale) ||
+            account.code,
+        })),
         contacts: [
           ...contactRows,
           ...[...missing].map(([id, name]) => ({ id, name })),
@@ -123,6 +132,7 @@ export default async function NewPaymentPage({
         type="received"
         currencies={[...SUPPORTED_CURRENCIES]}
         baseCurrency={context.baseCurrency}
+        moneyAccounts={moneyAccounts}
         outstandingInvoices={outstandingInvoices}
         outstandingBills={outstandingBills}
         initialDocument={initialDocument}

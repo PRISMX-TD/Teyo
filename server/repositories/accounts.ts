@@ -86,9 +86,9 @@ export async function getAccount(
 export async function listMoneyAccounts(
   tx: Tx,
   organizationId: string,
-): Promise<Array<{ id: string; nameEn: string | null; nameZh: string | null }>> {
+): Promise<Array<{ id: string; code: string; nameEn: string | null; nameZh: string | null }>> {
   const rows = await tx`
-    select id, name_en, name_zh
+    select id, code, name_en, name_zh
     from accounts
     where organization_id = ${organizationId}
       and is_money_account = true
@@ -97,6 +97,7 @@ export async function listMoneyAccounts(
   `;
   return rows.map((row) => ({
     id: row.id as string,
+    code: row.code as string,
     nameEn: (row.name_en as string) ?? null,
     nameZh: (row.name_zh as string) ?? null,
   }));

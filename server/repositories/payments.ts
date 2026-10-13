@@ -16,6 +16,11 @@ export type PaymentRow = {
   reference: string | null;
   notes: string | null;
   transactionId: string | null;
+  /** 钱进出的资金账户（0037）。之前记的、回填不出来的为 null。 */
+  moneyAccountId: string | null;
+  /** 只有 listPayments 带出来。 */
+  moneyAccountNameEn?: string | null;
+  moneyAccountNameZh?: string | null;
   voidedAt: string | null;
   createdAt: string;
   createdBy: string;
@@ -58,6 +63,8 @@ export type NewPaymentRow = {
   method: string;
   reference: string | null;
   notes: string | null;
+  /** 已由 createPayment 核实过：本公司的、启用中的资金账户。 */
+  moneyAccountId: string;
   createdBy: string;
 };
 
@@ -91,6 +98,9 @@ function mapRow(row: Record<string, unknown>): PaymentRow {
     reference: (row.reference as string | null) ?? null,
     notes: (row.notes as string | null) ?? null,
     transactionId: (row.transaction_id as string | null) ?? null,
+    moneyAccountId: (row.money_account_id as string | null) ?? null,
+    moneyAccountNameEn: (row.money_account_name_en as string | null | undefined) ?? null,
+    moneyAccountNameZh: (row.money_account_name_zh as string | null | undefined) ?? null,
     voidedAt: row.voided_at ? (row.voided_at as Date).toISOString() : null,
     createdAt: (row.created_at as Date).toISOString(),
     createdBy: row.created_by as string,
@@ -115,11 +125,13 @@ export async function listPayments(
       p.id, p.organization_id, p.contact_id, p.type,
       p.amount_minor, p.currency, p.exchange_rate,
       p.base_amount_minor, p.payment_date, p.method,
-      p.reference, p.notes, p.transaction_id,
+      p.reference, p.notes, p.transaction_id, p.money_account_id,
       p.voided_at, p.created_at, p.created_by,
-      c.name as contact_name
+      c.name as contact_name,
+      ma.name_en as money_account_name_en, ma.name_zh as money_account_name_zh
     from payments p
     join contacts c on c.id = p.contact_id
+    left join accounts ma on ma.id = p.money_account_id
     where p.organization_id = ${organizationId}
       and (${f.contactId ?? null}::uuid is null or p.contact_id = ${f.contactId ?? null}::uuid)
       and (${f.type ?? null}::payment_type is null or p.type = ${f.type ?? null}::payment_type)
@@ -141,7 +153,7 @@ export async function getPayment(
       p.id, p.organization_id, p.contact_id, p.type,
       p.amount_minor, p.currency, p.exchange_rate,
       p.base_amount_minor, p.payment_date, p.method,
-      p.reference, p.notes, p.transaction_id,
+      p.reference, p.notes, p.transaction_id, p.money_account_id,
       p.voided_at, p.created_at, p.created_by,
       c.name as contact_name
     from payments p
@@ -180,7 +192,7 @@ export async function insertPayment(
       organization_id, contact_id, type,
       amount_minor, currency, exchange_rate,
       base_amount_minor, payment_date, method,
-      reference, notes, created_by
+      reference, notes, money_account_id, created_by
     )
     values (
       ${row.organizationId},
@@ -194,6 +206,7 @@ export async function insertPayment(
       ${row.method},
       ${row.reference},
       ${row.notes},
+      ${row.moneyAccountId},
       ${row.createdBy}
     )
     returning id
@@ -765,28 +778,10 @@ export async function listOutstandingDocuments(
 }
 
 /**
- * 收付款落在哪个资金科目上。
- *
- * payments 表没有账户列——0009 建表时只有一个 method 枚举。所以资金科目
- * 只能从 method 推：现金收付进 'cash'，其余（转账/支票/在线/其他）进
- * 'bank'。这是本次改动里唯一一个「猜」出来的映射，把它写成一个具名常量
- * 而不是散在 if 里，是为了让下一个给 payments 加账户列的人一眼看见它该被
- * 替换掉。
- *
- * 这两个 code 没有走 server/services/posting-accounts.ts 的
- * resolvePostingAccounts：那个函数的 PostingAccountCode 类型取自
- * POSTING_ACCOUNT_CODES，而那张表里只有单据过账用的控制科目，没有
- * 'cash' / 'bank'。account-seed.ts 不属于本次改动，已在报告里记下。
+ * 「方式 → 资金科目」那张表搬到了 lib/payment-methods.ts：0037 之后账户由
+ * 用户选、存在 payments.money_account_id 上，那张表只剩表单缺省值与
+ * createPayment 没收到账户时的兜底两个用处，而表单是客户端组件。
  */
-export const MONEY_ACCOUNT_CODE_BY_METHOD = {
-  cash: 'cash',
-  bank_transfer: 'bank',
-  cheque: 'bank',
-  online: 'bank',
-  other: 'bank',
-} as const;
-
-export type PaymentMethod = keyof typeof MONEY_ACCOUNT_CODE_BY_METHOD;
 
 /**
  * 取本公司某个资金科目的 id。
