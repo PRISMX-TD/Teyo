@@ -77,6 +77,10 @@ export async function updateOrganization(
     phone?: string;
     email?: string;
     paymentDetails?: string;
+    invoiceLocale?: string;
+    invoiceSignoff?: string;
+    invoiceTaxLabel?: string;
+    invoiceFooter?: string;
     fiscalYearStartMonth: number | string;
   },
 ): Promise<void> {
@@ -99,6 +103,10 @@ export async function updateOrganization(
       phone: data.phone ?? null,
       email: data.email ?? null,
       paymentDetails: data.paymentDetails ?? null,
+      invoiceTaxLabel: data.invoiceTaxLabel ?? null,
+      invoiceFooter: data.invoiceFooter ?? null,
+      invoiceLocale: data.invoiceLocale,
+      invoiceSignoff: data.invoiceSignoff,
       fiscalYearStartMonth: data.fiscalYearStartMonth,
     });
 

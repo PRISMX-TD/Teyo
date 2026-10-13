@@ -9,6 +9,7 @@ import { addMonthsLocalISO, todayLocalISO } from '@/lib/date';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import type { InvoiceDetail } from '@/server/repositories/invoices';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
+import { MAX_INVOICE_REFERENCE_LENGTH } from '@/lib/invoice-options';
 
 type Contact = {
   id: string;
@@ -96,6 +97,7 @@ export function InvoiceForm({
     invoice ? bpsToPercent(invoice.taxRateBps) : '0',
   );
   const [notes, setNotes] = useState(invoice?.notes ?? '');
+  const [reference, setReference] = useState(invoice?.reference ?? '');
   const [items, setItems] = useState<LineItem[]>(
     invoice ? itemsOf(invoice) : [{ description: '', quantity: '1', unitPrice: '' }],
   );
@@ -129,6 +131,7 @@ export function InvoiceForm({
       currency,
       taxRatePercent: taxRatePercent || '0',
       notes: notes || undefined,
+      reference: reference || undefined,
       items: items.map((item) => ({
         description: item.description,
         quantity: item.quantity || '1',
@@ -208,6 +211,19 @@ export function InvoiceForm({
             </option>
           ))}
         </select>
+
+        {/* 紧跟在客户后面：PO 号是那个客户给的，填的人手里拿着的正是那张采购单。 */}
+        <label htmlFor="reference">{t.invoices.reference}</label>
+        <input
+          id="reference"
+          maxLength={MAX_INVOICE_REFERENCE_LENGTH}
+          aria-describedby="referenceHint"
+          value={reference}
+          onChange={(e) => setReference(e.target.value)}
+        />
+        <p id="referenceHint" className="field-hint">
+          {t.invoices.referenceHint}
+        </p>
 
         <label htmlFor="issueDate">{t.invoices.issueDate}</label>
         <input

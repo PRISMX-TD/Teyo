@@ -2237,12 +2237,33 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
    在纸上是一整页碳粉。 */
 
 /* ── 可打印的发票单据（app/(app)/[orgSlug]/invoices/[id]/print） ── */
+/* 水印盖在内容上面（z-index 1、7% 的浓度）：垫在下面的话，明细表格自己的
+   底色会把它挡掉一半，只剩「DRA」。pointer-events: none，不挡选字和点击。 */
 .printable-invoice {
+  position: relative;
+  overflow: hidden;
   background: var(--bg-elevated);
   border: 1px solid var(--border-primary);
   border-radius: var(--radius-lg);
   padding: var(--space-8);
   max-width: 52rem;
+}
+.printable-invoice-watermark {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  font-size: 7rem;
+  font-weight: 800;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  opacity: 0.07;
+  transform: rotate(-24deg);
+  white-space: nowrap;
 }
 .printable-invoice-head {
   display: flex;
@@ -2250,34 +2271,140 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
   align-items: flex-start;
   gap: var(--space-6);
   flex-wrap: wrap;
-  margin-bottom: var(--space-6);
+  margin-bottom: var(--space-8);
 }
-.printable-invoice-head h1 { margin: 0; }
 /* 高度定死、宽度随比例：横版 logo 与方形 logo 都落在同一条视线上，
    不会有哪一张把标题顶到半页以下。 */
 .printable-invoice-logo { display: block; max-height: 4rem; max-width: 14rem; object-fit: contain; margin-bottom: var(--space-4); }
+/* 两个类名：.app-main h1（0,1,1）会给它加下边距、在窄屏上把字号压小。 */
+.printable-invoice-head .printable-invoice-title {
+  margin: 0;
+  font-size: var(--text-3xl);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+/* 双语标签里跟在英文后面的中文。弱一档，不抢主语言的视线。 */
+.printable-invoice-alt { color: var(--text-secondary); font-weight: 400; letter-spacing: 0; text-transform: none; }
+.printable-invoice-title .printable-invoice-alt { font-size: 0.55em; }
 /* 地址、收款信息、备注都是用户按行写的，保留换行，不保留多余的空格。 */
 .printable-invoice-multiline { white-space: pre-line; }
-.printable-invoice-org { text-align: right; }
+.printable-invoice-org { text-align: right; max-width: 22rem; }
+.printable-invoice-org strong { font-size: var(--text-lg); }
 .printable-invoice-org p { margin: var(--space-1) 0 0; color: var(--text-secondary); font-size: var(--text-sm); }
 .printable-invoice-meta {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
   gap: var(--space-6);
+  flex-wrap: wrap;
   margin-bottom: var(--space-6);
 }
-.printable-invoice-meta dl {
-  display: grid;
-  grid-template-columns: auto 1fr;
-  gap: var(--space-1) var(--space-4);
-  margin: 0;
+.printable-invoice-bill-to { flex: 1 1 16rem; }
+.printable-invoice-bill-to h2,
+.printable-invoice-notes h2 {
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin: 0 0 var(--space-2);
 }
-.printable-invoice-meta dt { color: var(--text-secondary); font-size: var(--text-sm); }
-.printable-invoice-meta dd { margin: 0; font-size: var(--text-sm); }
-.printable-invoice-bill-to h2 { font-size: var(--text-sm); color: var(--text-secondary); margin: 0 0 var(--space-2); }
 .printable-invoice-bill-to p { margin: 0 0 var(--space-1); font-size: var(--text-sm); }
+.printable-invoice-facts {
+  display: grid;
+  grid-template-columns: auto auto;
+  gap: var(--space-1) var(--space-6);
+  margin: 0;
+  font-size: var(--text-sm);
+}
+.printable-invoice-facts dt { color: var(--text-secondary); }
+.printable-invoice-facts dd { margin: 0; text-align: right; }
+.printable-invoice-items th:first-child, .printable-invoice-items td:first-child { width: 55%; }
+/* 合计框靠右、收窄：读的人顺着金额那一列往下看，眼睛落下来正好是合计。
+   原来合计是表格的 tfoot，标题横跨三列、居中在整张表的正中间。 */
+.printable-invoice-totals {
+  width: min(100%, 22rem);
+  margin: var(--space-4) 0 0 auto;
+  font-size: var(--text-sm);
+}
+.printable-invoice-total-row {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-6);
+  padding: var(--space-1) var(--space-2);
+}
+.printable-invoice-total-row dt { color: var(--text-secondary); }
+.printable-invoice-total-row dd { margin: 0; text-align: right; }
+.printable-invoice-total-row.is-total {
+  border-top: 1px solid var(--border-primary);
+  margin-top: var(--space-1);
+  padding-top: var(--space-2);
+  font-weight: 700;
+}
+.printable-invoice-total-row.is-due {
+  margin-top: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-tertiary);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-md);
+  font-weight: 700;
+}
+.printable-invoice-total-row.is-total dt,
+.printable-invoice-total-row.is-due dt { color: var(--text-primary); }
 .printable-invoice-notes { margin-top: var(--space-6); }
-.printable-invoice-notes h2 { font-size: var(--text-sm); color: var(--text-secondary); margin: 0 0 var(--space-2); }
+.printable-invoice-notes p { margin: 0; font-size: var(--text-sm); }
+.printable-invoice-footer { margin: var(--space-6) 0 0; font-size: var(--text-sm); color: var(--text-secondary); }
+.printable-invoice-signoff { margin: var(--space-8) 0 0; text-align: center; font-size: var(--text-xs); color: var(--text-tertiary); }
+.printable-invoice-signoff .printable-invoice-alt { display: block; }
+.printable-invoice-signature {
+  width: min(100%, 16rem);
+  margin: var(--space-10) 0 0 auto;
+  text-align: center;
+  font-size: var(--text-sm);
+}
+.printable-invoice-signature p { margin: 0; }
+/* 线上方留出签名和盖章的位置。 */
+.printable-invoice-signature .printable-invoice-signature-line {
+  margin-top: var(--space-16);
+  padding-top: var(--space-1);
+  border-top: 1px solid var(--text-primary);
+  font-size: var(--text-xs);
+  color: var(--text-secondary);
+}
+.printable-invoice-signature-line .printable-invoice-alt { display: block; }
+
+/* 打印语言的临时切换。 */
+.invoice-language-switch {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--space-2);
+  margin-bottom: var(--space-3);
+  font-size: var(--text-sm);
+}
+.invoice-language-switch > span { color: var(--text-secondary); margin-right: var(--space-1); }
+.invoice-language-switch a {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--border-primary);
+  border-radius: var(--radius-sm);
+  color: var(--text-secondary);
+  text-decoration: none;
+}
+.invoice-language-switch a.is-current {
+  border-color: var(--text-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+/* 屏幕上 .print-frame 只是一层壳：表格的语义留给打印时重复表头表尾用。 */
+.print-frame, .print-frame > thead, .print-frame > tbody, .print-frame > tfoot,
+.print-frame > * > tr, .print-frame > * > tr > td { display: block; padding: 0; border: 0; }
+.print-frame-gap { display: none; }
+
+@media (max-width: 640px) {
+  .printable-invoice { padding: var(--space-4); }
+  .printable-invoice-org { text-align: left; }
+  .printable-invoice-watermark { font-size: 4rem; }
+}
 
 @media print {
   .sidebar, .floating-dock, .offline-banner, .filters, .primary-button,
@@ -2308,9 +2435,41 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
     border-radius: 0;
     padding: 0;
     max-width: none;
+    overflow: visible;
   }
   .printable-invoice-org p,
-  .printable-invoice-meta dt,
+  .printable-invoice-facts dt,
+  .printable-invoice-total-row dt,
   .printable-invoice-bill-to h2,
-  .printable-invoice-notes h2 { color: #333 !important; }
+  .printable-invoice-notes h2,
+  .printable-invoice-footer,
+  .printable-invoice-alt,
+  .printable-invoice-signature-line { color: #333 !important; }
+  .printable-invoice-total-row.is-total dt,
+  .printable-invoice-total-row.is-due dt { color: #000 !important; }
+  .printable-invoice-signoff { color: #555 !important; }
+  /* fixed：打印时固定定位的元素在每一页上重复。absolute 只会落在整张单据
+     的正中——三页的草稿只有第二页带着半个「DRAFT」，第一页看起来就是正式的。 */
+  .printable-invoice-watermark {
+    position: fixed;
+    color: #000 !important;
+    opacity: 0.08;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .printable-invoice-total-row.is-due {
+    background: #eee !important;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  .printable-invoice-signature .printable-invoice-signature-line { border-top-color: #000; }
+  /* 合计、签名、收款信息都不要被分页劈成两半。 */
+  .printable-invoice-totals, .printable-invoice-signature,
+  .printable-invoice-notes { break-inside: avoid; }
+  /* @page 边距为 0（见打印页），每一页的留白由这层表格的表头表尾垫出来。 */
+  .print-frame { display: table; width: 100%; border-collapse: collapse; }
+  .print-frame > thead { display: table-header-group; }
+  .print-frame > tfoot { display: table-footer-group; }
+  .print-frame > tbody { display: table-row-group; }
+  .print-frame > * > tr { display: table-row; }
+  .print-frame > * > tr > td { display: table-cell; padding: 0 14mm; }
+  .print-frame-gap { display: block; height: 12mm; }
 }

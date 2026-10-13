@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { INVOICE_LOCALES, INVOICE_SIGNOFFS } from '@/lib/invoice-options';
 
 // 每个字段的失败文案都是写给一个不懂会计、也不知道 uuid 是什么的小店主看的。
 // zod 的默认文案（'Invalid uuid'、'String must contain at least 1 character(s)'）
@@ -104,6 +105,14 @@ export const updateOrgSchema = z.object({
     'Enter an email address, for example billing@yourcompany.com.',
   ),
   paymentDetails: optionalText(500),
+  /**
+   * 发票的版式（0036）。两个枚举省略即保留原值，见 updateOrganizationSettings；
+   * 两段文字与上面一样省略即清空。
+   */
+  invoiceLocale: z.enum(INVOICE_LOCALES).optional(),
+  invoiceSignoff: z.enum(INVOICE_SIGNOFFS).optional(),
+  invoiceTaxLabel: optionalText(40),
+  invoiceFooter: optionalText(1000),
   fiscalYearStartMonth,
 });
 

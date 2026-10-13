@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PrintButton } from '@/components/invoices/print-button';
-import { formatMoney } from '@/lib/format';
-import { getMessages, interpolate, type Locale } from '@/lib/i18n';
+import { InvoiceDocument } from '@/components/invoices/invoice-document';
+import { getMessages, type Locale } from '@/lib/i18n';
+import { INVOICE_LOCALES, INVOICE_LOCALE_NAMES, isInvoiceLocale } from '@/lib/invoice-options';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -36,10 +37,13 @@ import { getLogoSignedUrl } from '@/server/services/organization-logo';
  */
 export default async function InvoicePrintPage({
   params,
+  searchParams,
 }: {
   params: Promise<{ orgSlug: string; id: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { orgSlug, id } = await params;
+  const raw = await searchParams;
   const context = await requirePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as Locale;
   const t = getMessages(locale);
@@ -52,26 +56,22 @@ export default async function InvoicePrintPage({
   // 两者都只该得到 404。
   if (!data) notFound();
 
-  const { organization, invoice, contact, items } = data;
-  const logoUrl = await getLogoSignedUrl(organization.logoPath);
+  const logoUrl = await getLogoSignedUrl(data.organization.logoPath);
 
-  // 发票上的每一个数都是**发票自己的币种**（invoices.subtotal_minor 一类
-  // 存的就是原币最小单位），不是本位币。用 baseCurrency 去格式化，一张
-  // 美元发票会印上马币符号。
-  const money = (minor: bigint) => formatMoney(minor, invoice.currency, locale);
-
-  // 状态原来原样印出数据库枚举值（'partially_paid'），中文发票上也是英文。
-  const statusLabel: Record<string, string> = {
-    draft: t.invoices.statusDraft,
-    sent: t.invoices.statusSent,
-    partially_paid: t.invoices.statusPartiallyPaid,
-    paid: t.invoices.statusPaid,
-    overdue: t.invoices.statusOverdue,
-    voided: t.invoices.statusVoided,
-  };
+  // 发票语言：默认取公司设置，页面上可以临时换一种（?lang=）。临时换的
+  // 不写回设置——给一个中文客户印一张，不该把全公司的默认值改掉。
+  const lang = isInvoiceLocale(raw.lang) ? raw.lang : data.organization.invoiceLocale;
 
   return (
     <div className="invoice-document">
+      {/*
+        @page 的边距设成 0：Chrome 只有在页边没有空间时才不印它自己的页眉页脚
+        （日期时间、网址、页面标题）。作者在页边框里放了内容也挡不住它——
+        所以页边距只能是 0，留白改由下面 .print-frame 的表头表尾垫出来。
+        放在这一页里而不是 globals.css：报表页打印时仍然要浏览器的默认页边距。
+      */}
+      <style>{'@page { margin: 0; }'}</style>
+
       <div className="page-header no-print">
         <Link href={`/${orgSlug}/invoices/${id}`} className="text-button">
           &larr; {t.common.back}
@@ -81,123 +81,51 @@ export default async function InvoicePrintPage({
         </div>
       </div>
 
+      <nav className="invoice-language-switch no-print" aria-label={t.invoicePdf.printLanguage}>
+        <span>{t.invoicePdf.printLanguage}</span>
+        {INVOICE_LOCALES.map((option) => (
+          <Link
+            key={option}
+            href={`/${orgSlug}/invoices/${id}/print?lang=${option}`}
+            className={option === lang ? 'is-current' : undefined}
+            aria-current={option === lang ? 'true' : undefined}
+            replace
+          >
+            {INVOICE_LOCALE_NAMES[option]}
+          </Link>
+        ))}
+      </nav>
+
       <p className="hint no-print">{t.invoicePdf.printHint}</p>
 
-      <article className="printable-invoice">
-        <header className="printable-invoice-head">
-          <div>
-            {logoUrl ? (
-              // 签名 URL 一小时后失效，next/image 的优化缓存在这里没有意义，
-              // 还得在 next.config.ts 里登记 Supabase 的域名。
-              // eslint-disable-next-line @next/next/no-img-element
-              <img
-                className="printable-invoice-logo"
-                src={logoUrl}
-                alt={interpolate(t.settings.logoAlt, { name: organization.name })}
-              />
-            ) : null}
-            <h1>{t.invoices.title}</h1>
-            <p className="mono">{invoice.invoiceNumber}</p>
-          </div>
-          <div className="printable-invoice-org">
-            <strong>{organization.name}</strong>
-            {organization.registrationNumber ? (
-              <p>
-                {t.invoicePdf.registrationNumber}{' '}
-                <span className="mono">{organization.registrationNumber}</span>
-              </p>
-            ) : null}
-            {organization.address ? (
-              <p className="printable-invoice-multiline">{organization.address}</p>
-            ) : null}
-            {organization.phone ? <p>{organization.phone}</p> : null}
-            {organization.email ? <p>{organization.email}</p> : null}
-            {organization.taxNumber ? (
-              <p>
-                {t.invoicePdf.taxNumber}{' '}
-                <span className="mono">{organization.taxNumber}</span>
-              </p>
-            ) : null}
-          </div>
-        </header>
-
-        <section className="printable-invoice-meta">
-          <dl>
-            <dt>{t.invoices.issueDate}</dt>
-            <dd className="mono">{invoice.issueDate}</dd>
-            <dt>{t.invoices.dueDate}</dt>
-            <dd className="mono">{invoice.dueDate}</dd>
-            <dt>{t.invoices.status}</dt>
-            <dd>{statusLabel[invoice.status] ?? invoice.status}</dd>
-            <dt>{t.transaction.currency}</dt>
-            <dd className="mono">{invoice.currency}</dd>
-          </dl>
-
-          <div className="printable-invoice-bill-to">
-            <h2>{t.invoicePdf.billTo}</h2>
-            <p>
-              <strong>{contact.name}</strong>
-            </p>
-            {contact.email ? <p>{contact.email}</p> : null}
-            {contact.address ? <p className="printable-invoice-multiline">{contact.address}</p> : null}
-            {contact.taxId ? <p className="mono">{contact.taxId}</p> : null}
-          </div>
-        </section>
-
-        <table className="report-table">
-          <thead>
-            <tr>
-              <th>{t.invoices.description}</th>
-              <th className="numeric">{t.invoices.quantity}</th>
-              <th className="numeric">{t.invoices.unitPrice}</th>
-              <th className="numeric">{t.invoices.amount}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {items.map((item, index) => (
-              <tr key={index}>
-                <td>{item.description}</td>
-                <td className="numeric mono">{item.quantity}</td>
-                <td className="numeric mono">{money(item.unitPriceMinor)}</td>
-                <td className="numeric mono">{money(item.amountMinor)}</td>
-              </tr>
-            ))}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th colSpan={3}>{t.invoices.subtotal}</th>
-              <th className="numeric mono">{money(invoice.subTotalMinor)}</th>
-            </tr>
-            {invoice.taxRateBps > 0 ? (
-              <tr>
-                <th colSpan={3}>
-                  {t.invoices.tax} ({(invoice.taxRateBps / 100).toFixed(2)}%)
-                </th>
-                <th className="numeric mono">{money(invoice.taxMinor)}</th>
-              </tr>
-            ) : null}
-            <tr className="total-row">
-              <th colSpan={3}>{t.invoices.total}</th>
-              <th className="numeric mono">{money(invoice.totalMinor)}</th>
-            </tr>
-          </tfoot>
-        </table>
-
-        {invoice.notes ? (
-          <section className="printable-invoice-notes">
-            <h2>{t.transaction.description}</h2>
-            <p className="printable-invoice-multiline">{invoice.notes}</p>
-          </section>
-        ) : null}
-
-        {/* 收款信息放在最后：客户读完金额，下一眼要找的就是「钱打到哪里」。 */}
-        {organization.paymentDetails ? (
-          <section className="printable-invoice-notes">
-            <h2>{t.invoicePdf.paymentDetails}</h2>
-            <p className="printable-invoice-multiline">{organization.paymentDetails}</p>
-          </section>
-        ) : null}
-      </article>
+      {/*
+        打印时每一页上下的留白。表头、表尾在打印时会在每一页重复，于是两个
+        空的格子就是每一页的上下页边距——@page 设成 0 之后，只有这个办法让
+        第二页的内容不顶着纸边。屏幕上这层表格退成普通的块，垫片不显示。
+      */}
+      <table className="print-frame" role="presentation">
+        <thead>
+          <tr>
+            <td>
+              <div className="print-frame-gap" />
+            </td>
+          </tr>
+        </thead>
+        <tfoot>
+          <tr>
+            <td>
+              <div className="print-frame-gap" />
+            </td>
+          </tr>
+        </tfoot>
+        <tbody>
+          <tr>
+            <td>
+              <InvoiceDocument data={data} logoUrl={logoUrl} lang={lang} />
+            </td>
+          </tr>
+        </tbody>
+      </table>
     </div>
   );
 }

@@ -2,6 +2,12 @@ import { randomUUID } from 'node:crypto';
 import { cache } from 'react';
 import type { Tx } from '@/server/db/transaction';
 import { sql } from '@/server/db/client';
+import {
+  isInvoiceLocale,
+  isInvoiceSignoff,
+  type InvoiceLocale,
+  type InvoiceSignoff,
+} from '@/lib/invoice-options';
 
 function slugify(name: string): string {
   const base = name
@@ -84,6 +90,13 @@ export type OrganizationSettings = {
    * 换成短时效签名 URL。只由 setOrganizationLogoPath 写，不经设置表单。
    */
   logoPath: string | null;
+  /** 发票的版式选项（0036），见 lib/invoice-options.ts。 */
+  invoiceLocale: InvoiceLocale;
+  invoiceSignoff: InvoiceSignoff;
+  /** 税那一行的名称。null 即按发票语言印默认的「Tax / 税」。 */
+  invoiceTaxLabel: string | null;
+  /** 印在每张发票底部的条款或说明。 */
+  invoiceFooter: string | null;
   /**
    * 财年起始月（1–12）。0024 迁移加的列，默认 1（日历年）。
    *
@@ -106,7 +119,8 @@ export async function getOrganizationSettings(
 ): Promise<OrganizationSettings> {
   const rows = await tx`
     select name, timezone, industry, address, fiscal_year_start_month,
-           registration_number, tax_number, phone, email, payment_details, logo_path
+           registration_number, tax_number, phone, email, payment_details, logo_path,
+           invoice_locale, invoice_signoff, invoice_tax_label, invoice_footer
     from organizations
     where id = ${organizationId}
   `;
@@ -125,6 +139,14 @@ export async function getOrganizationSettings(
     email: (row.email as string | null) ?? null,
     paymentDetails: (row.payment_details as string | null) ?? null,
     logoPath: (row.logo_path as string | null) ?? null,
+    // 两列都有 CHECK；这里仍然兜一下，免得哪天 CHECK 被放宽、打印页拿到一个
+    // 不认识的值而整页报错。
+    invoiceLocale: isInvoiceLocale(row.invoice_locale) ? row.invoice_locale : 'en',
+    invoiceSignoff: isInvoiceSignoff(row.invoice_signoff)
+      ? row.invoice_signoff
+      : 'computer_generated',
+    invoiceTaxLabel: (row.invoice_tax_label as string | null) ?? null,
+    invoiceFooter: (row.invoice_footer as string | null) ?? null,
     // smallint 由驱动解析成 number；列上有 not null default 1 与
     // between 1 and 12 的 CHECK，所以这里不需要再兜底一次。
     fiscalYearStartMonth: row.fiscal_year_start_month as number,
@@ -144,6 +166,15 @@ export async function updateOrganizationSettings(
     phone: string | null;
     email: string | null;
     paymentDetails: string | null;
+    invoiceTaxLabel: string | null;
+    invoiceFooter: string | null;
+    /**
+     * 两个枚举项省略即保留原值，而不是像文字项那样「省略即清空」：文字项
+     * 清空是合法的「不印」，枚举项没有「空」这个值，省略只可能是调用方
+     * 没带上它，悄悄改回默认值才是错的。
+     */
+    invoiceLocale?: InvoiceLocale;
+    invoiceSignoff?: InvoiceSignoff;
     fiscalYearStartMonth: number;
   },
 ): Promise<void> {
@@ -158,6 +189,10 @@ export async function updateOrganizationSettings(
         phone = ${input.phone},
         email = ${input.email},
         payment_details = ${input.paymentDetails},
+        invoice_tax_label = ${input.invoiceTaxLabel},
+        invoice_footer = ${input.invoiceFooter},
+        invoice_locale = coalesce(${input.invoiceLocale ?? null}::text, invoice_locale),
+        invoice_signoff = coalesce(${input.invoiceSignoff ?? null}::text, invoice_signoff),
         fiscal_year_start_month = ${input.fiscalYearStartMonth}
     where id = ${organizationId}
   `;

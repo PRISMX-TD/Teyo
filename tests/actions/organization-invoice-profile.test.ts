@@ -44,7 +44,8 @@ vi.mock('@/lib/supabase/storage', () => ({
 const { removeOrganizationLogo, updateOrganization, uploadOrganizationLogo } = await import(
   '@/server/actions/organizations'
 );
-const { createInvoice } = await import('@/server/actions/invoices');
+const { createInvoice, updateInvoice } = await import('@/server/actions/invoices');
+const { createPayment } = await import('@/server/actions/payments');
 const { getInvoicePdfData } = await import('@/server/repositories/invoice-pdf');
 const { getLogoSignedUrl, LOGO_SIGNED_URL_TTL_SECONDS } = await import(
   '@/server/services/organization-logo'
@@ -201,6 +202,163 @@ describe('updateOrganization: seller details for invoices', () => {
       taxNumber: 'TAX-42',
       paymentDetails: 'Bank: Test Bank',
       logoPath: null,
+    });
+  });
+});
+
+describe('updateOrganization: invoice layout', () => {
+  it('saves the invoice language, sign-off, tax name and footer', async () => {
+    currentUserId = ownerId;
+    await updateOrganization(orgSlug, {
+      ...BASE_SETTINGS,
+      invoiceLocale: 'bilingual',
+      invoiceSignoff: 'signature',
+      invoiceTaxLabel: 'SST',
+      invoiceFooter: 'Payment within 30 days.\r\nThank you!',
+    });
+
+    const [row] = await admin`
+      select invoice_locale, invoice_signoff, invoice_tax_label, invoice_footer
+      from organizations where id = ${orgId}
+    `;
+    expect(row).toEqual({
+      invoice_locale: 'bilingual',
+      invoice_signoff: 'signature',
+      invoice_tax_label: 'SST',
+      invoice_footer: 'Payment within 30 days.\nThank you!',
+    });
+  });
+
+  it('keeps the language and sign-off when a caller leaves them out', async () => {
+    // 两个枚举没有「空」这个值：省略只可能是调用方没带上，不能悄悄改回默认。
+    currentUserId = ownerId;
+    await updateOrganization(orgSlug, {
+      ...BASE_SETTINGS,
+      invoiceLocale: 'zh',
+      invoiceSignoff: 'none',
+    });
+    await updateOrganization(orgSlug, { ...BASE_SETTINGS });
+
+    const [row] = await admin`
+      select invoice_locale, invoice_signoff, invoice_tax_label, invoice_footer
+      from organizations where id = ${orgId}
+    `;
+    expect(row.invoice_locale).toBe('zh');
+    expect(row.invoice_signoff).toBe('none');
+    // 文字项与卖方资料一样：省略即清空。
+    expect(row.invoice_tax_label).toBeNull();
+    expect(row.invoice_footer).toBeNull();
+  });
+
+  it('rejects a language it does not know', async () => {
+    currentUserId = ownerId;
+    await expect(
+      updateOrganization(orgSlug, { ...BASE_SETTINGS, invoiceLocale: 'fr' }),
+    ).rejects.toThrow();
+  });
+
+  it('defaults a new company to English with the computer-generated line', async () => {
+    const other = await createTestOrgWithSeed(ownerId, 'Fresh Co', `fresh-co-${suffix}`, 'MYR');
+    const [row] = await admin`
+      select invoice_locale, invoice_signoff from organizations where id = ${other.id}
+    `;
+    expect(row).toEqual({ invoice_locale: 'en', invoice_signoff: 'computer_generated' });
+  });
+});
+
+describe('invoice reference and the printable invoice data', () => {
+  const ITEMS = [{ description: 'Design work', quantity: '2', unitPrice: '250.00' }];
+
+  async function newInvoice(reference?: string) {
+    currentUserId = ownerId;
+    const { id } = await createInvoice(orgSlug, {
+      contactId: customerId,
+      issueDate: '2033-04-02',
+      dueDate: '2033-05-02',
+      currency: 'MYR',
+      taxRatePercent: '0',
+      reference,
+      items: ITEMS,
+      issue: true,
+    });
+    return id;
+  }
+
+  it('saves the customer reference, trimmed', async () => {
+    const id = await newInvoice('  PO-2033-17  ');
+    const [row] = await admin`select reference from invoices where id = ${id}`;
+    expect(row.reference).toBe('PO-2033-17');
+  });
+
+  it('stores a blank reference as empty', async () => {
+    const id = await newInvoice('   ');
+    const [row] = await admin`select reference from invoices where id = ${id}`;
+    expect(row.reference).toBeNull();
+  });
+
+  it('changes and clears the reference on edit', async () => {
+    const id = await newInvoice('PO-1');
+    const edit = {
+      contactId: customerId,
+      issueDate: '2033-04-02',
+      dueDate: '2033-05-02',
+      currency: 'MYR',
+      taxRatePercent: '0',
+      items: ITEMS,
+    };
+    await updateInvoice(orgSlug, id, { ...edit, reference: 'PO-2' });
+    expect((await admin`select reference from invoices where id = ${id}`)[0].reference).toBe('PO-2');
+    await updateInvoice(orgSlug, id, edit);
+    expect((await admin`select reference from invoices where id = ${id}`)[0].reference).toBeNull();
+  });
+
+  it('rejects a reference over 60 characters and saves nothing', async () => {
+    currentUserId = ownerId;
+    const [{ count: before }] = await admin`
+      select count(*)::int as count from invoices where organization_id = ${orgId}
+    `;
+    await expect(newInvoice('x'.repeat(61))).rejects.toThrow(/60 characters/);
+    const [{ count: after }] = await admin`
+      select count(*)::int as count from invoices where organization_id = ${orgId}
+    `;
+    expect(after).toBe(before);
+  });
+
+  it('gives the print page the reference, customer phone and terms, and what is paid', async () => {
+    await admin`
+      update contacts set phone = '+60 12-345 6789', payment_terms = '30 days'
+      where id = ${customerId}
+    `;
+    await updateOrganization(orgSlug, {
+      ...BASE_SETTINGS,
+      invoiceLocale: 'zh',
+      invoiceSignoff: 'signature',
+      invoiceTaxLabel: 'SST',
+      invoiceFooter: 'Thank you',
+    });
+    const id = await newInvoice('PO-PRINT');
+    await createPayment(orgSlug, {
+      contactId: customerId,
+      type: 'received',
+      amount: '120.00',
+      currency: 'MYR',
+      paymentDate: '2033-04-05',
+      method: 'bank_transfer',
+      items: [{ invoiceId: id, amount: '120.00' }],
+    });
+
+    const data = await withTransaction(ownerId, (tx) => getInvoicePdfData(tx, orgId, id));
+    expect(data?.invoice).toMatchObject({
+      reference: 'PO-PRINT',
+      totalMinor: 50000n,
+      deductedMinor: 12000n,
+    });
+    expect(data?.contact).toMatchObject({ phone: '+60 12-345 6789', paymentTerms: '30 days' });
+    expect(data?.organization).toMatchObject({
+      invoiceLocale: 'zh',
+      invoiceSignoff: 'signature',
+      invoiceTaxLabel: 'SST',
+      invoiceFooter: 'Thank you',
     });
   });
 });

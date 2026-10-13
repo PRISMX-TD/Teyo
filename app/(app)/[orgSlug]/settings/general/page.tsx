@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { getMessages, interpolate } from '@/lib/i18n';
+import { INVOICE_LOCALES, INVOICE_LOCALE_NAMES } from '@/lib/invoice-options';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
@@ -120,6 +121,10 @@ export default async function GeneralSettingsPage({
               phone: String(formData.get('phone') ?? '') || undefined,
               email: String(formData.get('email') ?? '') || undefined,
               paymentDetails: String(formData.get('paymentDetails') ?? '') || undefined,
+              invoiceLocale: String(formData.get('invoiceLocale') ?? '') || undefined,
+              invoiceSignoff: String(formData.get('invoiceSignoff') ?? '') || undefined,
+              invoiceTaxLabel: String(formData.get('invoiceTaxLabel') ?? '') || undefined,
+              invoiceFooter: String(formData.get('invoiceFooter') ?? '') || undefined,
               fiscalYearStartMonth: String(formData.get('fiscalYearStartMonth') ?? ''),
             });
             redirect(`/${orgSlug}/settings/general?saved=general`);
@@ -231,6 +236,64 @@ export default async function GeneralSettingsPage({
             />
             <p id="paymentDetailsHint" className="field-hint">
               {t.settings.paymentDetailsHint}
+            </p>
+          </fieldset>
+
+          {/*
+            发票怎么印。每一项都有一个宽松的默认值、都可以不管：不是每家公司
+            都照同一套规矩开发票，这里只给选择，不替谁做决定。
+          */}
+          <fieldset className="settings-fieldset">
+            <legend>{t.settings.invoiceLayoutTitle}</legend>
+            <p className="field-hint">{t.settings.invoiceLayoutHint}</p>
+
+            <label htmlFor="invoiceLocale">{t.settings.invoiceLanguage}</label>
+            <select
+              id="invoiceLocale"
+              name="invoiceLocale"
+              aria-describedby="invoiceLocaleHint"
+              defaultValue={settings.invoiceLocale}
+            >
+              {INVOICE_LOCALES.map((option) => (
+                <option key={option} value={option}>
+                  {INVOICE_LOCALE_NAMES[option]}
+                </option>
+              ))}
+            </select>
+            <p id="invoiceLocaleHint" className="field-hint">
+              {t.settings.invoiceLanguageHint}
+            </p>
+
+            <label htmlFor="invoiceTaxLabel">{t.settings.invoiceTaxLabel}</label>
+            <input
+              id="invoiceTaxLabel"
+              name="invoiceTaxLabel"
+              maxLength={40}
+              aria-describedby="invoiceTaxLabelHint"
+              defaultValue={settings.invoiceTaxLabel ?? ''}
+            />
+            <p id="invoiceTaxLabelHint" className="field-hint">
+              {t.settings.invoiceTaxLabelHint}
+            </p>
+
+            <label htmlFor="invoiceSignoff">{t.settings.invoiceSignoff}</label>
+            <select id="invoiceSignoff" name="invoiceSignoff" defaultValue={settings.invoiceSignoff}>
+              <option value="computer_generated">{t.settings.invoiceSignoffComputer}</option>
+              <option value="signature">{t.settings.invoiceSignoffSignature}</option>
+              <option value="none">{t.settings.invoiceSignoffNone}</option>
+            </select>
+
+            <label htmlFor="invoiceFooter">{t.settings.invoiceFooter}</label>
+            <textarea
+              id="invoiceFooter"
+              name="invoiceFooter"
+              rows={3}
+              maxLength={1000}
+              aria-describedby="invoiceFooterHint"
+              defaultValue={settings.invoiceFooter ?? ''}
+            />
+            <p id="invoiceFooterHint" className="field-hint">
+              {t.settings.invoiceFooterHint}
             </p>
           </fieldset>
 

@@ -38,4 +38,9 @@ export default defineConfig({
   resolve: {
     alias: { '@': rootDir },
   },
+  // tsconfig 的 jsx 是 preserve（交给 Next 自己编译），Vite 照抄就会把 JSX
+  // 原样留下、解析失败。测试里直接渲染组件（tests/components/）时由这里编译。
+  oxc: {
+    jsx: { runtime: 'automatic' },
+  },
 });

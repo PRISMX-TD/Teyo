@@ -3,6 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { requirePermission, AuthError, type OrgContext } from '@/server/auth/guard';
+import { MAX_INVOICE_REFERENCE_LENGTH } from '@/lib/invoice-options';
 import { LedgerError } from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor, sumMinor } from '@/server/domain/money';
 import {
@@ -83,6 +84,8 @@ export type CreateInvoiceInput = {
   currency?: string;
   taxRatePercent?: string;
   notes?: string;
+  /** 客户的采购单号或参考号，印在发票上。可省，省略即清空。 */
+  reference?: string;
   items: InvoiceItemInput[];
   /** true = 创建即开具，直接进总账。默认 false（建草稿）。 */
   issue?: boolean;
@@ -130,6 +133,20 @@ function computeInvoiceAmounts(
     amounts: { subtotalMinor, taxMinor, totalMinor: subtotalMinor + taxMinor },
     items,
   };
+}
+
+/**
+ * 客户参考号：去掉首尾空白，空串当作没填。超长直接拒——表单上有
+ * maxLength，走到这里的超长值不是手打出来的，截断了反而让人以为存进去了。
+ */
+function normalizeReference(value: string | undefined): string | null {
+  const trimmed = (value ?? '').trim();
+  if (trimmed.length > MAX_INVOICE_REFERENCE_LENGTH) {
+    throw new LedgerError(
+      `Keep the customer reference to ${MAX_INVOICE_REFERENCE_LENGTH} characters or fewer.`,
+    );
+  }
+  return trimmed || null;
 }
 
 /** 分录摘要。日后翻总账的人要能认出这一笔是哪张发票来的。 */
@@ -234,6 +251,7 @@ export async function createInvoice(
 
   const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
   const issue = input.issue === true;
+  const reference = normalizeReference(input.reference);
 
   // 单号是「读最大号 + 1」，两个并发创建会算出同一个号。冲突时整笔重来——
   // 失败的那一次已经整体回滚，一个字节都没写，重跑会读到新的最大号。
@@ -258,6 +276,7 @@ export async function createInvoice(
         taxMinor: amounts.taxMinor,
         totalMinor: amounts.totalMinor,
         notes: input.notes?.trim() || null,
+        reference,
       });
 
       await insertInvoiceItems(
@@ -388,6 +407,7 @@ export async function updateInvoice(
   }
 
   const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
+  const reference = normalizeReference(input.reference);
 
   const posted = await withTransaction(context.userId, async (tx) => {
     const existing = await requireInvoice(tx, context, id);
@@ -428,6 +448,7 @@ export async function updateInvoice(
       taxMinor: amounts.taxMinor,
       totalMinor: amounts.totalMinor,
       notes: input.notes?.trim() || null,
+      reference,
     });
 
     // 明细整体替换而不是逐行 diff：发票行没有稳定的业务主键（描述可以改、

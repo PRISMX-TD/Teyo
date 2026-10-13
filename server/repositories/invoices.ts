@@ -29,6 +29,8 @@ export type InvoiceListRow = {
   taxMinor: bigint;
   totalMinor: bigint;
   notes: string | null;
+  /** 客户的采购单号或参考号（0036）。 */
+  reference: string | null;
   contactId: string;
   contactName: string;
   transactionId: string | null;
@@ -62,6 +64,7 @@ export type NewInvoiceRow = {
   taxMinor: bigint;
   totalMinor: bigint;
   notes: string | null;
+  reference: string | null;
 };
 
 export type NewInvoiceItemRow = {
@@ -82,6 +85,7 @@ export type InvoiceUpdate = {
   taxMinor?: bigint;
   totalMinor?: bigint;
   notes?: string | null;
+  reference?: string | null;
 };
 
 function formatDateOnly(value: Date | string): string {
@@ -105,6 +109,7 @@ function mapListRow(row: Record<string, unknown>): InvoiceListRow {
     taxMinor: BigInt(row.tax_minor as string),
     totalMinor: BigInt(row.total_minor as string),
     notes: (row.notes as string | null) ?? null,
+    reference: (row.reference as string | null) ?? null,
     contactId: row.contact_id as string,
     contactName: row.contact_name as string,
     transactionId: (row.transaction_id as string | null) ?? null,
@@ -121,7 +126,7 @@ export async function listInvoices(
     select
       i.id, i.invoice_number, i.status, i.issue_date, i.due_date,
       i.currency, i.subtotal_minor, i.tax_rate_bps, i.tax_minor,
-      i.total_minor, i.notes, i.contact_id, i.transaction_id,
+      i.total_minor, i.notes, i.reference, i.contact_id, i.transaction_id,
       i.voided_at, i.created_at,
       c.name as contact_name
     from invoices i
@@ -142,7 +147,7 @@ export async function getInvoice(
     select
       i.id, i.invoice_number, i.status, i.issue_date, i.due_date,
       i.currency, i.subtotal_minor, i.tax_rate_bps, i.tax_minor,
-      i.total_minor, i.notes, i.contact_id, i.transaction_id,
+      i.total_minor, i.notes, i.reference, i.contact_id, i.transaction_id,
       i.voided_at, i.created_at,
       c.name as contact_name
     from invoices i
@@ -181,7 +186,7 @@ export async function insertInvoice(
     insert into invoices (
       organization_id, contact_id, invoice_number, status,
       issue_date, due_date, currency, subtotal_minor,
-      tax_rate_bps, tax_minor, total_minor, notes
+      tax_rate_bps, tax_minor, total_minor, notes, reference
     )
     values (
       ${row.organizationId},
@@ -195,7 +200,8 @@ export async function insertInvoice(
       ${row.taxRateBps},
       ${row.taxMinor.toString()},
       ${row.totalMinor.toString()},
-      ${row.notes}
+      ${row.notes},
+      ${row.reference}
     )
     returning id
   `;
@@ -246,6 +252,7 @@ export async function updateInvoice(
   if (fields.taxMinor !== undefined) sets.tax_minor = fields.taxMinor.toString();
   if (fields.totalMinor !== undefined) sets.total_minor = fields.totalMinor.toString();
   if (fields.notes !== undefined) sets.notes = fields.notes;
+  if (fields.reference !== undefined) sets.reference = fields.reference;
   sets.updated_at = tx`now()`;
 
   const keys = Object.keys(sets);
