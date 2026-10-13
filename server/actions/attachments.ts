@@ -57,13 +57,28 @@ async function assertCanEditTransaction(
  * 作废的账单不再收附件：updateBill 对它同样拒绝，往一张已经不算数的账单上
  * 补凭证只会让人以为它还有效。
  */
-async function assertCanEditBill(tx: Tx, context: OrgContext, billId: string): Promise<void> {
-  const rows = UUID_PATTERN.test(billId)
-    ? await tx`
-        select voided_at from bills
-        where id = ${billId} and organization_id = ${context.organizationId}
-      `
-    : [];
+async function assertCanEditBill(
+  tx: Tx,
+  context: OrgContext,
+  billId: string,
+  { lock = false }: { lock?: boolean } = {},
+): Promise<void> {
+  // lock：在写附件那一行的事务里再查一遍时用。for share 让同时进来的作废
+  // 等这边提交，或者这边等作废提交之后读到 voided_at——两者不会都成功。
+  // 只在已经过了一遍权限之后才加：RLS 对加锁的读按 update 策略过滤，
+  // 没有改账单权限的人会读到「找不到」而不是「无权」。
+  const rows = !UUID_PATTERN.test(billId)
+    ? []
+    : lock
+      ? await tx`
+          select voided_at from bills
+          where id = ${billId} and organization_id = ${context.organizationId}
+          for share
+        `
+      : await tx`
+          select voided_at from bills
+          where id = ${billId} and organization_id = ${context.organizationId}
+        `;
   const row = rows.at(0);
   if (!row) {
     throw new AuthError('not_found', 'That bill was not found in this company.');
@@ -76,10 +91,15 @@ async function assertCanEditBill(tx: Tx, context: OrgContext, billId: string): P
   }
 }
 
-function assertCanEditOwner(tx: Tx, context: OrgContext, owner: AttachmentOwner): Promise<void> {
+function assertCanEditOwner(
+  tx: Tx,
+  context: OrgContext,
+  owner: AttachmentOwner,
+  options: { lock?: boolean } = {},
+): Promise<void> {
   return owner.type === 'transaction'
     ? assertCanEditTransaction(tx, context, owner.id)
-    : assertCanEditBill(tx, context, owner.id);
+    : assertCanEditBill(tx, context, owner.id, options);
 }
 
 function ownerPath(orgSlug: string, owner: AttachmentOwner): string {
@@ -130,6 +150,9 @@ async function uploadFor(
   await storage.upload(storagePath, file);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 上传要花时间，这段时间里账单可能已经被作废（或记录换了主人）。上传前
+    // 那一遍只是为了别把文件写到不该去的地方，真正算数的是这一遍。
+    await assertCanEditOwner(tx, context, owner, { lock: true });
     const inserted = await insertAttachment(tx, {
       organizationId: context.organizationId,
       owner,

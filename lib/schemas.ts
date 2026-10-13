@@ -59,6 +59,22 @@ const fiscalYearStartMonth = z.coerce
   .min(1, 'Pick one of the months in the list.')
   .max(12, 'Pick one of the months in the list.');
 
+/**
+ * 设置表单里可留空的文字项：换行统一成 \n、去掉首尾空白、空串当作没填。
+ *
+ * 换行要在量长度**之前**统一。浏览器提交 <textarea> 时每个换行是 \r\n，
+ * 而 maxLength 在输入框里把它算成一个字符——五行、刚好 300 字的地址在页面上
+ * 合法，到这里却是 304 个字符，被拒之后用户看到的是一张报错页。
+ * 空串当作没填：只敲了几个空格，存进库里的应该是 null 而不是 ''。
+ */
+const optionalText = (max: number) =>
+  z
+    .string()
+    .transform((value) => value.replace(/\r\n?/g, '\n').trim())
+    .pipe(z.string().max(max))
+    .optional()
+    .transform((value) => value || undefined);
+
 export const updateOrgSchema = z.object({
   name: nonEmpty.max(120),
   timezone: nonEmpty.max(60),
@@ -69,16 +85,25 @@ export const updateOrgSchema = z.object({
    * 只在「编辑公司资料」里出现，不进 createOrgSchema：开公司那一步问的越少
    * 越好，而地址在开第一张发票之前都用不上。
    */
-  address: z.string().trim().max(300).optional(),
+  address: optionalText(300),
   /**
    * 发票上的其余卖方资料（0034）。和 address 一样只在编辑公司资料时出现、
    * 全部可省；省略即清空，因为设置表单每次都会把这几项一起提交。
    */
-  registrationNumber: z.string().trim().max(60).optional(),
-  taxNumber: z.string().trim().max(60).optional(),
-  phone: z.string().trim().max(40).optional(),
-  email: z.string().trim().max(254).email().optional(),
-  paymentDetails: z.string().trim().max(500).optional(),
+  registrationNumber: optionalText(60),
+  taxNumber: optionalText(60),
+  phone: optionalText(40),
+  /**
+   * 只查「有 @、两边不空、没有空白」。zod 的 .email() 比浏览器的
+   * type="email" 严：浏览器放行的地址（比如没有点的域名）到这里被拒，用户
+   * 得到的是一张报错页而不是一句提示。这只是印在发票上的一行字，不会拿来
+   * 发信，挡住明显打错的就够了。
+   */
+  email: optionalText(254).refine(
+    (value) => value === undefined || /^[^\s@]+@[^\s@]+$/.test(value),
+    'Enter an email address, for example billing@yourcompany.com.',
+  ),
+  paymentDetails: optionalText(500),
   fiscalYearStartMonth,
 });
 

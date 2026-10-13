@@ -4,6 +4,7 @@ import { TransactionForm } from '@/components/transaction/transaction-form';
 import { getMessages, interpolate, type Locale } from '@/lib/i18n';
 import { requirePermission, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
+import { isDateLocked } from '@/server/domain/period-lock';
 import { canEditTransaction } from '@/server/domain/permissions';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import {
@@ -34,7 +35,12 @@ const toOption = (row: { id: string; nameEn: string | null; nameZh: string | nul
   name_zh: row.nameZh,
 });
 
-async function loadFormData(tx: Tx, organizationId: string) {
+/**
+ * keepProjectId：换类型重录时原记录挂着的项目。它可能已经完结，不在「进行中」
+ * 里——不补回去，下拉框会落到「--」，重录出来的那笔就悄悄丢了项目归属。
+ * 编辑页（transactions/[id]）是同一个道理。
+ */
+async function loadFormData(tx: Tx, organizationId: string, keepProjectId?: string | null) {
   const [
     moneyAccounts,
     incomeCategories,
@@ -59,7 +65,7 @@ async function loadFormData(tx: Tx, organizationId: string) {
     // 只给还在进行中的项目。已完成/已取消的项目不该继续接收新交易，
     // 但它们在项目列表里仍然看得到历史。
     projects: projects
-      .filter((project) => project.status === 'active')
+      .filter((project) => project.status === 'active' || project.id === keepProjectId)
       .map((project) => ({ id: project.id, name: project.name })),
   };
 }
@@ -171,7 +177,7 @@ type UserKind = (typeof USER_KINDS)[number];
  * 换类型重录的表单：拿原记录预填，类型换成链接上指定的那一种。
  *
  * 能不能换，这里按 replaceTransaction 会拒的那几条先判一遍——已作废、无权改、
- * 凭证或年结、单据生成的分录——判不过就只给一句说明和一个回去的链接，
+ * 凭证或年结、单据生成的分录、原记录在封账期内——判不过就只给一句说明和一个回去的链接，
  * 而不是让用户把表单填完、点保存才被服务端拒掉。服务端那一道照样在。
  */
 async function ReplaceEntry({
@@ -202,7 +208,7 @@ async function ReplaceEntry({
     }
     const [source, formData] = await Promise.all([
       findTransactionSource(tx, context.organizationId, originalId),
-      loadFormData(tx, context.organizationId),
+      loadFormData(tx, context.organizationId, original.projectId),
     ]);
     return { original, source, formData };
   });
@@ -216,7 +222,9 @@ async function ReplaceEntry({
     loaded.source === null &&
     original.kind !== kind &&
     (original.kind === 'income' || original.kind === 'expense' || original.kind === 'transfer') &&
-    canEditTransaction(context.role, original.createdBy === context.userId);
+    canEditTransaction(context.role, original.createdBy === context.userId) &&
+    // 原记录落在封账期里就作废不了，重录必然被拒——这里先说，别等填完表。
+    !isDateLocked(original.occurredOn, context.lockedUntil);
 
   if (!replaceable || !loaded || !original || !kind) {
     return (

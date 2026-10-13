@@ -24,6 +24,7 @@ import {
   findTransactionByClientUuid,
   findTransactionSource,
   getTransactionDetail,
+  lockTransactionRow,
   markVoided,
   type TransactionSource,
 } from '@/server/repositories/transactions';
@@ -507,6 +508,11 @@ async function voidUserEntry(
   cleanReason: string,
   extraAudit: Record<string, unknown> = {},
 ): Promise<void> {
+  // 先锁住这一行再读它。两个人同时作废（或同时换类型重录）同一笔时，后到的
+  // 那一个要等前一个提交，然后读到的是「已作废」并在下面被拒——而不是两人都
+  // 读到「未作废」、各作废一次。换类型重录那条路上，后者意味着同一笔钱被
+  // 重录了两次，而审计里第二条 replacedBy 把第一条盖住。
+  await lockTransactionRow(tx, context.organizationId, id);
   const existing = await getTransactionDetail(tx, context.organizationId, id);
 
   if (existing.voidedAt) {
@@ -583,6 +589,10 @@ export async function replaceTransaction(
   assertPeriodOpen(parsed.occurredOn, context.lockedUntil, context.role);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 锁放在新建之前：并发的第二次重录在这里就开始等，而不是先建好一笔、
+    // 等到作废那一步才发现原记录已经被别人换掉，白白回滚。voidUserEntry
+    // 里那一道锁仍在，同一个事务里重复加锁不会自己等自己。
+    await lockTransactionRow(tx, context.organizationId, originalId);
     const original = await getTransactionDetail(tx, context.organizationId, originalId);
     // 单据生成的分录排在 kind 判断之前，理由同 updateTransaction：它们的 kind
     // 都是 journal，不先拦，用户听到的是下面那句「只有收支转能换」——说的

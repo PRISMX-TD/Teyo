@@ -237,6 +237,47 @@ describe('replaceTransaction', () => {
     expect(rows).toHaveLength(0);
   });
 
+  it('lets only one of two simultaneous re-entries of the same record through', async () => {
+    // 两个人（或同一个人开了两个标签页）同时把同一笔换类型：没有行锁时两边
+    // 都可能读到「未作废」，各建一笔新的——同一笔钱入账两次。这条能不能撞上
+    // 那个窗口看时机，稳定复现竞态的是下面作废那一条；这里守的是结果。
+    const originalId = await newExpense();
+    const first = asTransfer();
+    const second = asTransfer();
+
+    currentUserId = ownerId;
+    const results = await Promise.allSettled([
+      replaceTransaction(orgSlug, originalId, first),
+      replaceTransaction(orgSlug, originalId, second),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const rejected = results.find((r) => r.status === 'rejected') as PromiseRejectedResult;
+    expect(rejected.reason).toMatchObject({ code: 'forbidden' });
+    const [{ count }] = await admin`
+      select count(*)::int as count from transactions
+      where client_uuid in (${first.clientUuid}, ${second.clientUuid})
+    `;
+    expect(count).toBe(1);
+  });
+
+  it('lets only one of two simultaneous voids of the same record through', async () => {
+    const originalId = await newExpense();
+
+    currentUserId = ownerId;
+    const results = await Promise.allSettled([
+      voidTransaction(orgSlug, originalId, 'First'),
+      voidTransaction(orgSlug, originalId, 'Second'),
+    ]);
+
+    expect(results.filter((r) => r.status === 'fulfilled')).toHaveLength(1);
+    const [{ count }] = await admin`
+      select count(*)::int as count from audit_logs
+      where entity_id = ${originalId} and action = 'transaction.voided'
+    `;
+    expect(count).toBe(1);
+  });
+
   it('lets a bookkeeper re-enter their own record', async () => {
     const originalId = await newExpense(bookkeeperId);
 

@@ -406,6 +406,27 @@ export async function updateTransactionHead(
 }
 
 /** 软删除。voided_at / voided_by / void_reason 三者必须同时写入（表级 check 约束）。 */
+/**
+ * 给这笔交易加行锁，直到所在事务结束。作废与换类型重录先锁再读，见
+ * server/actions/transactions.ts 的 voidUserEntry。
+ *
+ * 查不到（不是 uuid、不属于本公司、或 RLS 的 update 策略不放行——比如
+ * 记账员碰别人的记录）时什么也不锁、也不报错：后面的读取与权限判断会给出
+ * 准确的说法，这里只管排队。
+ */
+export async function lockTransactionRow(
+  tx: Tx,
+  organizationId: string,
+  id: string,
+): Promise<void> {
+  if (!UUID_PATTERN.test(id)) return;
+  await tx`
+    select id from transactions
+    where id = ${id} and organization_id = ${organizationId}
+    for update
+  `;
+}
+
 export async function markVoided(
   tx: Tx,
   organizationId: string,

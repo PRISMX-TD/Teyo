@@ -18,11 +18,18 @@ vi.mock('next/cache', () => ({ revalidatePath: () => {} }));
 
 /** 内存版 Storage，与 attachments.test.ts 同一个形状。 */
 const uploaded = new Map<string, { size: number; contentType: string }>();
+/** 上传「进行中」要发生的事，用来模拟上传途中账单被别人作废。 */
+let duringUpload: (() => Promise<void>) | null = null;
 
 vi.mock('@/lib/supabase/storage', () => ({
   getStorageClient: () => ({
     upload: async (path: string, file: File) => {
       uploaded.set(path, { size: file.size, contentType: file.type });
+      if (duringUpload) {
+        const hook = duringUpload;
+        duringUpload = null;
+        await hook();
+      }
       return { path };
     },
     createSignedUrl: async (path: string, expiresIn: number) => {
@@ -212,6 +219,21 @@ describe('uploadBillAttachment', () => {
     });
     const rows = await admin`select id from attachments where bill_id = ${billId}`;
     expect(rows).toHaveLength(0);
+  });
+
+  it('refuses a bill voided while the file was uploading, and cleans up the object', async () => {
+    const billId = await newBill();
+    currentUserId = ownerId;
+    const before = uploaded.size;
+    duringUpload = async () => {
+      await admin`update bills set voided_at = now() where id = ${billId}`;
+    };
+
+    await expect(uploadBillAttachment(orgSlug, billId, pdf())).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    expect(await admin`select id from attachments where bill_id = ${billId}`).toHaveLength(0);
+    expect(uploaded.size).toBe(before);
   });
 
   it('rejects a bill that belongs to another company the same user owns', async () => {

@@ -145,7 +145,36 @@ describe('updateOrganization: seller details for invoices', () => {
     currentUserId = ownerId;
     await expect(
       updateOrganization(orgSlug, { ...BASE_SETTINGS, email: 'not an email' }),
-    ).rejects.toThrow();
+    ).rejects.toThrow(/email address/);
+  });
+
+  it('accepts an address the browser’s email field accepts', async () => {
+    // type="email" 放行没有点的域名；服务端更严的话，用户会撞上一张报错页。
+    currentUserId = ownerId;
+    await updateOrganization(orgSlug, { ...BASE_SETTINGS, email: 'billing@intranet' });
+    const [row] = await admin`select email from organizations where id = ${orgId}`;
+    expect(row.email).toBe('billing@intranet');
+  });
+
+  it('counts a textarea line break as one character, as the browser does', async () => {
+    // 浏览器提交 textarea 时换行是 \r\n，而 maxLength 把它算成一个字符。
+    // 6 行、正好 300 字的地址在页面上合法，到服务端不能变成 305 字被拒。
+    currentUserId = ownerId;
+    const lines = Array.from({ length: 6 }, (_, i) => String(i).repeat(49));
+    const address = lines.join('\r\n');
+    expect(lines.join('\n')).toHaveLength(299);
+    await updateOrganization(orgSlug, { ...BASE_SETTINGS, address: `${address}x` });
+
+    const [row] = await admin`select address from organizations where id = ${orgId}`;
+    expect(row.address).toBe(`${lines.join('\n')}x`);
+  });
+
+  it('stores a field of only spaces as empty, not as blank text', async () => {
+    currentUserId = ownerId;
+    await updateOrganization(orgSlug, { ...BASE_SETTINGS, phone: '   ', email: '  ' });
+    const [row] = await admin`select phone, email from organizations where id = ${orgId}`;
+    expect(row.phone).toBeNull();
+    expect(row.email).toBeNull();
   });
 
   it('puts the seller details on the printable invoice data', async () => {
