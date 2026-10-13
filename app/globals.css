@@ -1731,7 +1731,19 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
   font-size: var(--text-sm);
 }
 .checkbox-row input[type='checkbox'] { flex-shrink: 0; }
-.checkbox-row > span:last-child { color: var(--text-primary); font-family: var(--font-mono); font-variant-numeric: tabular-nums; margin-left: auto; }
+/* 原来是 `span:last-child` 加等宽字体、靠右——两处用法（收付款表单、核销预收
+   对话框）的结构都是「勾选框、说明、勾上后才出现的金额框」，于是没勾的那
+   几行说明成了最后一个子元素，被推到右边换成等宽字；勾上之后又跳回左边。
+   同一张清单两种排法。说明一律靠左，金额框跟在后面。 */
+.checkbox-row > span { color: var(--text-primary); }
+
+/* 收付款表单的「应用于发票 / 账单」一组。fieldset 自己没有上边距，legend
+   于是贴在上面那一栏的底下，看着像那一栏的说明；每一行勾选框却吃到
+   `.transaction-form label:not(.kind-option)` 的大上边距（特指度 0,2,1），
+   离自己的标题反而更远。倒过来：组与上一栏隔开，组内各行收紧。 */
+.transaction-form .payment-settlement { margin-top: var(--space-5); }
+.transaction-form .payment-settlement > label.checkbox-row { margin-top: 0; }
+.transaction-form .payment-settlement > label.checkbox-row + label.checkbox-row { margin-top: var(--space-2); }
 
 /* ── 收付款页：未结单据的快捷清单（components/payments/payment-form.tsx） ──
    每一行是一个按钮：点一下，往来对象、币种、核销金额一起填好。清单可能

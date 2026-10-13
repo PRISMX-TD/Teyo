@@ -56,6 +56,43 @@ export function pickDocument(draft: PaymentDraft, doc: PickableDocument): Paymen
     : { type, contactId: doc.contactId, currency: doc.currency, selectedItems: [item] };
 }
 
+/**
+ * 参考号的长度上限，与 server/actions/payments.ts 的 `reference` 校验
+ * （z.string().max(200)）一致。
+ */
+export const MAX_PAYMENT_REFERENCE_LENGTH = 200;
+
+/**
+ * 参考号没填时用的那一串：勾上的单据的编号，按勾选的先后，逗号隔开。
+ *
+ * 参考号本来是给银行流水号、支票号的——那个系统拿不到。但留空的代价是
+ * 收付款列表那一栏只有「-」、流水里只写「Customer receipt」、交易详情的
+ * 来源只剩一个日期，谁也看不出这笔钱是哪张发票的。单据号是手边最好的
+ * 替代。
+ *
+ * 没有编号的单据跳过：账单号可以为空，未结清单里把它显示成「—」，那不是
+ * 一个号。勾得太多、超过长度上限时，留下放得下的前几个，后面写「+N」——
+ * 截在半个编号上的参考号比没有更误导。
+ */
+export function referenceFromDocuments(
+  items: SelectedItem[],
+  numberOf: (item: SelectedItem) => string | undefined,
+  maxLength: number = MAX_PAYMENT_REFERENCE_LENGTH,
+): string {
+  const numbers = items
+    .map((item) => numberOf(item)?.trim() ?? '')
+    .filter((number) => /[\p{L}\p{N}]/u.test(number));
+
+  const all = numbers.join(', ');
+  if (all.length <= maxLength) return all;
+
+  for (let kept = numbers.length - 1; kept >= 1; kept--) {
+    const shortened = `${numbers.slice(0, kept).join(', ')} +${numbers.length - kept}`;
+    if (shortened.length <= maxLength) return shortened;
+  }
+  return numbers[0].slice(0, maxLength);
+}
+
 /** 这一张是否已经在核销清单里。 */
 export function isPicked(draft: PaymentDraft, doc: PickableDocument): boolean {
   return draft.selectedItems.some((item) => isItemFor(item, doc));

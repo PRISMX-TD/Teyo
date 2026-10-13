@@ -2,8 +2,10 @@ import { describe, expect, it } from 'vitest';
 import {
   isPicked,
   pickDocument,
+  referenceFromDocuments,
   type PaymentDraft,
   type PickableDocument,
+  type SelectedItem,
 } from '@/components/payments/pick-document';
 import { hasBalanceToSettle } from '@/server/repositories/payments';
 
@@ -81,6 +83,54 @@ describe('pickDocument', () => {
   it('prefills in the currency’s own decimals', () => {
     const next = pickDocument(EMPTY, invoice({ currency: 'JPY', remainingMinor: 150000n }));
     expect(next.selectedItems).toEqual([{ invoiceId: 'inv-1', amount: '150000' }]);
+  });
+});
+
+describe('referenceFromDocuments', () => {
+  const NUMBERS = new Map([
+    ['inv-1', 'INV-00001'],
+    ['inv-2', 'INV-00002'],
+    ['bill-1', '—'],
+    ['bill-2', 'SUP/7788'],
+  ]);
+  const numberOf = (item: SelectedItem) => NUMBERS.get(item.invoiceId ?? item.billId ?? '');
+  const ticked = (...ids: string[]): SelectedItem[] =>
+    ids.map((id) =>
+      id.startsWith('bill') ? { billId: id, amount: '1.00' } : { invoiceId: id, amount: '1.00' },
+    );
+
+  it('is empty when nothing is ticked', () => {
+    expect(referenceFromDocuments([], numberOf)).toBe('');
+  });
+
+  it('lists the ticked documents’ numbers in the order they were ticked', () => {
+    expect(referenceFromDocuments(ticked('inv-2', 'inv-1'), numberOf)).toBe(
+      'INV-00002, INV-00001',
+    );
+  });
+
+  it('skips a bill that has no number of its own', () => {
+    // 没有账单号的账单在清单里显示成「—」——那不是一个号。
+    expect(referenceFromDocuments(ticked('bill-1', 'bill-2'), numberOf)).toBe('SUP/7788');
+    expect(referenceFromDocuments(ticked('bill-1'), numberOf)).toBe('');
+  });
+
+  it('keeps whole numbers and counts the rest when they do not all fit', () => {
+    // 'INV-00001, INV-00002' 是 20 个字符；放不下时宁可写「+1」也不截半个号。
+    expect(referenceFromDocuments(ticked('inv-1', 'inv-2'), numberOf, 19)).toBe('INV-00001 +1');
+    expect(referenceFromDocuments(ticked('inv-1', 'inv-2'), numberOf, 20)).toBe(
+      'INV-00001, INV-00002',
+    );
+  });
+
+  it('never goes over the length the server accepts', () => {
+    const many = Array.from({ length: 40 }, (_, i) => ({
+      invoiceId: `x-${i}`,
+      amount: '1.00',
+    }));
+    const reference = referenceFromDocuments(many, (item) => `INV-${item.invoiceId}`);
+    expect(reference.length).toBeLessThanOrEqual(200);
+    expect(reference).toMatch(/^INV-x-0, INV-x-1, .* \+\d+$/);
   });
 });
 

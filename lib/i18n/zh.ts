@@ -856,6 +856,8 @@ const zh: Translated<typeof en> = {
     methodOnline: '线上支付',
     methodOther: '其他',
     reference: '参考号',
+    referenceHintInvoices: '银行参考号或支票号，方便以后对账。不填就用勾选的发票号。',
+    referenceHintBills: '银行参考号或支票号，方便以后对账。不填就用勾选的账单号。',
     applyToInvoices: '应用于发票',
     applyToBills: '应用于账单',
     voided: '已作废',

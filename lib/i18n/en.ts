@@ -873,6 +873,10 @@ const en = {
     methodOnline: 'Online',
     methodOther: 'Other',
     reference: 'Reference',
+    referenceHintInvoices:
+      'The bank or cheque reference, for matching against your statement later. Left blank, the numbers of the invoices you tick are used.',
+    referenceHintBills:
+      'The bank or cheque reference, for matching against your statement later. Left blank, the numbers of the bills you tick are used.',
     applyToInvoices: 'Apply to Invoices',
     applyToBills: 'Apply to Bills',
     voided: 'Voided',

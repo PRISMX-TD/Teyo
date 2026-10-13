@@ -11,9 +11,12 @@ import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/s
 import { RateField } from '@/components/transaction/rate-field';
 import {
   isPicked,
+  MAX_PAYMENT_REFERENCE_LENGTH,
   pickDocument,
+  referenceFromDocuments,
   type PaymentDraft,
   type PickableDocument,
+  type SelectedItem,
 } from '@/components/payments/pick-document';
 
 type Contact = { id: string; name: string };
@@ -174,6 +177,9 @@ export function PaymentForm({
   const [currency, setCurrency] = useState(initial.currency);
   const [method, setMethod] = useState('bank_transfer');
   const [reference, setReference] = useState('');
+  // 用户自己动过参考号没有。动过之后，再勾、再取消单据都不去改它——那多半
+  // 是照着银行流水敲进去的号，被单据号盖掉就白敲了。
+  const [referenceEdited, setReferenceEdited] = useState(false);
   const [notes, setNotes] = useState('');
   const [selectedItems, setSelectedItems] = useState<
     { invoiceId?: string; billId?: string; amount: string }[]
@@ -252,6 +258,26 @@ export function PaymentForm({
   }
 
   const draft: PaymentDraft = { type: paymentType, contactId, currency, selectedItems };
+
+  /** 单据 id → 单据号，给参考号的缺省值用。 */
+  const documentNumbers = useMemo(() => {
+    const numbers = new Map<string, string>();
+    for (const inv of outstandingInvoices ?? []) numbers.set(`invoice:${inv.id}`, inv.invoiceNumber);
+    for (const bill of outstandingBills ?? []) numbers.set(`bill:${bill.id}`, bill.billNumber);
+    return numbers;
+  }, [outstandingInvoices, outstandingBills]);
+
+  /**
+   * 参考号的缺省值：勾上的单据号。用户没动过参考号时，输入框里显示的就是
+   * 它，随勾选变化；动过之后显示用户写的，清空了就作为占位提示露出来——
+   * 留空提交时用的也是它。规则见 pick-document.ts 的 referenceFromDocuments。
+   */
+  const autoReference = referenceFromDocuments(selectedItems, (item: SelectedItem) =>
+    item.invoiceId
+      ? documentNumbers.get(`invoice:${item.invoiceId}`)
+      : documentNumbers.get(`bill:${item.billId}`),
+  );
+  const shownReference = referenceEdited ? reference : autoReference;
 
   /** 点了快捷清单里的一张单据。规则见 pick-document.ts。 */
   function pick(doc: QuickPick) {
@@ -387,7 +413,7 @@ export function PaymentForm({
         exchangeRate,
         paymentDate: date,
         method: method as 'cash' | 'bank_transfer' | 'cheque' | 'online' | 'other',
-        reference: reference || undefined,
+        reference: shownReference.trim() || autoReference || undefined,
         notes: notes || undefined,
         items,
       });
@@ -594,12 +620,22 @@ export function PaymentForm({
       <input
         id="reference"
         type="text"
-        maxLength={200}
-        value={reference}
-        onChange={(e) => setReference(e.target.value)}
+        maxLength={MAX_PAYMENT_REFERENCE_LENGTH}
+        value={shownReference}
+        placeholder={autoReference}
+        aria-describedby="referenceHint"
+        onChange={(e) => {
+          setReference(e.target.value);
+          setReferenceEdited(true);
+        }}
       />
+      <p className="field-hint" id="referenceHint">
+        {paymentType === 'received'
+          ? i18n.payments.referenceHintInvoices
+          : i18n.payments.referenceHintBills}
+      </p>
 
-      <fieldset aria-describedby="settlementHint">
+      <fieldset className="payment-settlement" aria-describedby="settlementHint">
         <legend>
           {paymentType === 'received' ? i18n.payments.applyToInvoices : i18n.payments.applyToBills}
         </legend>

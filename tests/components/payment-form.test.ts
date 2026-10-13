@@ -114,6 +114,23 @@ describe('PaymentForm', () => {
     expect(html).toContain(`<label for="contactId">${zh.bills.vendor}</label>`);
   });
 
+  it('fills the reference in with the invoice number', () => {
+    const html = render({ kind: 'invoice', id: 'inv-1' });
+    expect(html).toMatch(/<input id="reference"[^>]*value="INV-00001"/);
+    expect(html).toContain(zh.payments.referenceHintInvoices);
+  });
+
+  it('fills the reference in with the bill number on a payment made', () => {
+    const html = render({ kind: 'bill', id: 'bill-1' });
+    expect(html).toMatch(/<input id="reference"[^>]*value="B-001"/);
+    expect(html).toContain(zh.payments.referenceHintBills);
+  });
+
+  it('leaves the reference empty until a document is ticked', () => {
+    const html = render();
+    expect(html).toMatch(/<input id="reference"[^>]*value=""/);
+  });
+
   it('ignores a document it was not given', () => {
     const html = render({ kind: 'invoice', id: 'not-outstanding' });
     expect(selected(html, 'currency')).toBe('MYR');
