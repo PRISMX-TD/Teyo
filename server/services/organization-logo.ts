@@ -28,6 +28,25 @@ export function buildLogoPath(organizationId: string, fileName: string): string 
 }
 
 /**
+ * 收款信息里的图片，路径形如 `<orgId>/payment-<uuid>.<ext>`（0038）。
+ * 与 logo 同一个 bucket、同一个首段，理由同 buildLogoPath。
+ */
+export function buildPaymentImagePath(organizationId: string, fileName: string): string {
+  const ext = path.extname(path.basename(fileName)).toLowerCase().replace(/[^.a-z0-9]/g, '');
+  return `${organizationId}/payment-${randomUUID()}${ext}`;
+}
+
+/**
+ * 收款信息里每张图的地址，与路径一一对应；某一张取不到就是 null。
+ * 吞错的理由同 getLogoSignedUrl：图片取不到不该让发票整页报错。
+ */
+export async function getPaymentImageUrls(
+  paths: readonly string[],
+): Promise<Array<{ path: string; url: string | null }>> {
+  return Promise.all(paths.map(async (p) => ({ path: p, url: await getLogoSignedUrl(p) })));
+}
+
+/**
  * 给页面用的 logo 地址，取不到就返回 null。
  *
  * 这里吞掉错误是刻意的：logo 是装饰，发票是正事。Storage 暂时不可用、

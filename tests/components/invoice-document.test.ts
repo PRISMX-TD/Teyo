@@ -27,6 +27,7 @@ function sample(overrides: {
       email: null,
       paymentDetails: null,
       logoPath: null,
+      paymentImagePaths: [],
       invoiceLocale: 'en',
       invoiceSignoff: 'computer_generated',
       invoiceTaxLabel: null,
@@ -63,8 +64,14 @@ function sample(overrides: {
   };
 }
 
-function render(data: InvoicePdfData, lang: InvoiceLocale = 'en'): string {
-  return renderToStaticMarkup(createElement(InvoiceDocument, { data, logoUrl: null, lang }));
+function render(
+  data: InvoicePdfData,
+  lang: InvoiceLocale = 'en',
+  paymentImageUrls: string[] = [],
+): string {
+  return renderToStaticMarkup(
+    createElement(InvoiceDocument, { data, logoUrl: null, paymentImageUrls, lang }),
+  );
 }
 
 /** 去掉标签，只看印出来的字。 */
@@ -187,6 +194,29 @@ describe('InvoiceDocument', () => {
     const none = text(render(sample({ organization: { invoiceSignoff: 'none' } })));
     expect(none).not.toContain('computer-generated');
     expect(none).not.toContain('Authorised signature');
+  });
+
+  it('prints the payment QR codes under the payment details', () => {
+    const html = render(
+      sample({ organization: { paymentDetails: 'Bybit Wallet\nTCH7on3 (TRC20)' } }),
+      'en',
+      ['https://storage.test/a.png', 'https://storage.test/b.png'],
+    );
+    expect(html).toMatch(
+      /Bybit Wallet[\s\S]*<div class="printable-invoice-payment-images"><img src="https:\/\/storage.test\/a.png" alt="Payment QR code 1"\/><img src="https:\/\/storage.test\/b.png" alt="Payment QR code 2"\/><\/div>/,
+    );
+  });
+
+  it('prints the payment section for images alone, without empty text', () => {
+    const html = render(sample(), 'zh', ['https://storage.test/a.png']);
+    expect(html).toContain('付款信息');
+    expect(html).toContain('alt="收款二维码 1"');
+    expect(html).not.toContain('<p class="printable-invoice-multiline"></p>');
+  });
+
+  it('leaves the payment section out when there is neither text nor image', () => {
+    expect(render(sample())).not.toContain('printable-invoice-payment-images');
+    expect(text(render(sample()))).not.toContain('Payment details');
   });
 
   it('prints the company’s own footer text', () => {

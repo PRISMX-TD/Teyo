@@ -7,16 +7,22 @@ import { requirePermission, requireUserId } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
+  addOrganizationPaymentImage,
   generateUniqueSlug,
   getOrganizationSettings,
   insertOrganization,
+  removeOrganizationPaymentImage,
   setOrganizationLogoPath,
   setPeriodLock,
   updateOrganizationSettings,
 } from '@/server/repositories/organizations';
 import { seedChartOfAccounts } from '@/server/services/account-seed';
-import { ALLOWED_LOGO_TYPES, MAX_LOGO_BYTES } from '@/lib/upload-rules';
-import { buildLogoPath } from '@/server/services/organization-logo';
+import { ALLOWED_LOGO_TYPES, MAX_LOGO_BYTES, MAX_PAYMENT_IMAGES } from '@/lib/upload-rules';
+import {
+  buildLogoPath,
+  buildPaymentImagePath,
+  getLogoSignedUrl,
+} from '@/server/services/organization-logo';
 
 export type CreateOrgInput = {
   name: string;
@@ -198,6 +204,79 @@ export async function uploadOrganizationLogo(orgSlug: string, file: File): Promi
 
   if (previousPath) {
     await storage.remove(previousPath).catch(() => {});
+  }
+
+  revalidatePath(`/${orgSlug}/settings/general`);
+}
+
+/**
+ * 往收款信息里加一张图（收款二维码之类），印在发票的收款信息下面。
+ *
+ * 顺序与 uploadOrganizationLogo 相同：先校验、再写对象、再在事务里改库，
+ * 改库失败（包括已经放满三张）就把刚写进去的对象删掉，不留孤儿。
+ *
+ * 返回新图的签名 URL：设置页上那一格是客户端组件，直接拿来显示，不必
+ * router.refresh()——刷新会把同一张表单里用户还没保存的改动也卷进去。
+ */
+export async function uploadPaymentDetailsImage(
+  orgSlug: string,
+  file: File,
+): Promise<{ path: string; url: string | null }> {
+  const context = await requirePermission(orgSlug, 'account:manage');
+
+  if (!ALLOWED_LOGO_TYPES.includes(file.type)) {
+    throw new Error('Use a PNG, JPG or WebP image.');
+  }
+  if (file.size > MAX_LOGO_BYTES) {
+    throw new Error('The image must be 1 MB or smaller.');
+  }
+
+  const storage = getStorageClient(BRANDING_BUCKET);
+  const imagePath = buildPaymentImagePath(context.organizationId, file.name);
+  await storage.upload(imagePath, file);
+
+  await withTransaction(context.userId, async (tx) => {
+    await addOrganizationPaymentImage(tx, context.organizationId, imagePath, MAX_PAYMENT_IMAGES);
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'organization.update',
+      entityType: 'organization',
+      entityId: context.organizationId,
+      before: { paymentImage: null },
+      after: { paymentImage: imagePath, fileName: file.name, sizeBytes: file.size },
+    });
+  }).catch(async (error: unknown) => {
+    await storage.remove(imagePath).catch(() => {});
+    throw error;
+  });
+
+  revalidatePath(`/${orgSlug}/settings/general`);
+  return { path: imagePath, url: await getLogoSignedUrl(imagePath) };
+}
+
+/** 从收款信息里拿掉一张图。先改库、提交之后再删对象，理由同 logo。 */
+export async function removePaymentDetailsImage(orgSlug: string, imagePath: string): Promise<void> {
+  const context = await requirePermission(orgSlug, 'account:manage');
+
+  const { removed } = await withTransaction(context.userId, async (tx) => {
+    const result = await removeOrganizationPaymentImage(tx, context.organizationId, imagePath);
+    if (result.removed) {
+      await recordAudit(tx, {
+        organizationId: context.organizationId,
+        actorUserId: context.userId,
+        action: 'organization.update',
+        entityType: 'organization',
+        entityId: context.organizationId,
+        before: { paymentImage: imagePath },
+        after: { paymentImage: null },
+      });
+    }
+    return result;
+  });
+
+  if (removed) {
+    await getStorageClient(BRANDING_BUCKET).remove(imagePath).catch(() => {});
   }
 
   revalidatePath(`/${orgSlug}/settings/general`);

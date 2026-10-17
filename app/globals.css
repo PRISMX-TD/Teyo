@@ -1666,6 +1666,19 @@ p.report-period {
    `.transaction-form label:not(.kind-option)` 那条 margin-top（特指度 0,2,1）。 */
 .transaction-form label.attachment-upload-label { align-self: flex-start; margin-top: var(--space-2); }
 .pending-receipts-field { margin-top: var(--space-5); }
+
+/* ── 收款信息：文字框 + 贴进来的图片（components/settings/payment-details-field.tsx） ── */
+.payment-details-field textarea.is-drop-target { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-subtle); }
+.payment-details-images { display: flex; flex-wrap: wrap; gap: var(--space-3); margin: var(--space-3) 0 0; padding: 0; list-style: none; }
+.payment-details-images li {
+  display: flex; flex-direction: column; align-items: flex-start; gap: var(--space-2);
+  padding: var(--space-2);
+  background: var(--bg-secondary);
+  border: 1px solid var(--border-primary); border-radius: var(--radius-sm);
+}
+/* 白底：二维码多半是黑白的，透明 PNG 落在深色主题的底上就看不出来了。 */
+.payment-details-images img { display: block; max-width: 160px; max-height: 160px; object-fit: contain; background: #fff; border-radius: var(--radius-sm); }
+.payment-details-actions { margin-top: var(--space-3); }
 .change-kind { margin: 0 0 var(--space-2); font-size: var(--text-sm); color: var(--text-secondary); }
 .attachment-errors { white-space: pre-line; }
 .attachment-panel-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); margin-top: var(--space-3); }
@@ -2432,6 +2445,11 @@ input[type='file']::file-selector-button:hover { background: var(--bg-hover); bo
 .printable-invoice-total-row.is-due dt { color: var(--text-primary); }
 .printable-invoice-notes { margin-top: var(--space-6); }
 .printable-invoice-notes p { margin: 0; font-size: var(--text-sm); }
+/* 收款二维码：约 32mm 高，手机在一臂之内扫得出，又不至于把收款信息撑成半页。 */
+.printable-invoice-payment-images { display: flex; flex-wrap: wrap; gap: var(--space-4); margin-top: var(--space-3); }
+/* 白底加一圈白边：透明底的二维码在深色主题的屏幕上是黑块落在深灰上，扫不出来；
+   白边也是扫码要的静区。印在白纸上看不出来。 */
+.printable-invoice-payment-images img { max-height: 120px; max-width: 220px; object-fit: contain; background: #fff; padding: var(--space-1); border-radius: var(--radius-sm); }
 .printable-invoice-footer { margin: var(--space-6) 0 0; font-size: var(--text-sm); color: var(--text-secondary); }
 .printable-invoice-signoff { margin: var(--space-8) 0 0; text-align: center; font-size: var(--text-xs); color: var(--text-tertiary); }
 .printable-invoice-signoff .printable-invoice-alt { display: block; }

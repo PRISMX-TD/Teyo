@@ -7,6 +7,8 @@ import type { InvoicePdfData } from '@/server/repositories/invoice-pdf';
 type Props = {
   data: InvoicePdfData;
   logoUrl: string | null;
+  /** 收款信息里的图片（收款二维码等），已换成签名 URL；取不到的那张不在里面。 */
+  paymentImageUrls?: string[];
   /**
    * 这张发票用什么语言印。由打印页决定（公司设置的默认值，或者页面上临时
    * 切换的那一个），与看这一页的人的界面语言无关——发票是给客户看的。
@@ -27,7 +29,7 @@ function percentOf(bps: number): string {
  * 拆出来是为了让单据能脱离 Next 的请求上下文单独渲染（测试里直接
  * renderToStaticMarkup），版式改动不必每次都登录一遍去看。
  */
-export function InvoiceDocument({ data, logoUrl, lang }: Props) {
+export function InvoiceDocument({ data, logoUrl, paymentImageUrls = [], lang }: Props) {
   const { organization, invoice, contact, items } = data;
 
   const en = getMessages('en');
@@ -221,10 +223,26 @@ export function InvoiceDocument({ data, logoUrl, lang }: Props) {
       ) : null}
 
       {/* 收款信息放在金额之后：客户读完金额，下一眼要找的就是「钱打到哪里」。 */}
-      {organization.paymentDetails ? (
+      {organization.paymentDetails || paymentImageUrls.length > 0 ? (
         <section className="printable-invoice-notes">
           <h2>{label((m) => m.invoicePdf.paymentDetails)}</h2>
-          <p className="printable-invoice-multiline">{organization.paymentDetails}</p>
+          {organization.paymentDetails ? (
+            <p className="printable-invoice-multiline">{organization.paymentDetails}</p>
+          ) : null}
+          {/* 收款二维码一类的图，跟在文字后面一字排开。限高而不是限宽：
+              一张竖长的转账截图不该占掉半页。 */}
+          {paymentImageUrls.length > 0 ? (
+            <div className="printable-invoice-payment-images">
+              {paymentImageUrls.map((url, index) => (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img
+                  key={url}
+                  src={url}
+                  alt={interpolate(primary.invoicePdf.paymentImageAlt, { n: index + 1 })}
+                />
+              ))}
+            </div>
+          ) : null}
         </section>
       ) : null}
 

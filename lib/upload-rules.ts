@@ -24,3 +24,10 @@ export const MAX_ATTACHMENT_BYTES = 10 * 1024 * 1024;
 export const ALLOWED_LOGO_TYPES: readonly string[] = ['image/png', 'image/jpeg', 'image/webp'];
 
 export const MAX_LOGO_BYTES = 1024 * 1024;
+
+/**
+ * 收款信息里的图片（收款二维码、钱包地址的截图）。和 logo 同在 branding
+ * bucket，类型与大小沿用上面 logo 那两项；这里只多一个张数上限，与 0038 的
+ * CHECK 一致。
+ */
+export const MAX_PAYMENT_IMAGES = 3;

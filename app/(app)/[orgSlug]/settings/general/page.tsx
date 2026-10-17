@@ -7,8 +7,9 @@ import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { updatePeriodLock, updateOrganization } from '@/server/actions/organizations';
 import { getOrganizationSettings, getUserLocale } from '@/server/repositories/organizations';
-import { getLogoSignedUrl } from '@/server/services/organization-logo';
+import { getLogoSignedUrl, getPaymentImageUrls } from '@/server/services/organization-logo';
 import { LogoUploader } from '@/components/settings/logo-uploader';
+import { PaymentDetailsField } from '@/components/settings/payment-details-field';
 
 /**
  * 财年起始月的选项。1–12 按顺序列出，标签由 i18n 的 settings.month1..month12
@@ -55,6 +56,7 @@ export default async function GeneralSettingsPage({
     getOrganizationSettings(tx, context.organizationId),
   );
   const logoUrl = await getLogoSignedUrl(settings.logoPath);
+  const paymentImages = await getPaymentImageUrls(settings.paymentImagePaths);
 
   return (
     <>
@@ -225,18 +227,14 @@ export default async function GeneralSettingsPage({
               defaultValue={settings.email ?? ''}
             />
 
+            {/* 文字跟着这张表单保存；贴进来的图片当场上传，见组件里的注释。 */}
             <label htmlFor="paymentDetails">{t.settings.paymentDetails}</label>
-            <textarea
-              id="paymentDetails"
-              name="paymentDetails"
-              rows={3}
-              maxLength={500}
-              aria-describedby="paymentDetailsHint"
+            <PaymentDetailsField
+              orgSlug={orgSlug}
               defaultValue={settings.paymentDetails ?? ''}
+              images={paymentImages}
+              t={t}
             />
-            <p id="paymentDetailsHint" className="field-hint">
-              {t.settings.paymentDetailsHint}
-            </p>
           </fieldset>
 
           {/*

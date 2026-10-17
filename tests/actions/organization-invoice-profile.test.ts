@@ -41,9 +41,13 @@ vi.mock('@/lib/supabase/storage', () => ({
   }),
 }));
 
-const { removeOrganizationLogo, updateOrganization, uploadOrganizationLogo } = await import(
-  '@/server/actions/organizations'
-);
+const {
+  removeOrganizationLogo,
+  removePaymentDetailsImage,
+  updateOrganization,
+  uploadOrganizationLogo,
+  uploadPaymentDetailsImage,
+} = await import('@/server/actions/organizations');
 const { createInvoice, updateInvoice } = await import('@/server/actions/invoices');
 const { createPayment } = await import('@/server/actions/payments');
 const { getInvoicePdfData } = await import('@/server/repositories/invoice-pdf');
@@ -473,5 +477,114 @@ describe('getLogoSignedUrl', () => {
     await uploadOrganizationLogo(orgSlug, image('flaky.png'));
     signedUrlFails = true;
     await expect(getLogoSignedUrl(await logoPath())).resolves.toBeNull();
+  });
+});
+
+/** 收款信息里现在挂着的图片路径，按顺序。 */
+async function paymentImagePaths(): Promise<string[]> {
+  const [row] = await admin`select payment_image_paths from organizations where id = ${orgId}`;
+  return row.payment_image_paths as string[];
+}
+
+async function clearPaymentImages(): Promise<void> {
+  currentUserId = ownerId;
+  for (const path of await paymentImagePaths()) {
+    await removePaymentDetailsImage(orgSlug, path);
+  }
+}
+
+describe('uploadPaymentDetailsImage', () => {
+  beforeEach(clearPaymentImages);
+
+  it('stores a pasted QR code in the branding bucket and adds it to the payment details', async () => {
+    currentUserId = ownerId;
+    const added = await uploadPaymentDetailsImage(orgSlug, image('payment-image.png'));
+
+    expect(added.path.startsWith(`${orgId}/payment-`)).toBe(true);
+    expect(added.path).toMatch(/\.png$/);
+    expect(added.url).toContain('/branding/');
+    expect(objects.get(added.path)?.bucket).toBe('branding');
+    expect(await paymentImagePaths()).toEqual([added.path]);
+  });
+
+  it('keeps images in the order they were added', async () => {
+    currentUserId = ownerId;
+    const first = await uploadPaymentDetailsImage(orgSlug, image('a.png'));
+    const second = await uploadPaymentDetailsImage(orgSlug, image('b.jpg', 'image/jpeg'));
+    expect(await paymentImagePaths()).toEqual([first.path, second.path]);
+  });
+
+  it('refuses a fourth image and leaves no stray object behind', async () => {
+    currentUserId = ownerId;
+    for (const name of ['1.png', '2.png', '3.png']) {
+      await uploadPaymentDetailsImage(orgSlug, image(name));
+    }
+    const stored = objects.size;
+
+    await expect(uploadPaymentDetailsImage(orgSlug, image('4.png'))).rejects.toThrow(/up to 3/);
+    expect(await paymentImagePaths()).toHaveLength(3);
+    expect(objects.size).toBe(stored);
+  });
+
+  it('rejects an SVG and anything over 1 MB', async () => {
+    currentUserId = ownerId;
+    await expect(
+      uploadPaymentDetailsImage(orgSlug, image('qr.svg', 'image/svg+xml')),
+    ).rejects.toThrow(/PNG, JPG or WebP/);
+    await expect(
+      uploadPaymentDetailsImage(orgSlug, image('big.png', 'image/png', 1024 * 1024 + 1)),
+    ).rejects.toThrow(/1 MB/);
+    expect(await paymentImagePaths()).toEqual([]);
+  });
+
+  it('does not let a bookkeeper change the payment details', async () => {
+    currentUserId = bookkeeperId;
+    await expect(uploadPaymentDetailsImage(orgSlug, image())).rejects.toMatchObject({
+      code: 'forbidden',
+    });
+    expect(await paymentImagePaths()).toEqual([]);
+  });
+
+  it('puts the images on the printable invoice data', async () => {
+    currentUserId = ownerId;
+    const added = await uploadPaymentDetailsImage(orgSlug, image('qr.png'));
+    const { id } = await createInvoice(orgSlug, {
+      contactId: customerId,
+      issueDate: '2033-04-01',
+      dueDate: '2033-05-01',
+      currency: 'MYR',
+      taxRatePercent: '0',
+      items: [{ description: 'Work', quantity: '1', unitPrice: '10.00' }],
+    });
+    const data = await withTransaction(ownerId, (tx) => getInvoicePdfData(tx, orgId, id));
+    expect(data?.organization.paymentImagePaths).toEqual([added.path]);
+  });
+});
+
+describe('removePaymentDetailsImage', () => {
+  beforeEach(clearPaymentImages);
+
+  it('takes the image off the payment details and deletes the object', async () => {
+    currentUserId = ownerId;
+    const keep = await uploadPaymentDetailsImage(orgSlug, image('keep.png'));
+    const drop = await uploadPaymentDetailsImage(orgSlug, image('drop.png'));
+
+    await removePaymentDetailsImage(orgSlug, drop.path);
+
+    expect(await paymentImagePaths()).toEqual([keep.path]);
+    expect(objects.has(drop.path)).toBe(false);
+    expect(objects.has(keep.path)).toBe(true);
+  });
+
+  it('will not delete an object that is not one of this company’s payment images', async () => {
+    // 路径是客户端传回来的。别的对象——这家公司的 logo、别家公司的图——都不能借这个动作删掉。
+    currentUserId = ownerId;
+    await uploadOrganizationLogo(orgSlug, image('logo-kept.png'));
+    const logo = await logoPath();
+
+    await removePaymentDetailsImage(orgSlug, logo!);
+
+    expect(objects.has(logo!)).toBe(true);
+    expect(await logoPath()).toBe(logo);
   });
 });

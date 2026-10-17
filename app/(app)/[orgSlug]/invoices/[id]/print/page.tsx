@@ -8,7 +8,7 @@ import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getInvoicePdfData } from '@/server/repositories/invoice-pdf';
-import { getLogoSignedUrl } from '@/server/services/organization-logo';
+import { getLogoSignedUrl, getPaymentImageUrls } from '@/server/services/organization-logo';
 
 /**
  * 一张可以直接打印、或用浏览器「另存为 PDF」的发票。
@@ -57,6 +57,9 @@ export default async function InvoicePrintPage({
   if (!data) notFound();
 
   const logoUrl = await getLogoSignedUrl(data.organization.logoPath);
+  const paymentImageUrls = (await getPaymentImageUrls(data.organization.paymentImagePaths))
+    .map((image) => image.url)
+    .filter((url): url is string => url !== null);
 
   // 发票语言：默认取公司设置，页面上可以临时换一种（?lang=）。临时换的
   // 不写回设置——给一个中文客户印一张，不该把全公司的默认值改掉。
@@ -121,7 +124,12 @@ export default async function InvoicePrintPage({
         <tbody>
           <tr>
             <td>
-              <InvoiceDocument data={data} logoUrl={logoUrl} lang={lang} />
+              <InvoiceDocument
+                data={data}
+                logoUrl={logoUrl}
+                paymentImageUrls={paymentImageUrls}
+                lang={lang}
+              />
             </td>
           </tr>
         </tbody>

@@ -90,6 +90,12 @@ export type OrganizationSettings = {
    * 换成短时效签名 URL。只由 setOrganizationLogoPath 写，不经设置表单。
    */
   logoPath: string | null;
+  /**
+   * 收款信息里的图片（0038），branding bucket 里的对象路径，按添加顺序。
+   * 同 logoPath：不经设置表单，只由 addOrganizationPaymentImage /
+   * removeOrganizationPaymentImage 写。
+   */
+  paymentImagePaths: string[];
   /** 发票的版式选项（0036），见 lib/invoice-options.ts。 */
   invoiceLocale: InvoiceLocale;
   invoiceSignoff: InvoiceSignoff;
@@ -120,6 +126,7 @@ export async function getOrganizationSettings(
   const rows = await tx`
     select name, timezone, industry, address, fiscal_year_start_month,
            registration_number, tax_number, phone, email, payment_details, logo_path,
+           payment_image_paths,
            invoice_locale, invoice_signoff, invoice_tax_label, invoice_footer
     from organizations
     where id = ${organizationId}
@@ -139,6 +146,7 @@ export async function getOrganizationSettings(
     email: (row.email as string | null) ?? null,
     paymentDetails: (row.payment_details as string | null) ?? null,
     logoPath: (row.logo_path as string | null) ?? null,
+    paymentImagePaths: (row.payment_image_paths as string[] | null) ?? [],
     // 两列都有 CHECK；这里仍然兜一下，免得哪天 CHECK 被放宽、打印页拿到一个
     // 不认识的值而整页报错。
     invoiceLocale: isInvoiceLocale(row.invoice_locale) ? row.invoice_locale : 'en',
@@ -222,6 +230,70 @@ export async function setOrganizationLogoPath(
     update organizations set logo_path = ${logoPath} where id = ${organizationId}
   `;
   return { previousPath: (row.logo_path as string | null) ?? null };
+}
+
+/** 收款信息里已经放满了图片。 */
+export class PaymentImageLimitError extends Error {
+  constructor(max: number) {
+    super(`The payment details can hold up to ${max} images. Remove one first.`);
+    this.name = 'PaymentImageLimitError';
+  }
+}
+
+/**
+ * 往收款信息里加一张图。先锁这一行再数：两个人同时贴图，各自数到两张、
+ * 各自加成第三张，就成了四张——0038 的 CHECK 会在第二个人那里拒掉，但那
+ * 是一句裸的约束报错，这里先判才说得出人话。
+ */
+export async function addOrganizationPaymentImage(
+  tx: Tx,
+  organizationId: string,
+  imagePath: string,
+  max: number,
+): Promise<void> {
+  const rows = await tx`
+    select cardinality(payment_image_paths) as count
+    from organizations where id = ${organizationId} for update
+  `;
+  const row = rows.at(0);
+  if (!row) {
+    throw new Error(`Organization ${organizationId} not found.`);
+  }
+  if (Number(row.count) >= max) {
+    throw new PaymentImageLimitError(max);
+  }
+  await tx`
+    update organizations
+    set payment_image_paths = array_append(payment_image_paths, ${imagePath}::text)
+    where id = ${organizationId}
+  `;
+}
+
+/**
+ * 从收款信息里拿掉一张图。只认这家公司数组里确实有的路径：路径是客户端
+ * 传回来的，不查这一步的话，任何能改公司资料的人都能借这个动作删掉
+ * branding bucket 里别的对象（调用方只在 removed 为 true 时才删对象）。
+ */
+export async function removeOrganizationPaymentImage(
+  tx: Tx,
+  organizationId: string,
+  imagePath: string,
+): Promise<{ removed: boolean }> {
+  const rows = await tx`
+    select ${imagePath}::text = any(payment_image_paths) as present
+    from organizations where id = ${organizationId} for update
+  `;
+  const row = rows.at(0);
+  if (!row) {
+    throw new Error(`Organization ${organizationId} not found.`);
+  }
+  if (!row.present) return { removed: false };
+  await tx`
+    update organizations
+    set payment_image_paths = array_remove(payment_image_paths, ${imagePath}::text)
+    where id = ${organizationId}
+  `;
+  return { removed: true };
 }
 
 /**

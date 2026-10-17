@@ -18,6 +18,8 @@ export type InvoicePdfData = {
     paymentDetails: string | null;
     /** branding bucket 里的对象路径，页面自己换签名 URL。 */
     logoPath: string | null;
+    /** 收款信息里的图片（0038），同上，按添加顺序。 */
+    paymentImagePaths: string[];
     /** 发票的版式选项（0036），见 lib/invoice-options.ts。 */
     invoiceLocale: InvoiceLocale;
     invoiceSignoff: InvoiceSignoff;
@@ -90,7 +92,7 @@ export async function getInvoicePdfData(
 
   const orgRows = await tx`
     select name, address, registration_number, tax_number, phone, email,
-           payment_details, logo_path,
+           payment_details, logo_path, payment_image_paths,
            invoice_locale, invoice_signoff, invoice_tax_label, invoice_footer
     from organizations
     where id = ${organizationId}
@@ -117,6 +119,7 @@ export async function getInvoicePdfData(
       email: (orgRow.email as string | null) ?? null,
       paymentDetails: (orgRow.payment_details as string | null) ?? null,
       logoPath: (orgRow.logo_path as string | null) ?? null,
+      paymentImagePaths: (orgRow.payment_image_paths as string[] | null) ?? [],
       invoiceLocale: isInvoiceLocale(orgRow.invoice_locale) ? orgRow.invoice_locale : 'en',
       invoiceSignoff: isInvoiceSignoff(orgRow.invoice_signoff)
         ? orgRow.invoice_signoff
