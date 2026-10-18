@@ -249,17 +249,17 @@ function MonthlyTrendsChart({
           const barCenterY = padTop + plotH;
           return (
             <g key={t.month}>
-              <rect x={groupX + groupW / 2 - barW - gap / 2} y={barCenterY - incomeH} width={barW} height={incomeH || 1} style={{fill:'var(--green)',rx:1}} />
-              <rect x={groupX + groupW / 2 + gap / 2} y={barCenterY - expenseH} width={barW} height={expenseH || 1} style={{fill:'var(--red)',rx:1}} />
+              <rect x={groupX + groupW / 2 - barW - gap / 2} y={barCenterY - incomeH} width={barW} height={incomeH || 1} rx={Math.min(4, barW / 2)} style={{fill:'var(--green)'}} />
+              <rect x={groupX + groupW / 2 + gap / 2} y={barCenterY - expenseH} width={barW} height={expenseH || 1} rx={Math.min(4, barW / 2)} style={{fill:'var(--red)'}} />
               <text x={groupX + groupW / 2} y={chartH - 6} textAnchor="middle" style={{fontSize:10,fill:'var(--text-tertiary)'}}>
                 {monthLabels[Number(t.month.slice(5, 7)) - 1]}
               </text>
             </g>
           );
         })}
-        <rect x={chartW - 170} y={padTop} width="8" height="8" style={{fill:'var(--green)',rx:1}} />
+        <rect x={chartW - 170} y={padTop} width="8" height="8" rx="4" style={{fill:'var(--green)'}} />
         <text x={chartW - 156} y={padTop + 7} style={{fontSize:10,fill:'var(--text-secondary)'}}>{i18n.transaction.income}</text>
-        <rect x={chartW - 95} y={padTop} width="8" height="8" style={{fill:'var(--red)',rx:1}} />
+        <rect x={chartW - 95} y={padTop} width="8" height="8" rx="4" style={{fill:'var(--red)'}} />
         <text x={chartW - 81} y={padTop + 7} style={{fontSize:10,fill:'var(--text-secondary)'}}>{i18n.transaction.expense}</text>
       </svg>
     </section>

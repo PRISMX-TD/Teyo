@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { notFound } from 'next/navigation';
 import { PrintButton } from '@/components/invoices/print-button';
 import { InvoiceDocument } from '@/components/invoices/invoice-document';
@@ -76,9 +77,7 @@ export default async function InvoicePrintPage({
       <style>{'@page { margin: 0; }'}</style>
 
       <div className="page-header no-print">
-        <Link href={`/${orgSlug}/invoices/${id}`} className="text-button">
-          &larr; {t.common.back}
-        </Link>
+        <BackLink href={`/${orgSlug}/invoices/${id}`}>{t.common.back}</BackLink>
         <div className="page-header-actions">
           <PrintButton label={t.invoicePdf.print} />
         </div>

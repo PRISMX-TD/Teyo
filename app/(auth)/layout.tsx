@@ -10,6 +10,7 @@ export default async function AuthLayout({ children }: { children: ReactNode }) 
   return (
     <div className="auth-page">
       <header className="auth-brand">
+        <span className="brand-mark brand-mark--lg" aria-hidden="true">T</span>
         <strong>{t.brand.name}</strong>
         <p>{t.brand.tagline}</p>
       </header>

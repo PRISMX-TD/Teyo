@@ -1,4 +1,5 @@
 import { AuthForm } from '@/components/auth/auth-form';
+import { PasswordInput } from '@/components/auth/password-input';
 import { safeNextPath } from '@/lib/safe-next-path';
 import { getMessages } from '@/lib/i18n';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
@@ -22,14 +23,19 @@ export default async function ResetPasswordPage({
   return (
     <AuthForm title={t.auth.resetPassword} submitLabel={t.auth.resetPassword} action={action}>
       <label htmlFor="password">{t.account.newPassword}</label>
-      <input
+      <PasswordInput
         id="password"
         name="password"
-        type="password"
+        showLabel={t.auth.showPassword}
+        hideLabel={t.auth.hidePassword}
         autoComplete="new-password"
         minLength={8}
+        aria-describedby="password-hint"
         required
       />
+      <span id="password-hint" className="field-hint">
+        {t.account.passwordHint}
+      </span>
     </AuthForm>
   );
 }

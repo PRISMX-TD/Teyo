@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { safeNextPath } from '@/lib/safe-next-path';
 import { AuthForm } from '@/components/auth/auth-form';
+import { PasswordInput } from '@/components/auth/password-input';
 import { getMessages } from '@/lib/i18n';
 import { resolveAnonymousLocale } from '@/lib/i18n/server';
 import { signIn } from '@/server/actions/auth';
@@ -55,10 +56,11 @@ export default async function LoginPage({
       <input id="email" name="email" type="email" autoComplete="email" required />
 
       <label htmlFor="password">{t.auth.password}</label>
-      <input
+      <PasswordInput
         id="password"
         name="password"
-        type="password"
+        showLabel={t.auth.showPassword}
+        hideLabel={t.auth.hidePassword}
         autoComplete="current-password"
         required
       />

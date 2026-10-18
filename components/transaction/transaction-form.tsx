@@ -479,24 +479,27 @@ export function TransactionForm({
       {!scenario && !isEdit && !replacing ? (
         <fieldset>
           <legend>{t.transaction.kind}</legend>
-          {KINDS.map((option) => (
-            <label key={option} className="kind-option">
-              <input
-                type="radio"
-                name="kind"
-                value={option}
-                checked={kind === option}
-                onChange={() => {
-                  setKind(option);
-                  // income/expense draw from different category pools; a
-                  // categoryId picked under the old kind won't exist as an
-                  // <option> under the new one.
-                  setCategoryId('');
-                }}
-              />
-              {kindLabels[option]}
-            </label>
-          ))}
+          {/* 分段控件：三选一，一眼看到当前是哪一种。 */}
+          <div className="segmented">
+            {KINDS.map((option) => (
+              <label key={option} className="kind-option">
+                <input
+                  type="radio"
+                  name="kind"
+                  value={option}
+                  checked={kind === option}
+                  onChange={() => {
+                    setKind(option);
+                    // income/expense draw from different category pools; a
+                    // categoryId picked under the old kind won't exist as an
+                    // <option> under the new one.
+                    setCategoryId('');
+                  }}
+                />
+                {kindLabels[option]}
+              </label>
+            ))}
+          </div>
         </fieldset>
       ) : null}
 
@@ -589,28 +592,30 @@ export function TransactionForm({
         // and the handleSubmit guard above.
         <fieldset>
           <legend>{t.scenario.directionQuestion}</legend>
-          <label className="direction-option">
-            <input
-              type="radio"
-              name="direction"
-              value="in"
-              required
-              checked={direction === 'in'}
-              onChange={() => setDirection('in')}
-            />
-            {t.scenario.directionIn}
-          </label>
-          <label className="direction-option">
-            <input
-              type="radio"
-              name="direction"
-              value="out"
-              required
-              checked={direction === 'out'}
-              onChange={() => setDirection('out')}
-            />
-            {t.scenario.directionOut}
-          </label>
+          <div className="segmented">
+            <label className="direction-option">
+              <input
+                type="radio"
+                name="direction"
+                value="in"
+                required
+                checked={direction === 'in'}
+                onChange={() => setDirection('in')}
+              />
+              {t.scenario.directionIn}
+            </label>
+            <label className="direction-option">
+              <input
+                type="radio"
+                name="direction"
+                value="out"
+                required
+                checked={direction === 'out'}
+                onChange={() => setDirection('out')}
+              />
+              {t.scenario.directionOut}
+            </label>
+          </div>
         </fieldset>
       ) : kind === 'transfer' ? (
         <>

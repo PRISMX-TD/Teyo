@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { NamedList } from '@/components/settings/named-list';
 import { getMessages } from '@/lib/i18n';
 import { createCategoryFromNamedList, renameCategory, setCategoryActive } from '@/server/actions/categories';
@@ -43,9 +43,7 @@ export default async function CategoriesSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.settings.categories}</h1>
       <NamedList
         orgSlug={orgSlug}

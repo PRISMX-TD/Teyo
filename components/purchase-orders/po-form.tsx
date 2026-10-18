@@ -8,6 +8,7 @@ import { createPurchaseOrder, updatePurchaseOrderAction } from '@/server/actions
 import { todayLocalISO } from '@/lib/date';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { RateField } from '@/components/transaction/rate-field';
+import { X } from '@/components/ui/icons';
 
 type Vendor = {
   id: string;
@@ -311,7 +312,7 @@ export function PoForm({
                 className="btn-small"
                 aria-label={`${t.common.delete} ${t.purchaseOrders.items} ${index + 1}`}
               >
-                ×
+                <X size={16} weight="bold" aria-hidden="true" />
               </button>
             ) : null}
           </div>

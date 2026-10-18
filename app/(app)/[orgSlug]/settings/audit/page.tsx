@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { listAuditLogs } from '@/server/repositories/audit-logs';
@@ -29,9 +30,7 @@ export default async function AuditSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.audit.title}</h1>
 
       {rows.length === 0 ? (

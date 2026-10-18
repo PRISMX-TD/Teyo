@@ -9,6 +9,7 @@ import { addMonthsLocalISO, todayLocalISO } from '@/lib/date';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import type { BillDetail } from '@/server/repositories/bills';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
+import { X } from '@/components/ui/icons';
 
 type Contact = {
   id: string;
@@ -364,7 +365,7 @@ export function BillForm({
                   className="btn-small"
                   aria-label={`${t.common.delete} ${t.bills.items} ${index + 1}`}
                 >
-                  ×
+                  <X size={16} weight="bold" aria-hidden="true" />
                 </button>
               ) : null}
             </div>

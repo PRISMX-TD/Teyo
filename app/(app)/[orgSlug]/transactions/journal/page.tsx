@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { JournalForm } from '@/components/transaction/journal-form';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -24,7 +24,7 @@ export default async function JournalPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/transactions`} className="back-link">&larr; {t.transaction.listTitle}</Link>
+      <BackLink href={`/${orgSlug}/transactions`}>{t.transaction.listTitle}</BackLink>
       <h1>{t.journal.newTitle}</h1>
       <JournalForm
         orgSlug={orgSlug}

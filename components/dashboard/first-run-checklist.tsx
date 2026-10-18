@@ -3,6 +3,7 @@ import type { JSX } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { can, type Role } from '@/server/domain/permissions';
 import { CHECKLIST_ACTIONS } from '@/server/repositories/dashboard';
+import { CheckCircle, Circle } from '@/components/ui/icons';
 
 export type ChecklistState = {
   hasMoneyAccount: boolean;
@@ -76,7 +77,11 @@ export function FirstRunChecklist(props: {
         {items.map((item) => (
           <li key={item.key} className={item.done ? 'checklist-done' : undefined}>
             <span className="checklist-mark" aria-hidden="true">
-              {item.done ? '✓' : '○'}
+              {item.done ? (
+                <CheckCircle size={22} weight="fill" />
+              ) : (
+                <Circle size={22} />
+              )}
             </span>
             {item.done ? (
               <span>

@@ -14,9 +14,9 @@ import type { MetadataRoute } from 'next';
  * 「Brand Commitments」里唯一列出的颜色，也是这个文件与 app/icon.tsx 里
  * 原本就在用的值。globals.css 的亮色档 --accent 现在就是它本身。
  *
- * 取亮色档而不是暗色档 #34a882：图标里是白字压底色，图标不可能跟着系统
+ * 取亮色档而不是暗色档 #3ec396：图标里是白字压底色，图标不可能跟着系统
  * 主题换色，所以取两者中配白字达标的那个——白字在 #0f7a5f 上 5.29:1，
- * 在 #34a882 上只有 2.55:1（实测，算法见 globals.css 的 token 块注释）。
+ * 在 #3ec396 上只有 2.2:1（实测，算法见 globals.css 的 token 块注释）。
  *
  * background_color 取 --bg-primary 的暗色值：:root 的默认主题就是暗色
  * （globals.css 第一个 token 块），启动画面也该是它。原来的 #f7f9f8 会让

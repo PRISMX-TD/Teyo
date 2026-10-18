@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import Link from 'next/link';
+import { Plus } from '@/components/ui/icons';
 import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
@@ -29,6 +30,9 @@ export default async function HomePage({
 
   return (
     <main className="landing">
+      <span className="brand-mark brand-mark--lg" aria-hidden="true">
+        T
+      </span>
       <h1>{t.brand.name}</h1>
       <p>{t.brand.tagline}</p>
       {notice === 'no_access' ? (
@@ -40,14 +44,23 @@ export default async function HomePage({
         <ul>
           {orgs.map((org) => (
             <li key={org.id}>
-              <Link href={`/${org.slug}`}>{org.name}</Link>
+              <Link href={`/${org.slug}`}>
+                {/* 公司名首字当头像：几家公司并排时，认字头比读全名快。 */}
+                <span className="avatar avatar--sm" aria-hidden="true">
+                  {(Array.from(org.name.trim())[0] ?? '?').toUpperCase()}
+                </span>
+                <span>{org.name}</span>
+              </Link>
             </li>
           ))}
         </ul>
       </nav>
       {/* 不带 new=1 的话，/onboarding 会把已有公司的人直接送回第一家。 */}
-      <p style={{ marginTop: 'var(--space-6)' }}>
-        <Link href="/onboarding?new=1">{t.nav.newCompany}</Link>
+      <p className="landing-new">
+        <Link href="/onboarding?new=1">
+          <Plus size={16} weight="bold" aria-hidden="true" />
+          {t.nav.newCompany}
+        </Link>
       </p>
     </main>
   );

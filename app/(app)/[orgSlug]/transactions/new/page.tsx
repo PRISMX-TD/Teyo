@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { ScenarioPicker } from '@/components/transaction/scenario-picker';
 import { TransactionForm } from '@/components/transaction/transaction-form';
 import { getMessages, interpolate, type Locale } from '@/lib/i18n';
@@ -229,9 +229,7 @@ async function ReplaceEntry({
   if (!replaceable || !loaded || !original || !kind) {
     return (
       <>
-        <Link href={`/${orgSlug}/transactions/${originalId}`} className="back-link">
-          &larr; {t.common.back}
-        </Link>
+        <BackLink href={`/${orgSlug}/transactions/${originalId}`}>{t.common.back}</BackLink>
         <p>{t.transaction.replaceUnavailable}</p>
       </>
     );
@@ -246,9 +244,7 @@ async function ReplaceEntry({
 
   return (
     <>
-      <Link href={`/${orgSlug}/transactions/${originalId}`} className="back-link">
-        &larr; {t.transaction.editTitle}
-      </Link>
+      <BackLink href={`/${orgSlug}/transactions/${originalId}`}>{t.transaction.editTitle}</BackLink>
       <h1>{interpolate(t.transaction.replaceTitle, { kind: kindLabels[kind] })}</h1>
       <p className="field-hint">{t.transaction.replaceExplain}</p>
       <TransactionForm

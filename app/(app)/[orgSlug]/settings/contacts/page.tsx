@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { ContactList } from '@/components/settings/contact-list';
 import { getMessages } from '@/lib/i18n';
 import { createContact, updateContactAction, toggleContactActive } from '@/server/actions/contacts';
@@ -36,9 +36,7 @@ export default async function ContactsSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.settings.contacts}</h1>
       <ContactList
         orgSlug={orgSlug}

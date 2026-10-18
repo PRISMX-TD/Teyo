@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { notFound } from 'next/navigation';
 import { AssetForm } from '@/components/fixed-assets/asset-form';
 import { DepreciationSchedule } from '@/components/fixed-assets/depreciation-schedule';
@@ -77,9 +77,7 @@ export default async function FixedAssetDetailPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/fixed-assets`} className="back-link">
-        &larr; {t.fixedAssets.title}
-      </Link>
+      <BackLink href={`/${orgSlug}/fixed-assets`}>{t.fixedAssets.title}</BackLink>
       <h1>{t.fixedAssets.title}</h1>
       <DepreciationSchedule
         orgSlug={orgSlug}

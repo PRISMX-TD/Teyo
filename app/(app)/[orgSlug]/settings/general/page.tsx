@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { redirect } from 'next/navigation';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { INVOICE_LOCALES, INVOICE_LOCALE_NAMES } from '@/lib/invoice-options';
@@ -60,9 +60,7 @@ export default async function GeneralSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.settings.general}</h1>
 
       {can(context.role, 'period:lock') && (

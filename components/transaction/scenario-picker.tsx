@@ -57,7 +57,7 @@ export function ScenarioPicker({ orgSlug, locale }: Props) {
           </Link>
         ))}
       </div>
-      <p>
+      <p className="scenario-skip">
         <Link href={`/${orgSlug}/transactions/new?scenario=advanced`}>{t.scenario.useAdvanced}</Link>
       </p>
     </>

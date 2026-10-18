@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -29,9 +29,7 @@ export default async function YearEndPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.yearEnd.title}</h1>
 
       <YearEndPanel

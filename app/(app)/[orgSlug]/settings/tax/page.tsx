@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { TaxRateList } from '@/components/settings/tax-rate-list';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -22,9 +22,7 @@ export default async function TaxSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.tax.title}</h1>
       <TaxRateList
         orgSlug={orgSlug}

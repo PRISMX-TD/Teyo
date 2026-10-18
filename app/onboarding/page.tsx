@@ -1,5 +1,5 @@
 import { redirect } from 'next/navigation';
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { requireUserId } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
@@ -52,9 +52,7 @@ export default async function OnboardingPage({
     <main className="onboarding-page">
       {addingAnother ? (
         // 返回 '/'：多家公司时列出来选，只有一家时直接回到那一家（见 app/page.tsx）。
-        <Link href="/" className="back-link">
-          {t.onboarding.back}
-        </Link>
+        <BackLink href="/">{t.onboarding.back}</BackLink>
       ) : null}
       {noAccess ? (
         <p role="status" className="form-error">

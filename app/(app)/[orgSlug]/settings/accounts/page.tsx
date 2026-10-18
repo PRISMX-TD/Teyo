@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { CoAList } from '@/components/settings/coa-list';
 import { getMessages } from '@/lib/i18n';
 import { createAccount, renameAccount, setAccountActive } from '@/server/actions/accounts';
@@ -33,9 +33,7 @@ export default async function AccountsSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.settings.accounts}</h1>
       <CoAList
         orgSlug={orgSlug}

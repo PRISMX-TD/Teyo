@@ -10,6 +10,7 @@ import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import type { InvoiceDetail } from '@/server/repositories/invoices';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
 import { MAX_INVOICE_REFERENCE_LENGTH } from '@/lib/invoice-options';
+import { X } from '@/components/ui/icons';
 
 type Contact = {
   id: string;
@@ -309,7 +310,7 @@ export function InvoiceForm({
                   // 「删掉第几行」的。
                   aria-label={`${t.common.delete} ${t.invoices.items} ${index + 1}`}
                 >
-                  ×
+                  <X size={16} weight="bold" aria-hidden="true" />
                 </button>
               ) : null}
             </div>

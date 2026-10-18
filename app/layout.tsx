@@ -30,14 +30,14 @@ export const metadata: Metadata = {
  * 收敛的方向选绿不选蓝：#0f7a5f 是 PRODUCT.md「Brand Commitments」里唯一
  * 列出的颜色，也是 icon/manifest 里已经存在的既成事实。现在 globals.css 的
  * --accent 亮色档就是它本身，暗色档是它在暗底上提亮到达标对比度的
- * #34a882（6.66:1，算法与实测见 globals.css 的 token 块注释）。
+ * #3ec396（卡片上 7.66:1，算法与实测见 globals.css 的 token 块注释）。
  *
  * 统一取强调色而不是底色：themeColor 染的是浏览器工具栏与任务切换器里的
  * 那一条，它在视觉上属于"这个应用的颜色"，不是"这一页的背景"。
  */
 export const viewport: Viewport = {
   themeColor: [
-    { media: '(prefers-color-scheme: dark)', color: '#34a882' },
+    { media: '(prefers-color-scheme: dark)', color: '#3ec396' },
     { media: '(prefers-color-scheme: light)', color: '#0f7a5f' },
   ],
   width: 'device-width',

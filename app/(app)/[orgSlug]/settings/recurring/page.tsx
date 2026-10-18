@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { RecurringList } from '@/components/settings/recurring-list';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -47,9 +47,7 @@ export default async function RecurringSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.recurring.title}</h1>
       <RecurringList
         orgSlug={orgSlug}

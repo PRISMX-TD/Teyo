@@ -3,6 +3,7 @@ import { getMessages } from '@/lib/i18n';
 import { resolveOrgContext } from '@/server/auth/guard';
 import { can, type Action } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
+import { NavIcon, type NavIconName } from '@/components/shell/nav-icons';
 
 export default async function SettingsIndexPage({
   params,
@@ -15,25 +16,25 @@ export default async function SettingsIndexPage({
   const t = getMessages(locale);
 
   // 侧栏的「设置」指向这里，所以这一页必须存在；它只是分流，不做任何写操作。
-  const sections: Array<{ href: string; label: string; action: Action }> = [
-    { href: 'general', label: t.settings.general, action: 'account:manage' },
-    { href: 'members', label: t.settings.members, action: 'member:manage' },
-    { href: 'categories', label: t.settings.categories, action: 'category:manage' },
-    { href: 'accounts', label: t.settings.accounts, action: 'account:manage' },
-    { href: 'recurring', label: t.settings.recurring, action: 'transaction:create' },
-    { href: 'contacts', label: t.settings.contacts, action: 'account:manage' },
+  const sections: Array<{ href: string; label: string; icon: NavIconName; action: Action }> = [
+    { href: 'general', label: t.settings.general, icon: 'general', action: 'account:manage' },
+    { href: 'members', label: t.settings.members, icon: 'members', action: 'member:manage' },
+    { href: 'categories', label: t.settings.categories, icon: 'categories', action: 'category:manage' },
+    { href: 'accounts', label: t.settings.accounts, icon: 'accounts', action: 'account:manage' },
+    { href: 'recurring', label: t.settings.recurring, icon: 'recurring', action: 'transaction:create' },
+    { href: 'contacts', label: t.settings.contacts, icon: 'contacts', action: 'account:manage' },
     // settings/inventory 与 settings/tax 两页一直是完整可用的，但这个数组里
     // 没有它们，侧栏里也没有——除了手敲 URL 之外走不到。权限跟着它们各自
     // requirePermission 的那一个走（两页都是 account:manage），否则这里会
     // 出现一个点进去就 403 的入口。
-    { href: 'inventory', label: t.nav.inventory, action: 'account:manage' },
-    { href: 'tax', label: t.nav.tax, action: 'account:manage' },
+    { href: 'inventory', label: t.nav.inventory, icon: 'inventory', action: 'account:manage' },
+    { href: 'tax', label: t.nav.tax, icon: 'tax', action: 'account:manage' },
     // 年结用 period:lock，与 0024 迁移里 fiscal_year_closings 的 owner-only
     // 策略对齐——理由见 server/actions/year-end.ts 顶部。这里必须用同一个
     // Action，否则 admin 会看到一个点进去就 403 的入口。
-    { href: 'year-end', label: t.settings.yearEnd, action: 'period:lock' },
+    { href: 'year-end', label: t.settings.yearEnd, icon: 'yearEnd', action: 'period:lock' },
     // 与审计页的 requirePermission('audit:read') 对齐（audit_logs 的 RLS 只放行 owner/admin）。
-    { href: 'audit', label: t.settings.audit, action: 'audit:read' },
+    { href: 'audit', label: t.settings.audit, icon: 'audit', action: 'audit:read' },
   ];
 
   const visible = sections.filter((section) => can(context.role, section.action));
@@ -42,10 +43,13 @@ export default async function SettingsIndexPage({
     <>
       <h1>{t.nav.settings}</h1>
 
-      <nav className="settings-index">
+      <nav className="settings-index" aria-label={t.nav.settings}>
         {visible.map((section) => (
           <Link key={section.href} href={`/${orgSlug}/settings/${section.href}`}>
-            {section.label}
+            <span className="row-icon">
+              <NavIcon name={section.icon} size={18} />
+            </span>
+            <span className="row-label">{section.label}</span>
           </Link>
         ))}
       </nav>

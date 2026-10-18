@@ -4,6 +4,8 @@ import { usePathname } from 'next/navigation';
 import Link from 'next/link';
 import type { Messages } from '@/lib/i18n';
 import { can, type Role } from '@/server/domain/permissions';
+import { Plus } from '@/components/ui/icons';
+import { NavIcon, type NavIconName } from './nav-icons';
 
 type Props = {
   orgSlug: string;
@@ -17,7 +19,7 @@ type Props = {
 // My account 整个被推出视口、点不到。Settings、主题切换、My account 现在都
 // 挂在 More 页面里（app/(app)/[orgSlug]/more/page.tsx），第一版复测确认
 // 5 项在 320px 和 375px 都留有余量。
-const NAV_ITEMS: { label: keyof Messages['nav']; href: (slug: string) => string }[] = [
+const NAV_ITEMS: { label: keyof Messages['nav'] & NavIconName; href: (slug: string) => string }[] = [
   { label: 'overview', href: (slug) => `/${slug}` },
   { label: 'transactions', href: (slug) => `/${slug}/transactions` },
   { label: 'reports', href: (slug) => `/${slug}/reports` },
@@ -41,36 +43,44 @@ export function FloatingDock({ orgSlug, i18n, role }: Props) {
     pathname.startsWith(`/${orgSlug}/`) &&
     !NAV_ITEMS.some((item) => item.label !== 'more' && matches(item.href(orgSlug)));
 
+  const tabs = NAV_ITEMS.map((item) => {
+    const href = item.href(orgSlug);
+    const isActive = matches(href);
+    // 只有真的停在 /more 上才是 aria-current="page"；从 More 分流进去的
+    // 子页只是「在这个分支里」，用 'true' 而不是冒充当前页。
+    const isBranch = !isActive && href === moreHref && underMore;
+    return (
+      <Link
+        key={item.label}
+        href={href}
+        aria-current={isActive ? 'page' : isBranch ? 'true' : undefined}
+        className={isActive || isBranch ? 'active' : ''}
+      >
+        <NavIcon name={item.label} active={isActive || isBranch} size={24} />
+        <span>{i18n.nav[item.label]}</span>
+      </Link>
+    );
+  });
+
+  // 「记一笔」放在正中间：这是整个应用最常做的一件事，拇指在屏幕下沿
+  // 最容易够到的就是正中。viewer 没有 transaction:create，这一格对它
+  // 只会是一个 403，干脆不画，其余四格平分整行。
+  const cta = can(role, 'transaction:create') ? (
+    <Link
+      key="cta"
+      href={`/${orgSlug}/transactions/new`}
+      className="topbar-cta"
+      aria-label={i18n.transaction.newTitle}
+    >
+      <Plus className="nav-icon" size={26} weight="bold" aria-hidden="true" />
+    </Link>
+  ) : null;
+
   return (
     <nav className="floating-dock" aria-label={i18n.nav.primaryNavigation}>
-      {NAV_ITEMS.map((item) => {
-        const href = item.href(orgSlug);
-        const isActive = matches(href);
-        // 只有真的停在 /more 上才是 aria-current="page"；从 More 分流进去的
-        // 子页只是「在这个分支里」，用 'true' 而不是冒充当前页。
-        const isBranch = !isActive && href === moreHref && underMore;
-        return (
-          <Link
-            key={item.label}
-            href={href}
-            aria-current={isActive ? 'page' : isBranch ? 'true' : undefined}
-            className={isActive || isBranch ? 'active' : ''}
-          >
-            {i18n.nav[item.label]}
-          </Link>
-        );
-      })}
-
-      {/* viewer 没有 transaction:create，这一格对它只会是一个 403。 */}
-      {can(role, 'transaction:create') ? (
-        <Link
-          href={`/${orgSlug}/transactions/new`}
-          className="topbar-cta"
-          aria-label={i18n.transaction.newTitle}
-        >
-          +
-        </Link>
-      ) : null}
+      {tabs.slice(0, 2)}
+      {cta}
+      {tabs.slice(2)}
     </nav>
   );
 }

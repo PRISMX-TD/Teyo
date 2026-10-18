@@ -4,6 +4,8 @@ import { usePathname, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
 import { can, type Action, type Role } from '@/server/domain/permissions';
+import { Plus } from '@/components/ui/icons';
+import { NavIcon, type NavIconName } from './nav-icons';
 import { useTheme } from './use-theme';
 
 type Org = { id: string; slug: string; name: string };
@@ -20,7 +22,7 @@ type Props = {
 type NavGroup = {
   label: string;
   // action 与对应页面 requirePermission 的那一个保持一致；留空表示任何成员可见。
-  items: { href: string; label: string; action?: Action }[];
+  items: { href: string; label: string; icon: NavIconName; action?: Action }[];
 };
 
 export function Sidebar({ orgSlug, i18n, orgs, role }: Props) {
@@ -31,48 +33,48 @@ export function Sidebar({ orgSlug, i18n, orgs, role }: Props) {
 
   const allGroups: NavGroup[] = [
     {
-      label: i18n.settings.general,
+      label: i18n.nav.groupDaily,
       items: [
-        { href: `/${orgSlug}`, label: i18n.nav.overview, action: 'transaction:read' },
-        { href: `/${orgSlug}/transactions`, label: i18n.nav.transactions, action: 'transaction:read' },
+        { href: `/${orgSlug}`, label: i18n.nav.overview, icon: 'overview', action: 'transaction:read' },
+        { href: `/${orgSlug}/transactions`, label: i18n.nav.transactions, icon: 'transactions', action: 'transaction:read' },
         // Task 16：待确认队列——「不确定」场景卡片记下的条目最终要有地方去处理，
         // 挂在「流水」组下而不是单开一个顶级分组，因为它本质上是交易列表的一个过滤视图。
-        { href: `/${orgSlug}/uncertain`, label: i18n.uncertain.title, action: 'transaction:read' },
+        { href: `/${orgSlug}/uncertain`, label: i18n.uncertain.title, icon: 'uncertain', action: 'transaction:read' },
       ],
     },
     {
-      label: i18n.nav.invoices,
+      label: i18n.nav.groupDocuments,
       items: [
-        { href: `/${orgSlug}/invoices`, label: i18n.nav.invoices, action: 'transaction:read' },
-        { href: `/${orgSlug}/payments`, label: i18n.nav.payments, action: 'transaction:read' },
-        { href: `/${orgSlug}/credit-notes`, label: i18n.nav.creditNotes, action: 'transaction:read' },
-        { href: `/${orgSlug}/purchase-orders`, label: i18n.nav.purchaseOrders, action: 'transaction:read' },
-        { href: `/${orgSlug}/bills`, label: i18n.nav.bills, action: 'transaction:read' },
+        { href: `/${orgSlug}/invoices`, label: i18n.nav.invoices, icon: 'invoices', action: 'transaction:read' },
+        { href: `/${orgSlug}/payments`, label: i18n.nav.payments, icon: 'payments', action: 'transaction:read' },
+        { href: `/${orgSlug}/credit-notes`, label: i18n.nav.creditNotes, icon: 'creditNotes', action: 'transaction:read' },
+        { href: `/${orgSlug}/purchase-orders`, label: i18n.nav.purchaseOrders, icon: 'purchaseOrders', action: 'transaction:read' },
+        { href: `/${orgSlug}/bills`, label: i18n.nav.bills, icon: 'bills', action: 'transaction:read' },
       ],
     },
     {
-      label: i18n.nav.reports,
+      label: i18n.nav.groupBooks,
       items: [
-        { href: `/${orgSlug}/reports`, label: i18n.nav.reports, action: 'transaction:read' },
-        { href: `/${orgSlug}/general-ledger`, label: i18n.nav.generalLedger, action: 'transaction:read' },
-        { href: `/${orgSlug}/reconciliation`, label: i18n.nav.reconciliation, action: 'transaction:edit:any' },
-        { href: `/${orgSlug}/budgets`, label: i18n.nav.budgets, action: 'account:manage' },
+        { href: `/${orgSlug}/reports`, label: i18n.nav.reports, icon: 'reports', action: 'transaction:read' },
+        { href: `/${orgSlug}/general-ledger`, label: i18n.nav.generalLedger, icon: 'generalLedger', action: 'transaction:read' },
+        { href: `/${orgSlug}/reconciliation`, label: i18n.nav.reconciliation, icon: 'reconciliation', action: 'transaction:edit:any' },
+        { href: `/${orgSlug}/budgets`, label: i18n.nav.budgets, icon: 'budgets', action: 'account:manage' },
       ],
     },
     {
-      label: i18n.nav.projects,
+      label: i18n.nav.groupTools,
       items: [
-        { href: `/${orgSlug}/projects`, label: i18n.nav.projects, action: 'transaction:read' },
-        { href: `/${orgSlug}/bank-import`, label: i18n.nav.bankImport, action: 'transaction:create' },
-        { href: `/${orgSlug}/fixed-assets`, label: i18n.nav.fixedAssets, action: 'account:manage' },
-        { href: `/${orgSlug}/export`, label: i18n.nav.export, action: 'report:export' },
+        { href: `/${orgSlug}/projects`, label: i18n.nav.projects, icon: 'projects', action: 'transaction:read' },
+        { href: `/${orgSlug}/bank-import`, label: i18n.nav.bankImport, icon: 'bankImport', action: 'transaction:create' },
+        { href: `/${orgSlug}/fixed-assets`, label: i18n.nav.fixedAssets, icon: 'fixedAssets', action: 'account:manage' },
+        { href: `/${orgSlug}/export`, label: i18n.nav.export, icon: 'export', action: 'report:export' },
       ],
     },
     {
       label: i18n.nav.settings,
       items: [
-        { href: `/${orgSlug}/settings`, label: i18n.nav.settings },
-        { href: `/${orgSlug}/settings/tax`, label: i18n.nav.tax, action: 'account:manage' },
+        { href: `/${orgSlug}/settings`, label: i18n.nav.settings, icon: 'settings' },
+        { href: `/${orgSlug}/settings/tax`, label: i18n.nav.tax, icon: 'tax', action: 'account:manage' },
       ],
     },
   ];
@@ -106,44 +108,48 @@ export function Sidebar({ orgSlug, i18n, orgs, role }: Props) {
           「一个人可以管几套账」。现在公司名常驻，切换下拉只在真的有得切
           的时候才追加在它下面。 */}
       <div className="sidebar-masthead">
-        <span className="sidebar-brand">{i18n.brand.name}</span>
-        {currentOrg ? (
-          <span className="sidebar-org" title={currentOrg.name}>
-            {currentOrg.name}
-          </span>
-        ) : null}
-        {orgs.length > 1 ? (
-          <>
-            <label className="visually-hidden" htmlFor="sidebar-org-select">
-              {i18n.nav.switchCompany}
-            </label>
-            <select
-              id="sidebar-org-select"
-              className="sidebar-org-select"
-              value={orgSlug}
-              onChange={(e) => {
-                if (e.target.value !== orgSlug) router.push(`/${e.target.value}`);
-              }}
-            >
-              {orgs.map((org) => (
-                <option key={org.id} value={org.slug}>
-                  {org.name}
-                </option>
-              ))}
-            </select>
-          </>
-        ) : null}
+        <span className="brand-mark" aria-hidden="true">T</span>
+        <div className="sidebar-identity">
+          <span className="sidebar-brand">{i18n.brand.name}</span>
+          {currentOrg ? (
+            <span className="sidebar-org" title={currentOrg.name}>
+              {currentOrg.name}
+            </span>
+          ) : null}
+        </div>
       </div>
+      {orgs.length > 1 ? (
+        <>
+          <label className="visually-hidden" htmlFor="sidebar-org-select">
+            {i18n.nav.switchCompany}
+          </label>
+          <select
+            id="sidebar-org-select"
+            className="sidebar-org-select"
+            value={orgSlug}
+            onChange={(e) => {
+              if (e.target.value !== orgSlug) router.push(`/${e.target.value}`);
+            }}
+          >
+            {orgs.map((org) => (
+              <option key={org.id} value={org.slug}>
+                {org.name}
+              </option>
+            ))}
+          </select>
+        </>
+      ) : null}
 
       {can(role, 'transaction:create') ? (
         <Link href={`/${orgSlug}/transactions/new`} className="sidebar-action">
+          <Plus size={16} weight="bold" aria-hidden="true" />
           {i18n.transaction.newTitle}
         </Link>
       ) : null}
 
-      <nav className="sidebar-nav">
-        {groups.map((group, gi) => (
-          <div key={gi} className="sidebar-group">
+      <nav className="sidebar-nav" aria-label={i18n.nav.primaryNavigation}>
+        {groups.map((group) => (
+          <div key={group.label} className="sidebar-group">
             <div className="sidebar-group-label">{group.label}</div>
             {group.items.map((link) => {
               const isActive = link.href === activeHref;
@@ -157,7 +163,8 @@ export function Sidebar({ orgSlug, i18n, orgs, role }: Props) {
                   aria-current={isActive ? 'page' : undefined}
                   className={isActive ? 'active' : ''}
                 >
-                  {link.label}
+                  <NavIcon name={link.icon} active={isActive} size={19} />
+                  <span>{link.label}</span>
                 </Link>
               );
             })}
@@ -166,24 +173,33 @@ export function Sidebar({ orgSlug, i18n, orgs, role }: Props) {
       </nav>
 
       <div className="sidebar-footer">
-        {/* 原来是 `theme === 'dark' ? 'Light' : 'Dark'`：同一个功能在 /more
-            页面走的是 t.nav.toggleTheme，这里却是两段写死的英文。文案统一
-            到 catalog，当前状态交给 aria-pressed 表达（「深色模式开着吗」
-            正是一个双态开关，不是两个不同的按钮）。 */}
+        {/* 一个 iOS 式的开关。文案统一走 catalog（「深色模式」），开没开交给
+            aria-pressed：读屏器念「深色模式，切换按钮，已按下」，与看到的
+            开关是同一个状态。 */}
         <button
           type="button"
           className="theme-toggle"
           aria-pressed={theme === 'dark'}
           onClick={toggle}
         >
+          <NavIcon name="theme" size={18} />
           <span>{i18n.nav.toggleTheme}</span>
-          <span aria-hidden="true">{theme === 'dark' ? '☀' : '☾'}</span>
+          <span className="theme-switch" aria-hidden="true" />
         </button>
-        <Link href="/account">{i18n.nav.account}</Link>
-        <Link href="/">{i18n.nav.switchCompany}</Link>
+        <Link href="/account">
+          <NavIcon name="account" size={18} />
+          <span>{i18n.nav.account}</span>
+        </Link>
+        <Link href="/">
+          <NavIcon name="switchCompany" size={18} />
+          <span>{i18n.nav.switchCompany}</span>
+        </Link>
         {/* 只有一家公司时 '/' 会直接跳回这家（见 app/page.tsx），这里是唯一
             能建第二家的入口；new=1 让 /onboarding 不把已有公司的人送走。 */}
-        <Link href="/onboarding?new=1">{i18n.nav.newCompany}</Link>
+        <Link href="/onboarding?new=1">
+          <NavIcon name="newCompany" size={18} />
+          <span>{i18n.nav.newCompany}</span>
+        </Link>
       </div>
     </aside>
   );

@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { AuthForm } from '@/components/auth/auth-form';
 import { getMessages, type Locale } from '@/lib/i18n';
 import { signUp } from '@/server/actions/auth';
+import { PasswordInput } from '@/components/auth/password-input';
 
 /**
  * 注册页在有账号之前没有 locale 可解析——app_users 那行还不存在——所以
@@ -70,10 +71,11 @@ export function SignupForm({
       <input id="email" name="email" type="email" autoComplete="email" required />
 
       <label htmlFor="password">{t.auth.password}</label>
-      <input
+      <PasswordInput
         id="password"
         name="password"
-        type="password"
+        showLabel={t.auth.showPassword}
+        hideLabel={t.auth.hidePassword}
         autoComplete="new-password"
         minLength={8}
         required

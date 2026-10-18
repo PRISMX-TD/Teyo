@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { ZodError } from 'zod';
 import { MembersPanel, type MemberActionResult } from '@/components/settings/members-panel';
 import { getMessages } from '@/lib/i18n';
@@ -56,9 +56,7 @@ export default async function MembersSettingsPage({
 
   return (
     <>
-      <Link href={`/${orgSlug}/settings`} className="back-link">
-        &larr; {t.nav.settings}
-      </Link>
+      <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
       <h1>{t.members.title}</h1>
       <MembersPanel
         members={members}

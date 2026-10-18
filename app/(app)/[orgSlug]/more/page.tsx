@@ -4,10 +4,11 @@ import { resolveOrgContext } from '@/server/auth/guard';
 import { can, type Action } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { ThemeToggleButton } from '@/components/shell/theme-toggle-button';
+import { NavIcon, type NavIconName } from '@/components/shell/nav-icons';
 
 // action 留空表示不做权限过滤——settings/page.tsx（分流页本身）和
 // /account 对任何已登录成员都可见，只是各自内部按角色再筛一遍要展示什么。
-type MoreLink = { href: string; label: string; action?: Action };
+type MoreLink = { href: string; label: string; icon: NavIconName; action?: Action };
 type MoreGroup = { label: string; items: MoreLink[] };
 
 /**
@@ -38,34 +39,34 @@ export default async function MorePage({
 
   const groups: MoreGroup[] = [
     {
-      label: t.settings.general,
-      items: [{ href: `/${orgSlug}/uncertain`, label: t.uncertain.title, action: 'transaction:read' }],
+      label: t.nav.groupDaily,
+      items: [{ href: `/${orgSlug}/uncertain`, label: t.uncertain.title, icon: 'uncertain', action: 'transaction:read' }],
     },
     {
-      label: t.nav.invoices,
+      label: t.nav.groupDocuments,
       items: [
-        { href: `/${orgSlug}/invoices`, label: t.nav.invoices, action: 'transaction:read' },
-        { href: `/${orgSlug}/payments`, label: t.nav.payments, action: 'transaction:read' },
-        { href: `/${orgSlug}/credit-notes`, label: t.nav.creditNotes, action: 'transaction:read' },
-        { href: `/${orgSlug}/purchase-orders`, label: t.nav.purchaseOrders, action: 'transaction:read' },
-        { href: `/${orgSlug}/bills`, label: t.nav.bills, action: 'transaction:read' },
+        { href: `/${orgSlug}/invoices`, label: t.nav.invoices, icon: 'invoices', action: 'transaction:read' },
+        { href: `/${orgSlug}/payments`, label: t.nav.payments, icon: 'payments', action: 'transaction:read' },
+        { href: `/${orgSlug}/credit-notes`, label: t.nav.creditNotes, icon: 'creditNotes', action: 'transaction:read' },
+        { href: `/${orgSlug}/purchase-orders`, label: t.nav.purchaseOrders, icon: 'purchaseOrders', action: 'transaction:read' },
+        { href: `/${orgSlug}/bills`, label: t.nav.bills, icon: 'bills', action: 'transaction:read' },
       ],
     },
     {
-      label: t.nav.reports,
+      label: t.nav.groupBooks,
       items: [
-        { href: `/${orgSlug}/general-ledger`, label: t.nav.generalLedger, action: 'transaction:read' },
-        { href: `/${orgSlug}/reconciliation`, label: t.nav.reconciliation, action: 'transaction:edit:any' },
-        { href: `/${orgSlug}/budgets`, label: t.nav.budgets, action: 'account:manage' },
+        { href: `/${orgSlug}/general-ledger`, label: t.nav.generalLedger, icon: 'generalLedger', action: 'transaction:read' },
+        { href: `/${orgSlug}/reconciliation`, label: t.nav.reconciliation, icon: 'reconciliation', action: 'transaction:edit:any' },
+        { href: `/${orgSlug}/budgets`, label: t.nav.budgets, icon: 'budgets', action: 'account:manage' },
       ],
     },
     {
-      label: t.nav.projects,
+      label: t.nav.groupTools,
       items: [
-        { href: `/${orgSlug}/projects`, label: t.nav.projects, action: 'transaction:read' },
-        { href: `/${orgSlug}/bank-import`, label: t.nav.bankImport, action: 'transaction:create' },
-        { href: `/${orgSlug}/fixed-assets`, label: t.nav.fixedAssets, action: 'account:manage' },
-        { href: `/${orgSlug}/export`, label: t.nav.export, action: 'report:export' },
+        { href: `/${orgSlug}/projects`, label: t.nav.projects, icon: 'projects', action: 'transaction:read' },
+        { href: `/${orgSlug}/bank-import`, label: t.nav.bankImport, icon: 'bankImport', action: 'transaction:create' },
+        { href: `/${orgSlug}/fixed-assets`, label: t.nav.fixedAssets, icon: 'fixedAssets', action: 'account:manage' },
+        { href: `/${orgSlug}/export`, label: t.nav.export, icon: 'export', action: 'report:export' },
       ],
     },
     {
@@ -73,8 +74,8 @@ export default async function MorePage({
       items: [
         // 分流页本身不设权限门槛——它只是分流，settings/page.tsx 再按角色筛一遍
         // 具体子页（同样的道理见该文件顶部的注释）。
-        { href: `/${orgSlug}/settings`, label: t.nav.settings },
-        { href: `/${orgSlug}/settings/tax`, label: t.nav.tax, action: 'account:manage' },
+        { href: `/${orgSlug}/settings`, label: t.nav.settings, icon: 'settings' },
+        { href: `/${orgSlug}/settings/tax`, label: t.nav.tax, icon: 'tax', action: 'account:manage' },
       ],
     },
   ];
@@ -92,12 +93,15 @@ export default async function MorePage({
 
       <nav aria-label={t.nav.more}>
         {visibleGroups.map((group) => (
-          <section key={group.label} style={{ marginBottom: 'var(--space-6)' }}>
+          <section key={group.label} className="settings-group">
             <h2 className="coa-section-title">{group.label}</h2>
             <div className="settings-index">
               {group.items.map((item) => (
                 <Link key={item.href} href={item.href}>
-                  {item.label}
+                  <span className="row-icon">
+                    <NavIcon name={item.icon} size={18} />
+                  </span>
+                  <span className="row-label">{item.label}</span>
                 </Link>
               ))}
             </div>
@@ -105,15 +109,30 @@ export default async function MorePage({
         ))}
 
         {/* 从 dock 搬过来的两项：任何已登录成员都能看，不走 can() 过滤。 */}
-        <section style={{ marginBottom: 'var(--space-6)' }}>
-          <h2 className="coa-section-title">{t.nav.account}</h2>
+        <section className="settings-group">
+          <h2 className="coa-section-title">{t.nav.groupAccount}</h2>
           <div className="settings-index">
-            <Link href="/account">{t.nav.account}</Link>
+            <Link href="/account">
+              <span className="row-icon">
+                <NavIcon name="account" size={18} />
+              </span>
+              <span className="row-label">{t.nav.account}</span>
+            </Link>
             {/* 公司切换。'/' 会按公司数量分流：多家时列出来选，一家时直接
                 跳回去（见 app/page.tsx）。 */}
-            <Link href="/">{t.nav.switchCompany}</Link>
+            <Link href="/">
+              <span className="row-icon">
+                <NavIcon name="switchCompany" size={18} />
+              </span>
+              <span className="row-label">{t.nav.switchCompany}</span>
+            </Link>
             {/* 再建一家公司。侧栏在手机上不显示，这里要有同一个入口。 */}
-            <Link href="/onboarding?new=1">{t.nav.newCompany}</Link>
+            <Link href="/onboarding?new=1">
+              <span className="row-icon">
+                <NavIcon name="newCompany" size={18} />
+              </span>
+              <span className="row-label">{t.nav.newCompany}</span>
+            </Link>
             <ThemeToggleButton label={t.nav.toggleTheme} />
           </div>
         </section>

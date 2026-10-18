@@ -7,6 +7,7 @@ import { getMessages } from '@/lib/i18n';
 import { createCreditNote, updateCreditNoteAction } from '@/server/actions/credit-notes';
 import { todayLocalISO } from '@/lib/date';
 import { RateField } from '@/components/transaction/rate-field';
+import { X } from '@/components/ui/icons';
 
 type Contact = { id: string; name: string };
 type InvoiceRef = { id: string; invoice_number: string; contact_id: string; currency: string };
@@ -318,8 +319,13 @@ export function CreditNoteForm({
               required
             />
             {items.length > 1 ? (
-              <button type="button" onClick={() => removeItem(index)} className="btn-small">
-                ×
+              <button
+                type="button"
+                onClick={() => removeItem(index)}
+                className="btn-small"
+                aria-label={`${i18n.common.delete} ${i18n.invoices.items} ${index + 1}`}
+              >
+                <X size={16} weight="bold" aria-hidden="true" />
               </button>
             ) : null}
           </div>
