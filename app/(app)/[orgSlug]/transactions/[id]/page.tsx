@@ -13,7 +13,11 @@ import {
   type TransactionSource,
 } from '@/server/repositories/transactions';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
-import { listSelectableCategories, type CategoryRow } from '@/server/repositories/categories';
+import {
+  listRecentCategories,
+  listSelectableCategories,
+  type CategoryRow,
+} from '@/server/repositories/categories';
 import { listAttachments } from '@/server/repositories/attachments';
 import { listProjects } from '@/server/repositories/projects';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
@@ -47,20 +51,35 @@ export default async function TransactionDetailPage({
   let attachments: Awaited<ReturnType<typeof listAttachments>>;
   let allProjects: Awaited<ReturnType<typeof listProjects>>;
   let source: TransactionSource | null;
+  // 编辑表单的常用分类芯片，和新建时同一份。原来编辑页不传，表单上就剩
+  // 一句「这笔钱是做什么用的？」底下什么也没有。
+  let recentIncomeCategories: CategoryRow[];
+  let recentExpenseCategories: CategoryRow[];
 
   try {
-    [row, accounts, incomeCategories, expenseCategories, attachments, allProjects, source] =
-      await withTransaction(context.userId, async (tx) =>
-        Promise.all([
-          getTransactionDetail(tx, context.organizationId, id),
-          listMoneyAccounts(tx, context.organizationId),
-          listSelectableCategories(tx, context.organizationId, 'income'),
-          listSelectableCategories(tx, context.organizationId, 'expense'),
-          listAttachments(tx, context.organizationId, { type: 'transaction', id }),
-          listProjects(tx, context.organizationId),
-          findTransactionSource(tx, context.organizationId, id),
-        ]),
-      );
+    [
+      row,
+      accounts,
+      incomeCategories,
+      expenseCategories,
+      attachments,
+      allProjects,
+      source,
+      recentIncomeCategories,
+      recentExpenseCategories,
+    ] = await withTransaction(context.userId, async (tx) =>
+      Promise.all([
+        getTransactionDetail(tx, context.organizationId, id),
+        listMoneyAccounts(tx, context.organizationId),
+        listSelectableCategories(tx, context.organizationId, 'income'),
+        listSelectableCategories(tx, context.organizationId, 'expense'),
+        listAttachments(tx, context.organizationId, { type: 'transaction', id }),
+        listProjects(tx, context.organizationId),
+        findTransactionSource(tx, context.organizationId, id),
+        listRecentCategories(tx, context.organizationId, 'income'),
+        listRecentCategories(tx, context.organizationId, 'expense'),
+      ]),
+    );
   } catch (e) {
     if (e instanceof TransactionNotFoundError) {
       return (
@@ -141,10 +160,17 @@ export default async function TransactionDetailPage({
       <Layout orgSlug={orgSlug} t={t}>
         <article className={isVoided ? 'record-detail voided' : 'record-detail'}>
           <h1>{isVoided ? t.transaction.voided : t.common.viewDetails}</h1>
-          {isVoided && row.voidReason ? <p className="form-error">{row.voidReason}</p> : null}
           {source ? <SourceNote orgSlug={orgSlug} source={source} t={t} /> : null}
           {!isVoided ? <p className="field-hint">{t.common.noEditPermission}</p> : null}
           <dl>
+            {/* 作废原因原来是一条没有标签的红色横幅，贴在卡片顶上，看上去像
+                表单报错。现在是卡片里有标签的第一行。 */}
+            {isVoided && row.voidReason ? (
+              <>
+                <dt>{t.transaction.voidReasonLabel}</dt>
+                <dd className="tx-void-reason">{row.voidReason}</dd>
+              </>
+            ) : null}
             <dt>{t.transaction.kind}</dt>
             <dd>{kindLabel}</dd>
             <dt>{t.transaction.date}</dt>
@@ -153,6 +179,8 @@ export default async function TransactionDetailPage({
             <dd className="mono amount">
               {formatMoney(row.amountMinor, row.currency, locale)}
             </dd>
+            {/* 在手机上核对一笔作废的账，最想确认的就是它动了哪个账户、记在哪个分类。 */}
+            <AccountRows row={row} locale={locale} t={t} />
             <dt>{t.transaction.description}</dt>
             <dd>{row.description || '\u2014'}</dd>
             <dt>{t.transaction.createdBy}</dt>
@@ -234,10 +262,6 @@ export default async function TransactionDetailPage({
             <dd>{row.createdByName}</dd>
           </dl>
         </article>
-        {/* 年结分录不能单独作废（voidTransaction 会拒），撤销走年结页。 */}
-        {canEdit && !isClosing ? (
-          <VoidButton orgSlug={orgSlug} transactionId={row.id} t={t} />
-        ) : null}
         <AttachmentPanel
           orgSlug={orgSlug}
           owner={{ type: 'transaction', id: row.id }}
@@ -245,6 +269,11 @@ export default async function TransactionDetailPage({
           t={t}
           readOnly={!canEdit}
         />
+        {/* 年结分录不能单独作废（voidTransaction 会拒），撤销走年结页。
+            作废放在页面最底下，与编辑页一致。 */}
+        {canEdit && !isClosing ? (
+          <VoidButton orgSlug={orgSlug} transactionId={row.id} t={t} />
+        ) : null}
       </Layout>
     );
   }
@@ -310,6 +339,16 @@ export default async function TransactionDetailPage({
           name_zh: c.nameZh,
         }))}
         expenseCategories={categoryPools.expense.map((c) => ({
+          id: c.id,
+          name_en: c.nameEn,
+          name_zh: c.nameZh,
+        }))}
+        recentIncomeCategories={recentIncomeCategories.map((c) => ({
+          id: c.id,
+          name_en: c.nameEn,
+          name_zh: c.nameZh,
+        }))}
+        recentExpenseCategories={recentExpenseCategories.map((c) => ({
           id: c.id,
           name_en: c.nameEn,
           name_zh: c.nameZh,
@@ -403,6 +442,68 @@ function SourceNote({
         {source.label ? `${typeLabel} ${source.label}` : typeLabel}
       </Link>
     </p>
+  );
+}
+
+/**
+ * 只读卡片里「动了哪个账户」的那几行，按类型说：收支是资金账户 + 分类，
+ * 转账是转出 + 转入，凭证是借方 + 贷方。转账与凭证从分录行里取——
+ * 转账借记转入方、贷记转出方（server/domain/posting-templates.ts）。
+ */
+function AccountRows({
+  row,
+  locale,
+  t,
+}: {
+  row: Awaited<ReturnType<typeof getTransactionDetail>>;
+  locale: 'en' | 'zh';
+  t: ReturnType<typeof getMessages>;
+}) {
+  const lineName = (direction: 'debit' | 'credit') => {
+    const line = row.lines.find((l) => l.direction === direction);
+    return line
+      ? localizedName({ name_en: line.accountNameEn, name_zh: line.accountNameZh }, locale)
+      : '\u2014';
+  };
+
+  if (row.kind === 'transfer') {
+    return (
+      <>
+        <dt>{t.transaction.transferredFrom}</dt>
+        <dd>{lineName('credit')}</dd>
+        <dt>{t.transaction.transferredTo}</dt>
+        <dd>{lineName('debit')}</dd>
+      </>
+    );
+  }
+  if (row.kind === 'journal' || row.kind === 'closing') {
+    return (
+      <>
+        <dt>{t.journal.debitAccount}</dt>
+        <dd>{lineName('debit')}</dd>
+        <dt>{t.journal.creditAccount}</dt>
+        <dd>{lineName('credit')}</dd>
+      </>
+    );
+  }
+  return (
+    <>
+      <dt>{t.settings.moneyAccount}</dt>
+      <dd>
+        {row.moneyAccountId
+          ? localizedName(
+              { name_en: row.moneyAccountNameEn, name_zh: row.moneyAccountNameZh },
+              locale,
+            )
+          : '\u2014'}
+      </dd>
+      <dt>{t.transaction.category}</dt>
+      <dd>
+        {row.categoryId
+          ? localizedName({ name_en: row.categoryNameEn, name_zh: row.categoryNameZh }, locale)
+          : '\u2014'}
+      </dd>
+    </>
   );
 }
 

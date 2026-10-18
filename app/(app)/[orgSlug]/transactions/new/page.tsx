@@ -1,5 +1,5 @@
 import { BackLink } from '@/components/ui/back-link';
-import { ScenarioPicker } from '@/components/transaction/scenario-picker';
+import { SCENARIO_TITLE_KEY, ScenarioPicker } from '@/components/transaction/scenario-picker';
 import { TransactionForm } from '@/components/transaction/transaction-form';
 import { getMessages, interpolate, type Locale } from '@/lib/i18n';
 import { requirePermission, type OrgContext } from '@/server/auth/guard';
@@ -113,6 +113,9 @@ export default async function NewTransactionPage({
 
     return (
       <>
+        {/* 从场景卡片下面那条「跳过」进来的，回去也回到卡片。装成 PWA 后
+            没有浏览器的返回键，这是唯一的退路。 */}
+        <BackLink href={`/${orgSlug}/transactions/new`}>{t.scenario.title}</BackLink>
         <h1>{t.transaction.newTitle}</h1>
         <TransactionForm
           orgSlug={orgSlug}
@@ -150,7 +153,10 @@ export default async function NewTransactionPage({
 
   return (
     <>
-      <h1>{t.transaction.newTitle}</h1>
+      {/* 标题用选中的那张卡片：用户要看得出自己点的是哪一种。选错了从
+          返回链接回到卡片重选，不必经底栏从头再来。 */}
+      <BackLink href={`/${orgSlug}/transactions/new`}>{t.scenario.title}</BackLink>
+      <h1>{t.scenario[SCENARIO_TITLE_KEY[scenario.id]]}</h1>
       <TransactionForm
         orgSlug={orgSlug}
         baseCurrency={context.baseCurrency}

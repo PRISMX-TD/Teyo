@@ -168,10 +168,12 @@ export default async function OnboardingPage({
         <p className="hint">{t.onboarding.baseCurrencyHint}</p>
 
         <label htmlFor="timezone">{t.onboarding.timezone}</label>
+        {/* 显示城市名就够了，value 仍是 IANA 名。带「Asia/」前缀时 320px 宽的
+            手机上选择框放不下，「(GMT+8)」被下拉箭头盖住一半。 */}
         <select id="timezone" name="timezone" defaultValue="Asia/Kuala_Lumpur">
-          <option value="Asia/Kuala_Lumpur">Asia/Kuala Lumpur (GMT+8)</option>
-          <option value="Asia/Singapore">Asia/Singapore (GMT+8)</option>
-          <option value="Asia/Shanghai">Asia/Shanghai (GMT+8)</option>
+          <option value="Asia/Kuala_Lumpur">Kuala Lumpur (GMT+8)</option>
+          <option value="Asia/Singapore">Singapore (GMT+8)</option>
+          <option value="Asia/Shanghai">Shanghai (GMT+8)</option>
         </select>
 
         <label htmlFor="industry">{t.onboarding.industry}</label>

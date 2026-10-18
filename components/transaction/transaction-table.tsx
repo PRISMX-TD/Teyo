@@ -10,9 +10,21 @@ type Props = {
   locale: Locale;
   baseCurrency: string;
   emptyLabel: string;
+  /**
+   * 公司只有一个成员时为 false：每张卡片上都重复同一个名字，还占掉第三行
+   * 右半边，把账户名挤成省略号。只影响手机卡片布局（见 tx.css），桌面表格不变。
+   */
+  showCreator?: boolean;
 };
 
-export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLabel }: Props) {
+export function TransactionTable({
+  orgSlug,
+  rows,
+  locale,
+  baseCurrency,
+  emptyLabel,
+  showCreator = true,
+}: Props) {
   const t = getMessages(locale);
 
   if (rows.length === 0) {
@@ -20,7 +32,7 @@ export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLab
   }
 
   return (
-    <table className="transaction-table tx-list">
+    <table className={showCreator ? 'transaction-table tx-list' : 'transaction-table tx-list tx-list--solo'}>
       <caption className="visually-hidden">{t.transaction.listTitle}</caption>
       <thead>
         <tr>
@@ -68,7 +80,18 @@ export function TransactionTable({ orgSlug, rows, locale, baseCurrency, emptyLab
               )}
             </td>
             <td>{row.createdByName}</td>
-            <td className={`numeric ${row.kind === 'income' ? 'money-in' : 'money-out'}`}>
+            {/* 只有收入和支出有方向。转账、凭证、年结原来一律记成红色的「出」，
+                手机卡片上没有列名也没有正负号，颜色是唯一的线索，于是客户回款、
+                股东注资看上去全像是钱流出去了。 */}
+            <td
+              className={
+                row.kind === 'income'
+                  ? 'numeric money-in'
+                  : row.kind === 'expense'
+                    ? 'numeric money-out'
+                    : 'numeric'
+              }
+            >
               {formatMoney(row.baseAmountMinor, baseCurrency, locale)}
             </td>
           </tr>

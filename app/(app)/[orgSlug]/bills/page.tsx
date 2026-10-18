@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listBills } from '@/server/repositories/bills';
@@ -46,6 +46,7 @@ export default async function BillsListPage({
         rows={rows}
         locale={locale}
         emptyLabel={t.bills.empty}
+        today={todayInOrg(context)}
       />
     </>
   );

@@ -1,4 +1,5 @@
 import { BackLink } from '@/components/ui/back-link';
+import { Plus } from '@/components/ui/icons';
 import { TaxRateList } from '@/components/settings/tax-rate-list';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -23,7 +24,16 @@ export default async function TaxSettingsPage({
   return (
     <>
       <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
-      <h1>{t.tax.title}</h1>
+      {/* 与分类、联系人同一个样子：页头一个「新增」入口，跳到列表下面的表单。 */}
+      <div className="page-header">
+        <h1>{t.tax.title}</h1>
+        <div className="page-header-actions">
+          <a href="#add-tax" className="add-button">
+            <Plus size={16} weight="bold" aria-hidden="true" />
+            {t.tax.addRate}
+          </a>
+        </div>
+      </div>
       <TaxRateList
         orgSlug={orgSlug}
         locale={locale}

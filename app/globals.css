@@ -255,7 +255,15 @@ body {
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
   -webkit-tap-highlight-color: transparent;
+  /* viewport-fit=cover 之后横屏的刘海一侧不再自动留白。竖屏两个值都是 0。 */
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
+/* 窄屏上中文最常见的难看：一段话最后一行只剩一个字（「……的发 / 票」）。
+   pretty 让浏览器提前一点换行，标题用 balance 两行等长。不支持的浏览器
+   照旧按原来的方式折行。 */
+p, li, dd, .kpi-hint, .kpi-question { text-wrap: pretty; }
+h1, h2, h3 { text-wrap: balance; }
 
 * { scrollbar-width: thin; scrollbar-color: var(--scrollbar-thumb) transparent; }
 *::-webkit-scrollbar { width: 10px; height: 10px; }
@@ -282,7 +290,10 @@ h3 { font-size: var(--text-md); letter-spacing: -0.01em; }
    一屏就是几十个彩色词。真正「去别处」的文字链接（登录页、开始清单）
    在各自的段落里单独染强调色。 */
 a { color: inherit; text-decoration: none; text-underline-offset: 0.2em; }
-a:hover { text-decoration: underline; text-decoration-thickness: 1px; text-decoration-color: var(--text-tertiary); }
+/* 只给真有悬停的指针：手机上点一下之后 :hover 会一直挂着，留下一条下划线。 */
+@media (hover: hover) {
+  a:hover { text-decoration: underline; text-decoration-thickness: 1px; text-decoration-color: var(--text-tertiary); }
+}
 
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 
@@ -311,6 +322,13 @@ a:hover { text-decoration: underline; text-decoration-thickness: 1px; text-decor
 
 .text-muted { color: var(--text-secondary); }
 .hint, .field-hint { display: block; font-size: var(--text-xs); color: var(--text-tertiary); margin-top: var(--space-1); line-height: 1.5; }
+/* 脚注里的链接（年结页「修改财年从几月开始」）：全局 a 继承正文色，在灰色
+   脚注里就和普通文字一模一样，没人知道能点。 */
+.hint a, .field-hint a { color: var(--accent); font-weight: 500; }
+/* 页头标题里的单号（INV-00003）：不许在连字符处折行。 */
+.doc-no { white-space: nowrap; }
+/* 页头标题下面那一行说明（导出页「把干净的数字交给会计师」）。 */
+.page-subtitle { margin: var(--space-1) 0 0; font-size: var(--text-base); color: var(--text-secondary); text-wrap: pretty; }
 
 /* 数字：正文字体 + tabular-nums。金额在纵向严格对齐靠的是等宽数字形，
    不是等宽字体。 */
@@ -341,6 +359,7 @@ td.numeric, th.numeric,
   box-shadow: inset 0 1px 0 rgba(255,255,255,0.24), 0 1px 2px rgba(11,92,72,0.35);
 }
 .brand-mark--lg { width: 60px; height: 60px; font-size: 30px; border-radius: 16px; }
+.brand-mark--sm { width: 26px; height: 26px; font-size: 13px; border-radius: 8px; }
 
 /* iOS 开关的样子。只做外观：真正的状态在外层按钮的 aria-pressed 上，
    读屏器听到的是「深色模式，开关，已按下」。
@@ -482,7 +501,12 @@ td.numeric, th.numeric,
 }
 .app-main > h1:first-child, .app-main > .page-header:first-child { margin-top: 0; }
 .app-main h1 { margin-bottom: var(--space-6); }
-.app-main h2 { margin-top: var(--space-10); margin-bottom: var(--space-4); }
+/* :where() 把特异性压到一个类名：卡片、对话框、面板里的 h2 各有自己的
+   外边距规则，原来全被这条 (0,1,1) 的段落间距压住，标题上方平白空出 40px。 */
+.app-main :where(h2) { margin-top: var(--space-10); margin-bottom: var(--space-4); }
+/* 卡片里的第一个标题不要那 40px：它分隔的是页面上的段落，放进卡片里
+   只会在卡片顶上留出一大块空白（银行导入的「上传对账单」）。 */
+.app-main :is(.import-form, .transaction-form, .export-form, .recurring-form, .add-form, .invite-form) > h2:first-child { margin-top: 0; }
 
 /* 换页淡入。它说的是「这是新的一页」——与 iOS 的推入同一个意思，只是
    更轻。用 backwards 而不是 both：动画结束后不留下 transform，否则这一层
@@ -604,7 +628,9 @@ input[type='checkbox'], input[type='radio'] {
 }
 input[type='number'], input[type='date'], input[inputmode='decimal'] { font-variant-numeric: tabular-nums; }
 input[type='date']::-webkit-calendar-picker-indicator { opacity: 0.55; cursor: pointer; }
-[data-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator { filter: invert(1); }
+/* 暗色主题已经声明了 color-scheme: dark，浏览器自己会把日历图标画成浅色；
+   再 invert 一次就又变回黑色，在深色输入框上几乎看不见。 */
+[data-theme='dark'] input[type='date']::-webkit-calendar-picker-indicator { opacity: 0.75; }
 
 /* 下拉框：iOS 弹出按钮的上下双箭头。data URI 里不能用 currentColor，
    取一个两档主题都看得见的中灰。 */
@@ -719,7 +745,9 @@ button.row-button.is-destructive, button.row-button.is-destructive:hover:not(:di
 .segmented > label input[type='radio'], .radio-group > label input[type='radio'] {
   position: absolute; opacity: 0; width: 1px; height: 1px; min-height: 0; pointer-events: none;
 }
-.segmented > label:hover, .segmented > button:hover:not(:disabled), .radio-group > label:hover { background: var(--bg-hover); }
+@media (hover: hover) {
+  .segmented > label:hover, .segmented > button:hover:not(:disabled), .radio-group > label:hover { background: var(--bg-hover); }
+}
 .segmented > label:has(input:checked), .radio-group > label:has(input:checked),
 .segmented > button[aria-pressed='true'], .segmented > button[aria-pressed='true']:hover:not(:disabled) {
   color: var(--text-primary); font-weight: 600;
@@ -770,7 +798,9 @@ button.row-button.is-destructive, button.row-button.is-destructive:hover:not(:di
 .transaction-table td > a + .badge, .audit-table td > a + .badge,
 .transaction-table td > span + .badge { margin-left: var(--space-2); }
 .transaction-table tbody tr { transition: background var(--dur-fast) var(--ease); }
-.transaction-table tbody tr:hover, .audit-table tbody tr:hover { background: var(--bg-hover); }
+@media (hover: hover) {
+  .transaction-table tbody tr:hover, .audit-table tbody tr:hover { background: var(--bg-hover); }
+}
 .transaction-table td a { font-weight: 500; }
 
 .numeric { text-align: right; white-space: nowrap; }
@@ -833,6 +863,7 @@ button.row-button.is-destructive, button.row-button.is-destructive:hover:not(:di
   background: var(--bg-secondary);
   border-radius: var(--radius-md);
   box-shadow: var(--shadow-card);
+  text-wrap: pretty;
 }
 
 /* ==========================================================================
@@ -913,7 +944,7 @@ button.row-button.is-destructive, button.row-button.is-destructive:hover:not(:di
 .kpi-lead .kpi-value.money-in { color: var(--green); }
 .kpi-lead .kpi-value.money-out { color: var(--red); }
 .kpi-lead .kpi-hint { font-size: var(--text-sm); color: var(--text-tertiary); }
-a.kpi-lead:hover { text-decoration: none; box-shadow: var(--shadow-raised); }
+@media (hover: hover) { a.kpi-lead:hover { text-decoration: none; box-shadow: var(--shadow-raised); } }
 a.kpi-lead:active { transform: scale(0.99); }
 
 .kpi-rest {
@@ -946,7 +977,13 @@ a.kpi-lead:active { transform: scale(0.99); }
 }
 .kpi-item .kpi-value.money-in { color: var(--green); }
 .kpi-item .kpi-value.money-out { color: var(--red); }
-a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
+@media (hover: hover) { a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; } }
+/* 最窄的手机：问题在上、金额在下。左右并排时英文的问题被金额挤成
+   每行两三个词、三四行高。 */
+@media (max-width: 400px) {
+  .kpi-item { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'q' 'h' 'v'; }
+  .kpi-item .kpi-value { text-align: left; margin-top: var(--space-1); }
+}
 
 /* ── 图与清单 ──────────────────────────────────────────────────────── */
 
@@ -970,10 +1007,25 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 .chart-svg { width: 100%; height: auto; overflow: visible; }
 .chart-svg text { fill: var(--text-tertiary); font-family: var(--font-text); font-size: 10px; }
 .chart-svg line { stroke: var(--border-primary); }
+/* 月度趋势有宽窄两张（见 dashboard-view.tsx 的 MonthlyTrendsChart）。
+   窄图封顶 480px：再往大放，12px 的字会被放大成十七八像素。 */
+.chart-svg--narrow { display: none; }
+@media (max-width: 767px) {
+  .chart-svg--wide { display: none; }
+  .chart-svg--narrow { display: block; max-width: 480px; }
+}
 
-.expense-bars { display: flex; flex-direction: column; }
-.expense-row {
+/* 三列由外层定，每一行用 subgrid 继承：原来每行各自是一个网格，金额
+   位数不同的行，进度条的起点就各不相同，一列条形图参差不齐。 */
+.expense-bars {
   display: grid; grid-template-columns: minmax(0,1fr) minmax(72px,110px) auto;
+  column-gap: var(--space-4);
+}
+.expense-row {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(0,1fr) minmax(72px,110px) auto;
+  grid-template-columns: subgrid;
   align-items: center; gap: var(--space-4);
   padding: var(--space-2) 0;
 }
@@ -1057,10 +1109,19 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 .transaction-form input:not([type='radio']):not([type='checkbox']),
 .transaction-form select, .transaction-form textarea,
 .export-form input:not([type='radio']):not([type='checkbox']), .export-form select { width: 100%; }
-.transaction-form label:not(.kind-option):not(.direction-option), .export-form label { margin-top: var(--space-5); }
+/* :where() 让这条只有一个类名的分量。原来 :not(.x):not(.y) 把它抬到 (0,3,1)，
+   下面每一条「这里不要上边距」的重置（第一个标签、单选组、汇率、附件按钮、
+   .form-field）全都压不过它：卡片顶上空一条、收付款的分段滑块下沉 20px。 */
+.transaction-form :where(label:not(.kind-option, .direction-option)), .export-form :where(label) { margin-top: var(--space-5); }
 .transaction-form > label:first-child, .transaction-form > fieldset:first-child { margin-top: 0; }
+/* 单据表单把全部字段包在一个 display:contents 的 <fieldset disabled> 里
+   （只读时一次禁掉）。上面那条 > label:first-child 够不着它里面的第一个
+   标签，于是卡片顶上平白多出 20px 空白。 */
+.transaction-form > fieldset:first-child > label:first-child { margin-top: 0; }
 .transaction-form fieldset { margin-bottom: var(--space-2); }
 .transaction-form fieldset + label { margin-top: var(--space-5); }
+.transaction-form > fieldset:not(:first-child) { margin-top: var(--space-5); }
+.transaction-form legend { font-weight: 500; }
 
 /* 收入 / 支出 / 转账，与「钱往哪边走」：分段控件（见上方 Segmented）。
    这两组没有包 .segmented 的旧调用方也要能看，所以给单个选项一份
@@ -1133,6 +1194,9 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 @keyframes sheet-in { from { transform: translateY(100%); } }
 @keyframes fade-in { from { opacity: 0; } }
 
+/* 两个类名叠起来：对话框在 DOM 里是 <main> 的后代，.app-main h2 的
+   40px 上外边距会压过单个类名，标题上方平白空出一大截。 */
+.app-dialog .app-dialog-title, .doc-dialog .doc-dialog__title,
 .app-dialog-title, .doc-dialog__title { margin: 0 0 var(--space-4); font-size: var(--text-md); font-weight: 650; letter-spacing: -0.012em; }
 .app-dialog label { margin-bottom: var(--space-2); }
 .app-dialog input, .app-dialog select, .app-dialog textarea { width: 100%; }
@@ -1147,8 +1211,10 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
     padding: var(--space-6) var(--space-5) calc(var(--space-5) + env(safe-area-inset-bottom));
     border-radius: var(--radius-lg) var(--radius-lg) 0 0;
   }
-  .app-dialog-actions, .doc-dialog__actions { flex-direction: row-reverse; }
-  .app-dialog-actions > *, .doc-dialog__actions > * { flex: 1 1 0; min-height: 48px; }
+  /* iOS 的操作表：按钮一个一行占满，确认在上、取消在最下面。并排两等分时
+     320 宽的「确认作废这张发票」会折成两行。DOM 顺序是 [取消, 确认]。 */
+  .app-dialog-actions, .doc-dialog__actions { flex-direction: column-reverse; gap: var(--space-2); }
+  .app-dialog-actions > *, .doc-dialog__actions > * { flex: none; width: 100%; min-height: 48px; }
 }
 @media (max-width: 600px) and (prefers-reduced-motion: no-preference) {
   .app-dialog[open], .doc-dialog[open] { animation: sheet-in var(--dur-slow) var(--ease-out); }
@@ -1187,7 +1253,7 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
   box-shadow: var(--shadow-card);
   transition: transform var(--dur-normal) var(--ease-out), box-shadow var(--dur-normal) var(--ease-out);
 }
-.scenario-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); text-decoration: none; }
+@media (hover: hover) { .scenario-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-raised); text-decoration: none; } }
 .scenario-card:active { transform: scale(0.985); }
 .scenario-card strong { font-size: var(--text-md); font-weight: 650; letter-spacing: -0.012em; }
 .scenario-card span { font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.5; }
@@ -1223,6 +1289,14 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 .filter-field { display: flex; flex-direction: column; flex: 1 1 140px; min-width: 0; }
 .filters label { margin-bottom: var(--space-1); font-size: var(--text-xs); font-weight: 600; color: var(--text-secondary); }
 .filters input, .filters select { min-height: 38px; font-size: var(--text-sm); }
+/* 收付款页的筛选是 <label>文字<select/></label> 的写法：原来 select 跟在
+   文字后面内联，宽度由最长的选项决定——一个长客户名就把它撑到上千像素，
+   手机上整页被推宽。改成与 .filter-field 一样的上下两行。 */
+.filters > label {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  flex: 1 1 160px; min-width: 0; margin-bottom: 0;
+}
+.filters > label > select { width: 100%; min-width: 0; }
 .filter-actions {
   display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2);
   flex: 1 1 100%; padding-top: var(--space-3);
@@ -1239,7 +1313,6 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
    ========================================================================== */
 
 .export-form fieldset { margin-top: var(--space-5); }
-.export-form fieldset:first-of-type { margin-top: var(--space-6); }
 
 .export-form label:has(input[type='radio']), .export-form label:has(input[type='checkbox']) {
   display: flex; align-items: flex-start; gap: var(--space-3);
@@ -1372,6 +1445,12 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 .record-detail dt:first-of-type, .record-detail dt:first-of-type + dd { border-top: none; }
 .record-detail dd.amount { font-size: var(--text-xl); font-weight: 700; font-variant-numeric: tabular-nums; letter-spacing: -0.026em; }
 .record-detail.voided dd.amount { opacity: 0.45; text-decoration: line-through; }
+.record-detail dd a { color: var(--accent); font-weight: 500; }
+/* 短值的摘要卡（合计 / 已收 / 未收）：iOS 的 value-1 单元格——标签在左、
+   值在右，手机上也不叠成两行。只有最要紧的那一个数字带 .amount。 */
+.record-detail--inline dl { grid-template-columns: minmax(0, 1fr) auto; }
+.record-detail--inline dd { text-align: right; font-variant-numeric: tabular-nums; }
+.record-detail--inline dd.amount { font-size: var(--text-lg); }
 
 /* ==========================================================================
    Settings
@@ -1492,7 +1571,7 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 }
 .members-panel li { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2) var(--space-3); min-height: 56px; padding: var(--space-3) var(--space-5); border-top: 1px solid var(--border-primary); font-size: var(--text-sm); }
 .members-panel li:first-child { border-top: none; }
-.members-panel li > span:first-child { font-weight: 600; font-size: var(--text-base); color: var(--text-primary); }
+.members-panel li > span:first-child { min-width: 0; overflow-wrap: anywhere; font-weight: 600; font-size: var(--text-base); color: var(--text-primary); }
 .members-panel li .text-muted { font-size: var(--text-xs); flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
 .members-panel li select, .members-panel li button { min-height: 32px; padding: 0 var(--space-3); font-size: var(--text-xs); flex: 0 0 auto; }
 .members-panel li select { padding-right: var(--space-8); }
@@ -1511,8 +1590,32 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 .coa-code { font-family: var(--font-mono); font-size: var(--text-xs); color: var(--text-tertiary); margin-right: var(--space-3); min-width: 108px; display: inline-block; }
 /* 科目表的行第一个 span 是代码而不是名称：让代码保持内容宽度，把伸缩
    交给后面的名称。 */
-.list-item-line > span.coa-code { flex: 0 0 auto; }
+/* span.coa-code 写全：.list-item-line > span:first-child（名称样式）的
+   特异度更高，原来把代码也染成了 16px 正文黑字。 */
+.list-item-line > span.coa-code { flex: 0 0 auto; font-size: var(--text-xs); color: var(--text-tertiary); }
 .list-item-line > .coa-code + span { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+/* 每一类科目自成一张卡，类名在卡外作小标题（iOS 的分组列表）。原来外层
+   .named-list 是一整张大卡：类名塞在卡里、贴着上沿被裁掉一截，「新增科目」
+   表单又成了卡中卡。 */
+.named-list:has(> .coa-section) { background: none; border-radius: 0; box-shadow: none; overflow: visible; }
+.coa-group {
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+  overflow: clip;
+}
+.coa-group > .list-item:first-child { border-top: none; }
+
+@media (max-width: 767px) {
+  /* 手机上一行放不下「代码 名称 徽章 重命名 隐藏」：按钮会一个一个掉到
+     下一行。改成名称 + 按钮在第一行，代码与徽章作为小字在第二行。 */
+  .list-item-line:has(> .coa-code) { row-gap: 0; }
+  .list-item-line > .coa-code + span { order: 1; flex: 1 1 0; }
+  .list-item-line:has(> .coa-code) > button { order: 2; }
+  .list-item-line:has(> .coa-code)::after { content: ''; order: 3; flex-basis: 100%; height: 0; }
+  .list-item-line > .coa-code { order: 4; min-width: 0; margin-right: 0; }
+  .list-item-line:has(> .coa-code) > .badge { order: 5; }
+}
 .checkbox-label { display: inline-flex; align-items: center; gap: var(--space-2); margin-right: var(--space-2); font-size: var(--text-xs); color: var(--text-secondary); }
 
 /* ==========================================================================
@@ -1538,7 +1641,7 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
   white-space: nowrap;
   transition: background var(--dur-normal) var(--ease-out), box-shadow var(--dur-normal) var(--ease-out);
 }
-.report-tabs button:hover:not(:disabled) { background: var(--bg-hover); }
+@media (hover: hover) { .report-tabs button:hover:not(:disabled) { background: var(--bg-hover); } }
 .report-tabs button:active:not(:disabled) { transform: none; }
 .report-tabs button.active, .report-tabs button.active:hover:not(:disabled) {
   font-weight: 600; background: var(--segment-thumb); box-shadow: var(--shadow-thumb);
@@ -1551,7 +1654,7 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
   color: var(--text-primary); font-weight: 400; text-align: left;
 }
 .report-table tbody td.numeric, .report-table tbody th.numeric { text-align: right; }
-.report-table tbody tr:hover { background: var(--bg-hover); }
+@media (hover: hover) { .report-table tbody tr:hover { background: var(--bg-hover); } }
 .report-table .section-header { background: var(--bg-tertiary); }
 .report-table .section-header:hover { background: var(--bg-tertiary); }
 .report-table .section-header td, .report-table .section-header th {
@@ -1560,8 +1663,7 @@ a.kpi-item:hover { background: var(--bg-hover); text-decoration: none; }
 }
 .report-table .subtotal td, .report-table .subtotal th { font-weight: 600; border-bottom: 1px solid var(--border-secondary); }
 /* 本期没有发生额的科目：退到背景里，悬停时恢复全对比度。 */
-.report-table tbody tr.row-zero { opacity: 0.55; }
-.report-table tbody tr.row-zero:hover { opacity: 1; }
+.report-table tbody tr.row-zero :is(td, th) { color: var(--text-secondary); }
 /* 合计行。单线小计、双线总计是会计报表的既有约定，保留。 */
 .report-table .total-row th, .report-table .total-row td,
 .report-table tfoot th, .report-table tfoot td {
@@ -1657,7 +1759,13 @@ p.report-period {
   border-radius: var(--radius-pill);
   transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
-.add-button:hover { background: var(--accent-subtle); box-shadow: inset 0 0 0 1px var(--accent-border); text-decoration: none; color: var(--accent); }
+/* 写成 <button class="add-button"> 时，button:hover:not(:disabled)（0,2,1）会把
+   淡绿压成灰底，所以 button 版本单列一条同分量的。 */
+@media (hover: hover) {
+  .add-button:hover, button.add-button:hover:not(:disabled) {
+    background: var(--accent-subtle); box-shadow: inset 0 0 0 1px var(--accent-border); text-decoration: none; color: var(--accent);
+  }
+}
 .add-button:active { transform: scale(0.97); }
 .action-group { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap; }
 
@@ -1682,8 +1790,16 @@ p.report-period {
 }
 [data-theme='dark'] .invoice-item-row { background: rgba(255,255,255,0.03); }
 .invoice-item-row--pair { grid-template-columns: minmax(0,1fr) 140px 40px; }
-.invoice-item-row input { min-height: 38px; font-size: var(--text-sm); width: 100%; min-width: 0; }
+.invoice-item-row input, .invoice-item-row select { min-height: 38px; font-size: var(--text-sm); width: 100%; min-width: 0; }
 .invoice-item-row > button { justify-self: center; min-height: 34px; width: 34px; padding: 0; }
+/* 数量、单价、金额各自包在 <label class="item-field"> 里：桌面上表头已经
+   说了是哪一列，标签文字只给读屏器；手机上表头收起，标签露出来。 */
+.invoice-item-row .item-field { display: block; min-width: 0; margin: 0; }
+.item-field__label {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip-path: inset(50%); white-space: nowrap;
+}
+.invoice-items > .add-button { align-self: flex-start; }
 
 .invoice-item-head {
   display: grid; grid-template-columns: minmax(0,1fr) 84px 120px 40px; gap: var(--space-2);
@@ -1697,9 +1813,36 @@ p.report-period {
   /* 窄屏一行放不下三个输入：描述独占一行，数量与单价并排，删除键跟在后面。
      表头收起——每个输入框自己带 aria-label。 */
   .invoice-item-head { display: none; }
-  .invoice-item-row, .invoice-item-row--pair { grid-template-columns: minmax(0,1fr) minmax(0,1fr) 44px; }
-  .invoice-item-row > input:first-child { grid-column: 1 / -1; }
-  .invoice-item-row--pair > input:first-child { grid-column: 1 / 3; }
+  /* 每个格子都显式摆位，不靠自动排布：采购订单多一个税率下拉，自动排布会
+     把它塞进删除键那一列，或者把数量和单价挤成几像素宽。
+       第 1 行  描述（有删除键时让出最右一格给它）
+       第 2 行  数量 | 单价（单价拿更宽的那份：数量通常只有一两位）
+       第 3 行  税率（采购订单才有）                                  */
+  .invoice-item-row {
+    grid-template-columns: minmax(0, 2fr) minmax(0, 3fr) 44px;
+    align-items: end; row-gap: var(--space-3);
+    padding: var(--space-3);
+  }
+  .invoice-item-row > :first-child { grid-column: 1 / -1; grid-row: 1; }
+  .invoice-item-row:has(> button) > :first-child { grid-column: 1 / 3; }
+  .invoice-item-row > button {
+    grid-column: 3; grid-row: 1; justify-self: end; align-self: center;
+    width: 44px; height: 44px; border-radius: 50%;
+  }
+  .invoice-item-row > :nth-child(2) { grid-column: 1; grid-row: 2; }
+  .invoice-item-row > :nth-child(3):not(button) { grid-column: 2 / -1; grid-row: 2; }
+  .invoice-item-row > :nth-child(4):not(button) { grid-column: 1 / -1; grid-row: 3; }
+  /* 账单的明细只有描述 + 金额：描述与删除键一行，金额独占第二行。 */
+  .invoice-item-row--pair { grid-template-columns: minmax(0, 1fr) 44px; }
+  .invoice-item-row--pair:has(> button) > :first-child { grid-column: 1; }
+  .invoice-item-row--pair > button { grid-column: 2; }
+  .invoice-item-row--pair > :nth-child(2) { grid-column: 1 / -1; grid-row: 2; }
+  .item-field__label {
+    position: static; width: auto; height: auto; overflow: visible; clip-path: none;
+    display: block; margin: 0 0 var(--space-1) 2px;
+    font-size: var(--text-xs); font-weight: 500; color: var(--text-secondary);
+  }
+  .invoice-items > .add-button { align-self: stretch; justify-content: center; min-height: 44px; font-size: var(--text-base); }
 }
 
 /* ==========================================================================
@@ -1780,7 +1923,6 @@ p.report-period {
    ========================================================================== */
 
 .recurring-list { display: flex; flex-direction: column; gap: var(--space-5); }
-.recurring-toolbar { display: flex; gap: var(--space-3); align-items: center; flex-wrap: wrap; }
 .recurring-form {
   display: flex; flex-direction: column; gap: var(--space-5); max-width: 620px;
   padding: var(--space-6);
@@ -1799,7 +1941,6 @@ p.report-period {
    ========================================================================== */
 
 .attachment-panel { margin-top: var(--space-6); padding-top: var(--space-5); border-top: 1px solid var(--border-primary); }
-.attachment-panel h3 { font-size: var(--text-md); font-weight: 650; margin-bottom: var(--space-3); }
 .attachment-list { display: flex; flex-direction: column; margin: var(--space-3) 0 0; padding: 0; list-style: none; }
 .attachment-list > * { padding: var(--space-2) 0; border-top: 1px solid var(--border-primary); }
 .attachment-list > *:first-child { border-top: none; }
@@ -1998,11 +2139,6 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
    ========================================================================== */
 
 .asset-name { font-weight: 600; font-size: var(--text-base); color: var(--text-primary); }
-.asset-info-header {
-  display: flex; align-items: baseline; justify-content: space-between;
-  flex-wrap: wrap; gap: var(--space-3);
-  margin-bottom: var(--space-4);
-}
 .depreciation-schedule { margin-top: var(--space-8); }
 .dispose-asset-panel { margin-top: var(--space-8); }
 
@@ -2051,8 +2187,9 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
 
 /* 提示行里那一小截红字（收付款表单的「核销超额」）：只换颜色，不改布局。 */
 .doc-inline-error { color: var(--red); }
-/* <a class="btn-small"> 要与旁边的 <button> 长得一样。 */
-.doc-actions a.btn-small {
+/* <a class="btn-small"> 要与旁边的 <button> 长得一样——不只在 .doc-actions
+   里：固定资产列表的「处置」原来在外面，渲染成一块没有圆角的粉色方块。 */
+a.btn-small {
   display: inline-flex; align-items: center; justify-content: center;
   font-weight: 600;
   color: var(--text-primary); background: var(--fill);
@@ -2060,8 +2197,9 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
   text-decoration: none;
   transition: background var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
-.doc-actions a.btn-small:hover { background: var(--fill-strong); text-decoration: none; }
-.doc-actions a.btn-small:active { transform: scale(0.97); }
+@media (hover: hover) { a.btn-small:hover { background: var(--fill-strong); text-decoration: none; } }
+a.btn-small:active { transform: scale(0.97); }
+a.btn-small.btn-danger { color: var(--red); background: var(--red-subtle); }
 
 .doc-dialog label { display: block; margin-bottom: var(--space-2); font-size: var(--text-sm); }
 .doc-dialog input { width: 100%; }
@@ -2070,7 +2208,9 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
 .doc-dialog .form-error { margin-top: var(--space-3); }
 
 /* 单据状态条：draft → sent → partially_paid → paid 走到哪一步了。
-   一条连续的轨道，当前这一步浮起来。 */
+   一张卡里一排圆点，圆点之间一条线：走过的几步打勾、线染成品牌绿，当前
+   这一步实心带一圈光晕。原来是分段控件的轨道 + 浮起的滑块，看上去像一个
+   能点的选择器，其实什么也不做；手机上还竖成一列，占掉首屏三分之一。 */
 .doc-lifecycle { margin-bottom: var(--space-6); }
 .doc-lifecycle__caption {
   margin: 0 0 var(--space-2); padding: 0 var(--space-4);
@@ -2078,36 +2218,58 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
   color: var(--text-secondary);
 }
 .doc-lifecycle__steps {
-  display: flex; flex-wrap: wrap; gap: 2px;
-  margin: 0; padding: 2px; list-style: none;
-  background: var(--fill);
-  border-radius: var(--radius-sm);
+  display: flex; gap: 0;
+  margin: 0; padding: var(--space-4) var(--space-2) var(--space-3); list-style: none;
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
   counter-reset: doc-step;
 }
 .doc-lifecycle__step {
   counter-increment: doc-step;
-  flex: 1 1 auto;
-  display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2);
-  min-height: 34px; padding: 0 var(--space-4);
-  font-size: var(--text-sm); color: var(--text-secondary);
-  border-radius: 8px;
+  position: relative; flex: 1 1 0; min-width: 0;
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+  padding: 0 2px;
+  font-size: var(--text-xs); line-height: 1.3; text-align: center;
+  color: var(--text-tertiary);
 }
 .doc-lifecycle__step::before {
   content: counter(doc-step);
+  position: relative; z-index: 1;
   display: inline-flex; align-items: center; justify-content: center;
-  width: 18px; height: 18px; border-radius: 50%;
-  font-size: var(--text-2xs); font-weight: 600; font-variant-numeric: tabular-nums;
-  color: var(--text-tertiary); box-shadow: inset 0 0 0 1px var(--border-secondary);
+  width: 24px; height: 24px; border-radius: 50%;
+  font-size: 12px; font-weight: 600; font-variant-numeric: tabular-nums;
+  color: var(--text-tertiary); background: var(--bg-secondary);
+  box-shadow: inset 0 0 0 1.5px var(--border-secondary);
 }
+/* 连线：从上一步圆点的右缘画到这一步圆点的左缘，两头各让 4px。 */
+.doc-lifecycle__step + .doc-lifecycle__step::after {
+  content: ''; position: absolute; top: 11px;
+  right: calc(50% + 16px); width: calc(100% - 32px); height: 2px;
+  border-radius: 1px; background: var(--border-secondary);
+}
+.doc-lifecycle__step[data-done] { color: var(--text-secondary); }
+.doc-lifecycle__step[data-done]::before {
+  content: '';
+  background: var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 12 12'%3E%3Cpath fill='none' stroke='%23fff' stroke-width='2' stroke-linecap='round' stroke-linejoin='round' d='M2.5 6.2 5 8.6l4.5-5'/%3E%3C/svg%3E") center / 12px no-repeat;
+  box-shadow: none;
+}
+.doc-lifecycle__step[data-done] + .doc-lifecycle__step::after { background: var(--accent); }
 /* 当前这一步。选择器直接挂在 aria-current 上，与读屏器同一个来源。 */
-.doc-lifecycle__step[aria-current='step'] {
-  color: var(--text-primary); font-weight: 600;
-  background: var(--segment-thumb); box-shadow: var(--shadow-thumb);
+.doc-lifecycle__step[aria-current='step'] { color: var(--text-primary); font-weight: 600; }
+.doc-lifecycle__step[aria-current='step']::before {
+  color: #fff; background: var(--btn-bg);
+  box-shadow: 0 0 0 4px var(--accent-subtle);
 }
-.doc-lifecycle__step[aria-current='step']::before { color: #fff; background: var(--btn-bg); box-shadow: none; }
 .doc-lifecycle__steps[data-voided] .doc-lifecycle__step { opacity: 0.45; text-decoration: line-through; text-decoration-thickness: 1px; }
 .doc-lifecycle__voided { margin: var(--space-3) 0 0; }
 .doc-lifecycle__notice { margin: var(--space-3) 0 0; padding: 0 var(--space-4); font-size: var(--text-sm); color: var(--text-secondary); line-height: 1.55; }
+/* 放进表单卡片里的那一句（贷项通知单草稿）：卡片已经有内边距，再缩进 16px
+   就和下面的标签对不齐了。改成卡片里的一块浅底提示。 */
+.transaction-form > .doc-lifecycle__notice {
+  margin: 0 0 var(--space-1); padding: var(--space-3) var(--space-4);
+  background: var(--bg-tertiary); border-radius: var(--radius-sm);
+}
 
 /* 表单里的开关式勾选（「立即开具」「先存成草稿」）：一句主文案加一句解释。 */
 .doc-toggle {
@@ -2277,25 +2439,48 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
   .transaction-table tr.row-link:active { background: var(--bg-active); }
   /* 网格布局里备注格是网格项，桌面那条 max-width: 0 会把它压成零宽。 */
   .transaction-table td.tx-description { width: auto; max-width: none; min-width: 0; }
-  .transaction-table td:nth-child(2) { grid-row: 1; grid-column: 1; font-weight: 600; font-size: var(--text-base); }
-  .transaction-table td.numeric { grid-row: 1; grid-column: 2; font-size: var(--text-base); font-weight: 650; }
+  /* 下面按列序摆位置的规则只属于流水表（.tx-list）。其余借用
+     .transaction-table 外观的单据表列序各不相同，原来也被套上这一套，
+     于是金额跑到第三行、两个日期并排却没有标签——它们走 .doc-table。 */
+  .tx-list td:nth-child(2) { grid-row: 1; grid-column: 1; font-weight: 600; font-size: var(--text-base); }
+  .tx-list td.numeric { grid-row: 1; grid-column: 2; font-size: var(--text-base); font-weight: 650; }
   /* 日期 / 分类 / 账户 / 记录人：网格项不会相互内联，排成 2×2。 */
-  .transaction-table td:nth-child(1),
-  .transaction-table td:nth-child(3),
-  .transaction-table td:nth-child(4),
-  .transaction-table td:nth-child(5) {
+  .tx-list td:nth-child(1),
+  .tx-list td:nth-child(3),
+  .tx-list td:nth-child(4),
+  .tx-list td:nth-child(5) {
     font-size: var(--text-xs); color: var(--text-tertiary);
     overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   }
-  .transaction-table td:nth-child(1) { grid-row: 2; grid-column: 1; }
-  .transaction-table td:nth-child(3) { grid-row: 2; grid-column: 2; text-align: right; }
-  .transaction-table td:nth-child(4) { grid-row: 3; grid-column: 1; }
-  .transaction-table td:nth-child(5) { grid-row: 3; grid-column: 2; text-align: right; }
+  .tx-list td:nth-child(1) { grid-row: 2; grid-column: 1; }
+  .tx-list td:nth-child(3) { grid-row: 2; grid-column: 2; text-align: right; }
+  .tx-list td:nth-child(4) { grid-row: 3; grid-column: 1; }
+  .tx-list td:nth-child(5) { grid-row: 3; grid-column: 2; text-align: right; }
   .audit-table td { grid-column: 1/-1; font-size: var(--text-sm); }
 
   /* 报表在窄屏保留表格形态（借贷两列必须并排才读得出来），收紧内边距。 */
   .report-table { font-size: var(--text-xs); }
   .report-table thead th, .report-table tbody td, .report-table tbody th { padding: var(--space-2) var(--space-3); }
+  /* 合计行在桌面是 15px 粗体 + 16px 内边距；手机上它决定了金额列的宽度，
+     两列金额的试算平衡表就因为它多出 70px、不得不横向滑动。 */
+  .report-table tfoot th, .report-table tfoot td,
+  .report-table .total-row th, .report-table .total-row td { padding: var(--space-2) var(--space-3); font-size: var(--text-sm); }
+  /* 列多的报表（账龄、预算、折旧表……）在手机上放不下，原来把整页推宽，
+     连底部标签栏都跟着能左右拖。现在只让表格自己在卡片里横向滑动；
+     卡片外观挪到外层，表格本身不再画阴影和圆角。只在手机上这样做：
+     桌面上外层一旦成了滚动容器，表头就吸不住视口顶了。 */
+  .table-scroll {
+    max-width: 100%;
+    overflow-x: auto; overscroll-behavior-x: contain;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+  }
+  .table-scroll > table { background: none; border-radius: 0; box-shadow: none; }
+  /* 能横向滑动之后，第一列（客户名、科目、期间）不必再被挤成一词一行；
+     表格里的按钮也不该竖着折成两三行把整行撑高。 */
+  .table-scroll > table:has(thead th:nth-child(4)) :is(td, th):first-child { min-width: 9em; }
+  .table-scroll > table button { white-space: nowrap; }
 
   /* 筛选：收成一条可点开的横条，条件生效时默认摊开。 */
   .filters-summary {
@@ -2332,7 +2517,11 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
 
   .app-main h1 { font-size: var(--text-2xl); }
   .page-header h1 { font-size: var(--text-2xl); }
-  .kpi-lead .kpi-value { font-size: 2.5rem; }
+  /* 首要数字随屏宽缩放：固定 40px 时 320px 宽的手机上「RM 14,310.75」
+     放不下一行，「RM」被单独甩在上面。卡片也不再撑到 180px 高——
+     问题和数字之间原来空着七八十像素。 */
+  .kpi-lead { min-height: 0; }
+  .kpi-lead .kpi-value { padding-top: var(--space-4); font-size: clamp(1.75rem, 9vw, 2.5rem); }
   .transaction-form, .export-form, .recurring-form, .import-form { padding: var(--space-5) var(--space-4); }
 
   /* 低于 16px，iOS 会在聚焦输入框时自动放大视口——记一笔的金额框首当其冲。 */
@@ -2344,13 +2533,30 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
   .attachment-preview-btn, .attachment-delete-btn, .btn-small { min-height: 44px !important; }
   .text-button { min-height: auto !important; }
   .first-run li a { display: inline-flex; align-items: center; min-height: 44px; }
-  .segmented > label, .radio-group > label, .kind-option, .direction-option { min-height: 40px; }
+  .segmented > label, .radio-group > label, .kind-option, .direction-option { min-height: 44px; }
+  /* 桌面上紧凑的 38px 控件（筛选、单据明细行、工具栏下拉）到了手机上
+     字号被抬到 16px，高度停在 42px，差一点够不到 44px 的触控线。 */
+  input:not([type='checkbox']):not([type='radio']):not([type='range']):not([type='file']),
+  select { min-height: 44px !important; }
+  .back-link { min-height: 44px; }
+  .add-button, .attachment-upload-label, .scenario-skip a, .filters .filter-toggle { min-height: 44px; }
+  .field-hint a, .hint a { display: inline-flex; align-items: center; min-height: 44px; }
+  /* 分段控件不许折行（320 宽英文「Money / out」会把选中那一段撑高一截）：
+     窄屏收一点左右内边距，最窄的手机再小一号字。 */
+  .segmented > label, .segmented > button, .radio-group > label { padding: 0 var(--space-1); white-space: nowrap; }
+}
+@media (max-width: 359px) {
+  .segmented > label, .segmented > button, .radio-group > label { font-size: var(--text-xs); }
 }
 
 @media (max-width: 520px) {
   .record-detail dl { grid-template-columns: 1fr; }
   .record-detail dt { padding-bottom: 0; }
   .record-detail dd { border-top: none; padding-top: var(--space-1); }
+  .record-detail--inline dl { grid-template-columns: minmax(0, 1fr) auto; }
+  .record-detail--inline dt { padding-bottom: var(--space-3); }
+  .record-detail--inline dd { border-top: 1px solid var(--border-primary); padding-top: var(--space-3); }
+  .record-detail--inline dt:first-of-type + dd { border-top: none; }
   .ye-facts { grid-template-columns: 1fr; }
   .ye-facts dt { padding-bottom: 0; }
   .ye-facts dt + dd { border-top: none; padding-top: var(--space-1); }
@@ -2363,10 +2569,96 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
 @media (max-width: 767px) {
   /* 操作那一格独占一行，不然几个按钮会被挤进右侧那条 auto 列里。 */
   .transaction-table td:has(> .doc-actions) { grid-column: 1 / -1; margin-top: var(--space-2); }
-  .doc-actions a.btn-small { min-height: 44px !important; }
-  /* 状态条在窄屏竖过来：四步横排会把每一步压到两三个字宽。 */
-  .doc-lifecycle__steps { flex-direction: column; }
-  .doc-lifecycle__step { justify-content: flex-start; }
+
+  /* 合计行（tfoot）原来没跟着 tbody 一起转成卡片，留在表格布局里，
+     「合计」和金额各自漂在一边。 */
+  .transaction-table tfoot { display: block; }
+  .transaction-table tfoot tr {
+    display: grid; grid-template-columns: minmax(0,1fr) auto; gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border-primary);
+  }
+  .transaction-table tfoot td { padding: 0; border: none; text-align: left; }
+  .transaction-table tfoot td.numeric { text-align: right; }
+
+  /* 单据表（发票 / 账单 / 贷项通知单 / 采购订单 / 收付款 / 库存）的卡片。
+     第一行：对方（或物品名）+ 金额；第二行：单号与日期等次要信息排成一行
+     小字，每一项前面带上原来的列名（data-label），状态徽章靠右；
+     最后一行是操作按钮。几张表列序各不相同，所以不按列序摆，而是在 TSX
+     里给单元格标上角色类，这里用 flex 的 order 排。 */
+  .doc-table tr,
+  .doc-table tfoot tr {
+    display: flex; flex-wrap: wrap; align-items: baseline;
+    gap: 4px var(--space-3);
+    position: relative;
+  }
+  /* 两处换行：第一行与次要信息之间（::after），次要信息与操作之间（::before）。 */
+  .doc-table tr::after { content: ''; order: 3; flex-basis: 100%; height: 0; }
+  .doc-table tr::before { content: ''; order: 6; flex-basis: 100%; height: 0; }
+  .doc-table tfoot tr::after, .doc-table tfoot tr::before { content: none; }
+  .doc-table td {
+    order: 4; min-width: 0;
+    font-size: var(--text-xs); color: var(--text-secondary);
+    overflow-wrap: anywhere;
+  }
+  .doc-table td[data-label]::before { content: attr(data-label) '\00a0'; color: var(--text-tertiary); }
+  .doc-table td.numeric { text-align: left; }
+  .doc-table td.doc-title {
+    order: 1; flex: 1 1 0;
+    font-size: var(--text-base); font-weight: 600; color: var(--text-primary);
+    text-align: left;
+  }
+  .doc-table tfoot td.doc-title { text-align: left; }
+  .doc-table td.doc-amount { order: 2; font-size: var(--text-base); font-weight: 650; color: var(--text-primary); text-align: right; }
+  .doc-table td.doc-amount.money-in { color: var(--green); }
+  .doc-table td.doc-amount.money-out { color: var(--red); }
+  .doc-table td.doc-number { font-weight: 500; }
+  .doc-table td.doc-status { order: 5; margin-left: auto; align-self: center; }
+  .doc-table td.doc-actions-cell { order: 7; flex-basis: 100%; margin-top: var(--space-2); }
+  .doc-table td.doc-actions-cell:empty, .doc-table td.doc-blank { display: none; }
+  .doc-table td.doc-actions-cell > :is(.doc-actions, .action-group) { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+  /* 库存表的操作是三个裸按钮，排成一行而不是各占一行。 */
+  .doc-table td.doc-actions-cell > button { margin: 0 var(--space-2) var(--space-2) 0; }
+  /* 整张卡可点：单号那个链接撑满整张卡；卡里其余可交互的东西浮在它上面。 */
+  .doc-table td.doc-number a::after { content: ''; position: absolute; inset: 0; }
+  .doc-table td:not(.doc-number) a, .doc-table button { position: relative; z-index: 1; }
+  .doc-table tr:has(td.doc-number a):active { background: var(--bg-active); }
+  a.btn-small { min-height: 44px !important; }
+  /* 单据卡片里的纯文字按钮（发票的「打印」）同样要够得着 44px。 */
+  .doc-table .doc-actions .text-button { min-height: 44px !important; }
+}
+
+/* ==========================================================================
+   Mobile Bar（手机顶上一条，components/shell/mobile-bar.tsx）
+   ==========================================================================
+   侧栏在手机上隐藏了，公司名得有个地方放。不吸顶，随页面滚走。 */
+
+.mobile-bar { display: none; }
+
+@media (max-width: 767px) {
+  .mobile-bar {
+    display: flex; align-items: center; justify-content: space-between; gap: var(--space-3);
+    padding: calc(env(safe-area-inset-top) + var(--space-2)) var(--space-4) 0;
+  }
+  .mobile-bar-org {
+    display: inline-flex; align-items: center; gap: var(--space-2);
+    min-width: 0; min-height: 44px;
+    font-size: var(--text-sm); font-weight: 600; color: var(--text-primary);
+  }
+  .mobile-bar-org:hover { text-decoration: none; }
+  .mobile-bar-org:active { opacity: 0.6; }
+  .mobile-bar-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mobile-bar-caret { flex: 0 0 auto; color: var(--text-tertiary); }
+  .mobile-bar-account {
+    flex: 0 0 auto;
+    display: inline-flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; margin-right: -9px;
+    color: var(--text-secondary); border-radius: 50%;
+  }
+  .mobile-bar-account:hover { color: var(--text-primary); text-decoration: none; }
+  .mobile-bar-account:active { background: var(--fill); }
+  /* 顶上已经有这一条了，正文不必再空出一整段。 */
+  .app-main { padding-top: var(--space-2); }
 }
 
 /* ==========================================================================
@@ -2391,9 +2683,11 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
     display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
     min-height: 48px; min-width: 0;
     padding: var(--space-1) 2px;
-    font-size: var(--text-2xs); font-weight: 500; color: var(--text-tertiary);
-    /* 窄屏下「Transactions」这类不可断行的单词会挤出格子；截成省略号
-       比让文字互相打架要体面。 */
+    /* 10px、略收字距：iOS 标签栏的字就是 10pt。11px 时英文的
+       「Transactions」在 320px 宽的手机上要 65px，格子只有 57px，
+       被截成「Transacti…」。 */
+    font-size: 10px; letter-spacing: -0.02em; font-weight: 500; color: var(--text-tertiary);
+    /* 更窄或更长的语言下仍放不下时，截成省略号比让文字互相打架要体面。 */
     overflow: hidden; white-space: nowrap;
     transition: color var(--dur-fast) var(--ease);
   }
@@ -2574,30 +2868,36 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
 }
 .printable-invoice-signature-line .printable-invoice-alt { display: block; }
 
-/* 打印语言的临时切换：一个小号分段控件。 */
+/* 打印语言的临时切换：一条分段轨道（与全站分段控件同一套 token），
+   不是三颗散胶囊。 */
 .invoice-language-switch {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--space-2);
+  gap: var(--space-2) var(--space-3);
   margin-bottom: var(--space-3);
   font-size: var(--text-sm);
 }
 .invoice-language-switch > span { color: var(--text-secondary); margin-right: var(--space-1); }
-.invoice-language-switch a {
-  display: inline-flex; align-items: center;
-  min-height: 30px; padding: 0 var(--space-3);
-  border-radius: var(--radius-pill);
-  color: var(--text-primary);
+.invoice-language-switch__options {
+  display: inline-flex; gap: 2px; padding: 2px;
   background: var(--fill);
-  font-weight: 500;
-  text-decoration: none;
+  border-radius: var(--radius-sm);
 }
-.invoice-language-switch a:hover { background: var(--fill-strong); text-decoration: none; }
-.invoice-language-switch a.is-current {
-  color: var(--btn-fg);
-  background: var(--btn-bg);
+.invoice-language-switch__options > a {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-height: 32px; padding: 0 var(--space-3);
+  font-weight: 500; white-space: nowrap; text-decoration: none;
+  color: var(--text-primary); background: transparent;
+  border-radius: 8px;
+}
+@media (hover: hover) {
+  .invoice-language-switch__options > a:hover { background: var(--bg-hover); text-decoration: none; }
+}
+.invoice-language-switch__options > a.is-current,
+.invoice-language-switch__options > a.is-current:hover {
   font-weight: 600;
+  background: var(--segment-thumb); box-shadow: var(--shadow-thumb);
 }
 
 /* 屏幕上 .print-frame 只是一层壳：表格的语义留给打印时重复表头表尾用。 */
@@ -2612,12 +2912,1128 @@ input[type='file']::file-selector-button:hover { box-shadow: inset 0 0 0 1px var
 }
 
 /* ==========================================================================
+   Phone layout: shell, dashboard, auth, account
+   ========================================================================== */
+
+/* ── 概览：首要数字 ────────────────────────────────────────────────────
+   手机上按「卡片内容宽 ÷ 字数」定字号（--kpi-chars 由 dashboard-view.tsx
+   写在元素上）：9vw 只照顾到七位数，八位数在 320px 上仍会折行。币种与
+   数字之间已是不换行空格，这里保证整串放得下一行。不认 cqi 的浏览器会
+   丢掉这条声明，落回 globals.css 里那条 clamp(…, 9vw, …)。 */
+@media (max-width: 767px) {
+  .kpi-lead { container-type: inline-size; }
+  .kpi-lead .kpi-value {
+    font-size: clamp(1.25rem, calc(100cqi / (var(--kpi-chars, 12) * 0.6)), 2.5rem);
+  }
+}
+
+/* 单列之后卡片之间统一 24px：.dashboard 是 24，这一组原来是 16，
+   月度趋势和「钱花在哪里」两张卡片贴得比别的近。 */
+@media (max-width: 1100px) {
+  .dashboard-grid { gap: var(--space-6); }
+}
+
+/* 窄图：画布 280 宽（见 dashboard-view.tsx），封顶 320px——再放大，13px 的
+   刻度字会被放成 15px 以上、比正文还大；卡片更宽时居中。 */
+@media (max-width: 767px) {
+  .chart-svg--narrow { max-width: 320px; margin-inline: auto; }
+}
+
+/* 「钱花在哪里」：手机上一行三列时，进度条先吃满 110px，分类名只剩一两个
+   字宽，全被截成「进.」「租.」。改成两行：名字 + 金额在上，整宽的条在下。 */
+@media (max-width: 540px) {
+  .expense-bars { display: flex; flex-direction: column; }
+  .expense-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'l a' 'b b';
+    gap: 6px var(--space-3);
+    padding: var(--space-2) 0;
+  }
+  /* 名字折成两行时，金额对齐第一行，而不是浮在两行中间。 */
+  .expense-label { grid-area: l; align-self: start; white-space: normal; overflow-wrap: anywhere; }
+  .expense-amount { grid-area: a; align-self: start; }
+  .expense-bar-track { grid-area: b; }
+}
+
+/* 待确认横幅的角标只剩数字：做成一颗圆角数字徽章。 */
+.uncertain-banner .badge {
+  justify-content: center;
+  min-width: 26px; min-height: 26px;
+  font-size: var(--text-sm); font-variant-numeric: tabular-nums;
+}
+
+/* 逾期卡片：每行前面一个绿 / 红点，与名字同一行。 */
+.overdue-list li > span:first-child { display: inline-flex; align-items: center; gap: var(--space-2); }
+
+/* ── 登录 / 注册 / 忘记密码 ─────────────────────────────────────────── */
+
+/* 语言选择框和其它字段一样整宽（原来只有 input 设了 100%）。 */
+.auth-shell select { width: 100%; }
+
+/* 卡片底部的链接：每条撑到 44px 高，放不下就整条换行，不再用「 · 」连句。
+   链接自己有 13px 的上下留白，外边距相应收小。 */
+.auth-shell > .auth-links {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: center;
+  gap: 0 var(--space-5);
+  margin-top: var(--space-3); margin-bottom: calc(-1 * var(--space-3));
+}
+/* 提示语和链接之间只留链接自己的 4px 内边距：一个词距，中文的全角问号
+   本身已带空白。 */
+.auth-links > span {
+  display: inline-flex; flex-wrap: wrap; align-items: center; justify-content: center;
+}
+.auth-links a { display: inline-flex; align-items: center; min-height: 44px; padding: 0 var(--space-1); }
+
+/* ── 离线兜底页 / 全站 404 ─────────────────────────────────────────────
+   借 .auth-page + .auth-shell 的外壳，内容居中：图标、标题、一句说明、
+   一颗整宽的按钮。 */
+.status-shell { text-align: center; }
+.status-shell-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 56px; height: 56px; margin-bottom: var(--space-4);
+  color: var(--text-secondary); background: var(--fill);
+  border-radius: 50%;
+}
+.status-shell h1 { margin-bottom: var(--space-2); }
+/* balance：两三行的短句，末行不剩「被删除。」这样的两三个字。 */
+.auth-shell.status-shell > p { margin-top: 0; font-size: var(--text-base); color: var(--text-secondary); text-wrap: balance; }
+/* .auth-shell a 把链接染成强调色，绿底上就是绿字——按钮这里要改回按钮色。 */
+.status-shell a.primary-button {
+  display: flex; width: 100%; min-height: 48px; margin-top: var(--space-6);
+  font-size: var(--text-base); color: var(--btn-fg);
+}
+.status-shell a.primary-button:hover { color: var(--btn-fg); }
+
+/* 公司内的 404（app/(app)/[orgSlug]/not-found.tsx）。 */
+.not-found-card { display: flex; flex-direction: column; align-items: center; gap: var(--space-5); }
+/* balance：中文那句在 375px 下原来末行只剩「删除。」三个字。 */
+.not-found-card > p { max-width: 36ch; font-size: var(--text-base); color: var(--text-secondary); text-wrap: balance; }
+
+/* ── 我的账号 / 新建公司 ───────────────────────────────────────────── */
+@media (max-width: 767px) {
+  /* 与公司里各页的大标题同一字号（.app-main h1 在手机上是 34px）。 */
+  .account-page h1, .onboarding-page h1 { font-size: var(--text-2xl); }
+  /* 副标题在 320–375px 下末行只剩「有者。」，两行均分更好读。 */
+  .onboarding-page > p { text-wrap: balance; }
+  /* 表单卡片在手机上收窄内边距，与记一笔等表单一致；320px 下时区选择框
+     原来被 24px 的内边距挤得放不下「(GMT+8)」。 */
+  .onboarding-page form, .invite-page > form { padding: var(--space-5) var(--space-4); }
+}
+
+/* ── 打字时收起底部标签栏 ────────────────────────────────────────────
+   app/layout.tsx 设了 interactive-widget=resizes-content：Android Chrome
+   弹出键盘时把布局视口缩到键盘上沿，贴底的标签栏跟着浮到键盘上面，
+   正好盖住视口最下面那一栏（Chrome 认为它「看得见」，不会再往上滚）。
+   iOS 原生应用打字时也不显示标签栏。只认触屏：桌面窄窗口没有软键盘，
+   记一笔页面还会在桌面上自动聚焦金额框，不能因此把导航藏掉。
+   不认 :has 的浏览器整条丢弃，退回原样。 */
+@media (max-width: 767px) and (pointer: coarse) {
+  .app-shell:has(:is(
+    input:not([type]), input[type='text'], input[type='search'], input[type='email'],
+    input[type='tel'], input[type='url'], input[type='password'], input[type='number'],
+    textarea, [contenteditable='true']
+  ):focus) .floating-dock { display: none; }
+}
+
+/* ── 离线兜底页 / 全站 404 的主按钮 ─────────────────────────────────
+   .auth-shell a（500）与 a.primary-button（600）同权重且排在后面，按钮字
+   被压成 500，比别处的主按钮细一档。 */
+.status-shell a.primary-button { font-weight: 600; }
+
+/* ── 概览：卡片文字左缘对齐 ─────────────────────────────────────────
+   单列堆叠后（≤1100px），首要数字和各张图卡的文字从 24px 起，次要数字
+   列表从 20px 起，往下看左缘一进一出。统一到 24px；分隔线跟着文字缩进。 */
+@media (max-width: 1100px) {
+  .kpi-item { padding-inline: var(--space-6); }
+  .kpi-item + .kpi-item::before { left: var(--space-6); }
+}
+/* 待确认横幅在任何宽度下都正好压在首要数字卡片上面，同样对齐到 24px。 */
+.uncertain-banner { padding-inline: var(--space-6); }
+
+/* ==========================================================================
+   Phone layout: transactions, bank import, attachments
+   ========================================================================== */
+
+/* ── 编辑页「类型记错了？」：两个改类型的链接之间不再夹「 · 」，
+   用间距分开，放不下时整条链接换行。 ── */
+.change-kind { display: flex; flex-wrap: wrap; align-items: center; gap: 0 var(--space-3); }
+.change-kind a { white-space: nowrap; }
+
+/* ── 备注是多行框（记一笔、记账凭证）。支持 field-sizing 的浏览器从一行高
+   开始随内容长高，和旁边的单行框一样高；不支持的退回 rows=2。 ── */
+.transaction-form textarea.tx-note { padding-top: var(--space-2); padding-bottom: var(--space-2); }
+@supports (field-sizing: content) {
+  .transaction-form textarea.tx-note { field-sizing: content; min-height: 44px; max-height: 10lh; resize: none; }
+}
+
+/* 「收据」标题下面紧跟「+ 添加收据」时，legend 自带 8px 下边距，按钮不再另加 8px。 */
+.transaction-form legend + label.attachment-upload-label { margin-top: 0; }
+
+/* ── 作废：不和「保存」并排，卡片下面单独一整行红字。宽度跟表单卡片对齐。 ── */
+button.row-button.tx-void-row { margin-top: var(--space-6); max-width: 620px; }
+
+/* 作废记录卡片里的「作废原因」一行。 */
+.record-detail dd.tx-void-reason { color: var(--red); }
+
+/* 场景卡片右侧的箭头只在单列（手机）时出现，见下面 640px 段。 */
+.scenario-card__chevron { display: none; }
+
+/* ── 银行导入 ── */
+/* 上传卡片和下面的列表/空状态原来贴在一起，两层阴影糊成一块。 */
+.import-form { margin-bottom: var(--space-6); }
+.import-form .import-file-field { gap: var(--space-2); align-items: flex-start; }
+/* .import-form label 是上下排的 flex 列；胶囊按钮要横排。 */
+.import-form label.attachment-upload-label { flex-direction: row; gap: var(--space-2); }
+.import-form .attachment-upload-label input[type='file'] { width: 1px; padding: 0; }
+.import-file-name { font-size: var(--text-sm); color: var(--text-primary); overflow-wrap: anywhere; }
+.import-file-field .field-hint { margin-top: 0; }
+/* 两行的居中空状态：pretty 对中文不起作用，375 宽时末行只剩「始。」。 */
+.import-form + .empty-state, .filters-disclosure ~ .empty-state { text-wrap: balance; }
+/* 「‹ 更多」只给手机：桌面侧栏一直在，「更多」页是手机的入口。 */
+@media (min-width: 768px) { .bank-import-back { display: none; } }
+
+@media (max-width: 767px) {
+  /* 改类型的链接是 44px 高的点按目标。链接自己已经撑出上下留白，
+     下面的「日期」不用再隔 20px + 12px。 */
+  .change-kind { margin-bottom: 0; }
+  .change-kind a { display: inline-flex; align-items: center; min-height: 44px; }
+  .transaction-form > .change-kind + label { margin-top: var(--space-2); }
+
+  /* 流水卡片：备注允许两行，320 宽时只剩十来个字，多数记录只能靠金额区分。 */
+  .tx-list .tx-description-line > a {
+    display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; line-clamp: 2;
+    white-space: normal; overflow-wrap: anywhere;
+  }
+  /* 只有一个成员的公司：不重复「记录人」，账户名占满第三行。 */
+  .tx-list--solo td:nth-child(5) { display: none; }
+  .tx-list--solo td:nth-child(4) { grid-column: 1 / -1; }
+
+  /* 筛选：「包含已作废记录」独占一行，下面「重置 | 筛选」各占一半——
+     不再随文案长短忽而三个挤一行、忽而两个一行。 */
+  .filters .filter-toggle { flex: 1 1 100%; margin-right: 0; }
+
+  /* 收据面板是一张卡片（iOS 分组），上传按钮整宽。 */
+  .attachment-panel {
+    padding: var(--space-5) var(--space-4);
+    border-top: none;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-card);
+  }
+  .attachment-panel .attachment-upload-label,
+  .import-form .attachment-upload-label { width: 100%; justify-content: center; }
+  .attachment-panel-actions { display: block; }
+  .import-form .import-file-field { align-items: stretch; }
+
+  button.row-button.tx-void-row { max-width: none; }
+}
+
+/* 起止日期、最小/最大金额两两并排。360 以下不并排：半宽的日期框放不下。 */
+@media (min-width: 360px) and (max-width: 767px) {
+  .filters .filter-field--pair { flex: 1 1 calc(50% - var(--space-2)); }
+}
+
+/* ── 场景卡片：单列时不再撑到 112px（「我进货了」底下空一截），右侧加箭头。 ── */
+@media (max-width: 640px) {
+  .scenario-card { position: relative; min-height: 0; padding-right: var(--space-10); }
+  .scenario-card__chevron {
+    display: block;
+    position: absolute; top: 50%; right: var(--space-4);
+    transform: translateY(-50%);
+    color: var(--text-tertiary);
+  }
+}
+
+@media (max-width: 767px) {
+  /* 备注能折成两行后，「已作废」徽章若还按整块居中，会卡在两行字中间；
+     按基线对齐，它跟第一行字平齐。 */
+  .tx-list .tx-description-line { align-items: baseline; }
+
+  /* 新建表单里的「+ 添加收据」在 fieldset（块级）里，align-self 不起作用，
+     得自己撑满整行，和编辑页、银行导入的上传按钮一样宽。 */
+  .pending-receipts-field label.attachment-upload-label { display: flex; width: 100%; justify-content: center; }
+
+  /* 收据卡片是 main 的直接子元素，.app-main > section 的 40px 上边距压过了
+     它自己的 24px；和下面「作废」那一行一样隔 24px，卡片间距才均匀。 */
+  .app-main > section.attachment-panel { margin-top: var(--space-6); }
+}
+
+/* 筛选里起止日期并排时（360 起），半宽的日期框每边 12px 内边距会把日期最后
+   一位压在日历图标底下；和报表页并排的日期框一样收到 8px。 */
+@media (min-width: 360px) and (max-width: 540px) {
+  .filters .filter-field--pair input[type='date'] { padding-inline: var(--space-2); }
+}
+
+/* ==========================================================================
+   Phone layout: invoices, credit notes, printable invoice
+   ========================================================================== */
+
+/* ==========================================================================
+   单据详情页（发票 / 贷项通知单）
+   ========================================================================== */
+
+/* 副标题是客户名：一个没有空格的长公司名不许把页面撑宽。 */
+.doc-header .page-subtitle { overflow-wrap: anywhere; }
+/* 页头动作里的报错（开具 / 发出失败）：独占一行，不夹在两个按钮中间。 */
+.doc-header .page-header-actions > .form-error { flex-basis: 100%; margin: 0; }
+
+/* 合计 / 已收 / 未收，以及贷项通知单的短值卡片：与下面的状态条、表单隔开；
+   与表单同宽——桌面上一行 1400px 宽的「标签……数字」读不过来。 */
+.doc-summary { max-width: 620px; margin-bottom: var(--space-6); }
+/* 「未收」旁边的逾期徽章：标签太长时徽章自己换到下一行，不挤掉金额。 */
+.doc-summary dt { flex-wrap: wrap; gap: var(--space-1) var(--space-2); text-wrap: pretty; }
+/* 值那一列按最宽的大号金额定宽，320 宽时标签只剩 80px 出头，「已收 / 已抵扣」
+   会甩下一个「扣」。标签与值之间本来就有对齐留白，中缝收窄一点。 */
+.record-detail--inline.doc-summary dt { padding-right: var(--space-2); }
+.record-detail--inline.doc-summary dd { padding-left: var(--space-2); }
+
+/* 作废：页面最底下一整行红字（iOS 详情页「删除」的位置），与表单同宽。 */
+.doc-void-action { max-width: 620px; margin-top: var(--space-8); }
+
+@media (max-width: 540px) {
+  /* 页头的主动作与「打印」在手机上平分一整行，拇指够得着、也不再是两颗
+     靠左的小胶囊。 */
+  .doc-header .page-header-actions > :is(.primary-button, .secondary-button) {
+    flex: 1 1 0; justify-content: center;
+  }
+}
+
+/* ==========================================================================
+   单据表单（发票 / 贷项通知单）
+   ========================================================================== */
+
+/* 税率输入框右侧的「%」：说清楚填的是百分比，不是税额。 */
+.input-suffix { position: relative; }
+.input-suffix > input { padding-right: var(--space-8); }
+.input-suffix > span {
+  position: absolute; right: var(--space-3); top: 50%; transform: translateY(-50%);
+  color: var(--text-tertiary); pointer-events: none;
+}
+
+/* ==========================================================================
+   打印页（invoices/[id]/print）
+   ========================================================================== */
+
+/* 「‹ 返回」与「打印」同一行：窄屏下 .page-header 会竖排，两者各占一行，
+   发票之前白白空出一大截。 */
+.invoice-document > .page-header { flex-direction: row; align-items: center; justify-content: space-between; }
+.invoice-document > .page-header .back-link { margin-bottom: 0; }
+.invoice-document > .page-header > .page-header-actions { width: auto; }
+/* 说明文字原来贴着发票卡片的上沿。 */
+.invoice-document > .hint { margin-bottom: var(--space-4); }
+
+@media (max-width: 767px) {
+  /* 标签单独一行，轨道铺满整行；每一段 44px 高，宽度按字数分。 */
+  .invoice-language-switch > span { flex-basis: 100%; }
+  .invoice-language-switch__options { display: flex; width: 100%; }
+  .invoice-language-switch .invoice-language-switch__options > a {
+    flex: 1 1 auto; min-height: 44px; padding: 0 var(--space-2);
+  }
+}
+
+/* 窄屏上「发票号 / 日期」那块不再缩在左边：铺满整行，值靠右。只改屏幕。 */
+@media screen and (max-width: 640px) {
+  .printable-invoice-facts { flex: 1 1 100%; grid-template-columns: auto 1fr; }
+}
+
+/* 明细表 4 列在 320 宽放不下（打印页的金额列被卡片裁掉，贷项通知单的要
+   横着滑）。窄屏上每行改成两行：描述一行，「数量 × 单价 …… 金额」一行。
+   只在屏幕上：打印仍是表格。:is() 只取一个类名的分量，与原规则同级、靠顺序胜出。 */
+@media screen and (max-width: 480px) {
+  :is(.printable-invoice-items, .doc-items-table),
+  :is(.printable-invoice-items, .doc-items-table) tbody { display: block; }
+  :is(.printable-invoice-items, .doc-items-table) thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden;
+    clip-path: inset(50%); white-space: nowrap;
+  }
+  :is(.printable-invoice-items, .doc-items-table) tbody tr {
+    display: grid; grid-template-columns: auto auto minmax(0, 1fr);
+    align-items: baseline; gap: 2px var(--space-2);
+    padding: var(--space-3) var(--space-4);
+    border-top: 1px solid var(--border-primary);
+  }
+  :is(.printable-invoice-items, .doc-items-table) tbody tr:first-child { border-top: none; }
+  :is(.printable-invoice-items, .doc-items-table) tbody td { padding: 0; border: 0; font-size: var(--text-sm); }
+  :is(.printable-invoice-items, .doc-items-table) tbody td:first-child {
+    grid-column: 1 / -1; width: auto; min-width: 0; color: var(--text-primary);
+  }
+  :is(.printable-invoice-items, .doc-items-table) tbody td:nth-child(2),
+  :is(.printable-invoice-items, .doc-items-table) tbody td:nth-child(3) { text-align: left; color: var(--text-secondary); }
+  :is(.printable-invoice-items, .doc-items-table) tbody td:nth-child(2)::after { content: ' \00d7'; color: var(--text-tertiary); }
+  :is(.printable-invoice-items, .doc-items-table) tbody td:last-child { text-align: right; font-weight: 600; color: var(--text-primary); }
+}
+
+/* 状态条与贷项通知单的明细表也与表单、合计卡片同宽：桌面上 924 宽的状态条
+   夹在 620 宽的卡片之间，右边缘参差不齐。手机上本来就窄于 620，不受影响。 */
+.doc-header, .doc-header ~ :is(.doc-lifecycle, .table-scroll) { max-width: 620px; }
+
+/* 页头的报错排在两颗按钮之后：DOM 里它紧跟主按钮，原样会把「开具」与
+   「打印」拆到报错的两边。 */
+.doc-header .page-header-actions > .form-error { order: 1; }
+
+@media (max-width: 540px) {
+  /* 页头两颗按钮仍平分一行，但谁都不比自己的字窄：320 宽时英文
+     「Record payment」平分只得 140px，折成两行还靠左。fit-content 而不是
+     max-content：字比整行还长时照样折行，不把页面撑宽。 */
+  .doc-header .page-header-actions > :is(.primary-button, .secondary-button) {
+    min-width: fit-content; text-align: center;
+  }
+}
+
+
+/* ==========================================================================
+   Phone layout: bills, purchase orders, payments
+   ========================================================================== */
+
+/* ── 采购订单明细行：每行多一个税率下拉（po-form.tsx 的 --tax） ──
+   桌面上原来是 4 列网格放 5 个格子：税率挤进 40px 的删除键那一列，
+   × 被挤到下一行。给税率单独一列。手机上走全局那套显式摆位（第 3 行）。 */
+@media (min-width: 768px) {
+  .invoice-item-row--tax,
+  .invoice-item-head--tax { grid-template-columns: minmax(0, 1fr) 84px 112px 132px 40px; }
+  /* 税率是下拉框，文字靠左：表头跟着靠左，并对齐到下拉框里文字的起点。 */
+  .invoice-item-head--tax > span:nth-child(4) { text-align: left; padding-left: var(--space-3); }
+}
+
+/* ── 采购订单状态按钮（po-status-actions.tsx） ──
+   详情页底部整行的按钮，iOS 详情页最下面那一组操作。宽度跟表单卡片对齐。 */
+.po-status-actions {
+  display: flex; flex-direction: column; gap: var(--space-3);
+  max-width: 620px; margin-top: var(--space-8);
+}
+.po-void-body {
+  margin: 0; font-size: var(--text-sm); line-height: 1.55;
+  color: var(--text-secondary); text-wrap: pretty;
+}
+
+/* ── 账单详情：合计 / 已付 / 待付 摘要卡 ── */
+.bill-summary { max-width: 620px; margin-bottom: var(--space-6); }
+.bill-summary dd > a { font-variant-numeric: tabular-nums; }
+
+/* 新开账单页标题下面「由采购订单 PO-… 转来」：单号链回那张采购单。 */
+.bill-from-po a { color: var(--accent); font-weight: 500; }
+
+/* ── 收付款列表的筛选卡 ──
+   它不在 .filters-disclosure 里（那一套给流水页：上面一条折叠条、卡片只圆下面两个角），
+   所以既没有圆角顶、也没有与下面列表之间的间距。 */
+.filters.payments-filters { margin-bottom: var(--space-5); }
+
+/* ── 收付款表单的快捷清单：手机上「更多」那一行，桌面上不出现 ── */
+button.payment-quick-pick-more {
+  width: 100%; margin-top: var(--space-2);
+  color: var(--accent); background: var(--accent-subtle);
+  font-size: var(--text-sm);
+}
+button.payment-quick-pick-more:hover:not(:disabled) { color: var(--accent); background: var(--accent-subtle); }
+@media (min-width: 768px) {
+  button.payment-quick-pick-more { display: none; }
+}
+
+@media (max-width: 767px) {
+  .filters.payments-filters { padding: var(--space-4); border-radius: var(--radius-md); }
+
+  /* 快捷清单一行：单号 | 金额，往来对象独占第二行（原来夹在中间，320 宽只剩
+     「Sya…」三个字），到期日第三行。 */
+  .transaction-form .payment-quick-pick-item,
+  .payment-quick-pick-item {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas: 'number amount' 'contact contact' 'due due';
+  }
+  .payment-quick-pick-contact { white-space: normal; overflow: visible; overflow-wrap: anywhere; }
+  /* 不在页面里再套一层滚动：先露 5 张，其余收在「显示全部」后面；勾中的那张总是露着。 */
+  .payment-quick-pick ul { max-height: none; overflow: visible; }
+  .payment-quick-pick:not([data-expanded]) li:nth-child(n + 6):not(:has([aria-pressed='true'])) { display: none; }
+
+  .po-status-actions { max-width: none; margin-top: var(--space-6); }
+  .bill-summary { max-width: none; }
+}
+
+/* 详情页标题「编辑采购订单 PO-00002」：汉字之间默认处处可断，320 宽会折成
+   「编辑采购订 / 单 PO-…」。带单号的标题只在空格处折行（单号本身已 nowrap）。 */
+.page-header h1:has(> .doc-no) { word-break: keep-all; overflow-wrap: break-word; }
+
+/* ── 只读采购订单的明细表（purchase-orders/[id]）──
+   四列在 320 宽放不下，金额列被挤到卡片外面要横向滑。手机上每一行折成
+   两行：描述独占一行；下面「20 × RM 185.00」靠左、金额靠右。 */
+@media screen and (max-width: 767px) {
+  .po-items-table, .po-items-table tbody { display: block; }
+  .po-items-table thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%);
+  }
+  .po-items-table tbody tr {
+    display: grid; grid-template-columns: auto minmax(0, 1fr) auto;
+    column-gap: var(--space-1); row-gap: 2px; align-items: baseline;
+    padding: var(--space-3) var(--space-4);
+    border-bottom: 1px solid var(--border-primary);
+  }
+  .po-items-table tbody tr:last-child { border-bottom: none; }
+  .po-items-table tbody td { padding: 0; border: none; }
+  .po-items-table tbody td:nth-child(1) { grid-column: 1 / -1; font-size: var(--text-sm); }
+  .po-items-table tbody td:nth-child(2),
+  .po-items-table tbody td:nth-child(3) { text-align: left; color: var(--text-secondary); }
+  .po-items-table tbody td:nth-child(2)::after { content: ' ×'; }
+  .po-items-table tbody td:nth-child(4) { text-align: right; font-size: var(--text-sm); font-weight: 600; }
+}
+
+/* 账单逾期那一句单独一行，红字，接在状态说明前面。 */
+.bill-overdue-notice { display: block; }
+
+@media (max-width: 767px) {
+  /* 快捷清单里往来对象在手机上会折成好几行（马来文 + 中文全称），按钮默认的
+     1.2 行高是给单行标签用的，几行汉字会贴在一起。用 balance 不用 pretty：
+     汉字处处可断，pretty 在 320 宽仍会把「公司」甩到末行。 */
+  .payment-quick-pick-contact { line-height: 1.4; text-wrap: balance; }
+}
+
+/* ==========================================================================
+   Phone layout: reports, ledger, budgets, reconciliation, export
+   ========================================================================== */
+
+/* 横向滑动表格右缘的提示阴影。暗色卡片上 18% 的黑几乎看不出来，单给一档。 */
+:root, [data-theme='dark'] { --scroll-edge-shadow: rgba(0, 0, 0, 0.6); }
+[data-theme='light'] { --scroll-edge-shadow: rgba(17, 17, 26, 0.22); }
+
+/* ==========================================================================
+   报表合计区
+   ==========================================================================
+   tfoot 里的 <th> 原来没有 text-align，落回浏览器默认的居中；每一行合计
+   都画双线，现金流量表底下叠了四道。现在：标签左对齐、金额右对齐，双线
+   只画在每张表真正的总计（.grand-total）下面；没有标记的旧表，最后一行
+   合计照旧带双线。 */
+
+.report-table tfoot :is(th, td) { text-align: left; border-bottom: 0; }
+.report-table :is(tfoot, .total-row) .numeric { text-align: right; }
+.report-table tfoot tr + tr > * { border-top: 1px solid var(--border-primary); }
+.report-table tfoot tr.grand-total > * { border-top: 1px solid var(--text-tertiary); }
+.report-table tfoot tr:last-child:not(.balance-check) > *,
+.report-table tr.grand-total > * { border-bottom: 3px double var(--text-tertiary); }
+.report-table tr.grand-total + tr > * { border-top: 0; }
+/* 现金流量表的「期初现金」：一行普通数，不是合计。 */
+.report-table tfoot tr.footer-line > * { font-weight: 400; }
+
+/* 平衡校验：三张表原来三种样子（粗体居中双线 / 普通正文行）。统一成
+   合计下面一行小字结论，平了是绿、不平是红。 */
+.report-table tr.balance-check > * {
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm); font-weight: 600; color: var(--text-secondary);
+  border-bottom: 0;
+}
+.report-table tr.balance-check.is-ok .balance-verdict { color: var(--green); }
+.report-table tr.balance-check.is-off .balance-verdict { color: var(--red); }
+/* 手机上表格横向滑动，最后一列的数（平衡结论、期末余额）落在可视区
+   以外。第一格里放一份只给眼睛看的副本（aria-hidden），只在手机上出现；
+   原格子在那时只留给读屏。 */
+.mobile-echo { display: none; }
+
+/* 总计是整张表最后一行时，双线正好压在卡片的圆角上被裁掉两头。 */
+.report-table:has(> :last-child > tr.grand-total:last-child) { padding-bottom: var(--space-2); }
+
+/* 两行表头（报表名 + 期间）：两行都吸顶会在第一行上叠印透明的第二行。
+   只让第一行吸住，期间那一行跟着内容滚走。 */
+.report-table thead tr + tr th { position: static; }
+
+/* 对账单表格里「该期间无交易」那一格：.empty-state 的卡片底色与阴影
+   画在表格单元格里，成了卡片里套卡片。 */
+.report-table td.empty-state { background: none; box-shadow: none; border-radius: 0; padding: var(--space-8) var(--space-4); }
+
+/* ==========================================================================
+   报表页签：哪一侧还有被挡住的页签，哪一侧就淡出
+   ==========================================================================
+   属性由 reports-view.tsx 在滚动时打上。只在屏幕上：打印时页签条只剩
+   选中的那一个标题。 */
+
+@media screen {
+  .report-tabs[data-more-after] {
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 40px), transparent);
+  }
+  .report-tabs[data-more-before] {
+    -webkit-mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+    mask-image: linear-gradient(to left, #000 calc(100% - 40px), transparent);
+  }
+  .report-tabs[data-more-before][data-more-after] {
+    -webkit-mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+    mask-image: linear-gradient(to right, transparent, #000 40px, #000 calc(100% - 40px), transparent);
+  }
+}
+
+/* ==========================================================================
+   工具条（总账 / 对账单 / 税额汇总 / 预算 / 对账）
+   ========================================================================== */
+
+/* 控件包在 <label> 里，继承了标签的 600 字重：选中的值看起来像标题，
+   和导出页（标签与控件是兄弟节点）的同一种日期框粗细不一样。 */
+.gl-controls :is(select, input), .statement-controls :is(select, input),
+.budget-toolbar select, .reconciliation-toolbar select,
+.reconciliation-summary input { font-weight: 400; }
+
+/* 外层已经是 flex + gap，再加工具条自己的下边距就成了 40px。 */
+.budget-view > .budget-toolbar, .statement-tab > .statement-controls,
+.tax-tab > .statement-controls, .reconciliation-view > .reconciliation-toolbar { margin-bottom: 0; }
+
+/* 税额汇总结果里的期间条：外层已是 flex + gap，它自己的 20px 下边距
+   让期间和表格之间空出 44px。 */
+.tax-report > p.report-period { margin-bottom: 0; }
+
+/* 税额汇总页签原来没有任何样式：标题直接压在日期卡片上。 */
+.tax-tab { display: flex; flex-direction: column; gap: var(--space-5); }
+.tax-tab h3 { font-size: var(--text-md); margin-bottom: 0; }
+
+/* 总账：期初 / 期末摘要卡。原来期初余额是一段裸文字，下边紧贴表格。 */
+.gl-summary { max-width: 480px; margin-bottom: var(--space-4); }
+.gl-summary + .hint { margin: 0 0 var(--space-3); }
+
+/* 预算的「应用」与总账、对账单是同一种工具条主按钮。 */
+.budget-toolbar > button {
+  min-height: 38px;
+  color: var(--btn-fg); background: var(--btn-bg); box-shadow: var(--shadow-button);
+}
+.budget-toolbar > button:hover:not(:disabled) { background: var(--btn-bg-hover); color: var(--btn-fg); }
+
+@media (max-width: 540px) {
+  /* 主按钮在手机上是一整条，和导出页一致，不再是缩在左边的小胶囊。 */
+  .gl-controls > button, .statement-controls > button, .budget-toolbar > button { flex: 1 1 100%; }
+  /* 年、月是两个很短的下拉，并排放。 */
+  .budget-toolbar label { flex: 1 1 0; min-width: 0; }
+}
+/* 起止日期在 360 宽以上并排；320 宽的手机上一个日期框只剩一百来像素，
+   放不下日期和日历图标，仍然各占一行。 */
+@media (min-width: 360px) and (max-width: 540px) {
+  .gl-controls label:has(input[type='date']),
+  .statement-controls label:has(input[type='date']) { flex: 1 1 0; min-width: 0; }
+  /* 360 宽时两个日期框各 140px 左右，桌面那份内边距会把日期最后一位挤没。 */
+  .gl-controls, .statement-controls { padding-inline: var(--space-4); column-gap: var(--space-3); }
+  .gl-controls input[type='date'], .statement-controls input[type='date'] { padding-inline: var(--space-2); }
+}
+
+/* ==========================================================================
+   预算：可点改的金额
+   ========================================================================== */
+
+/* 原来是一个带 onClick 的 <span>：触屏上看不出能点。做成一个长得像
+   输入框的按钮，右边一支小铅笔。 */
+.budget-amount {
+  display: inline-flex; align-items: center; justify-content: flex-end; gap: var(--space-2);
+  min-height: 34px; min-width: 8em; padding: 0 var(--space-3);
+  font-size: inherit; font-weight: 400; font-variant-numeric: tabular-nums;
+  color: var(--text-primary);
+  background: var(--field-bg);
+  border: 1px solid var(--field-border);
+  border-radius: var(--radius-sm);
+  box-shadow: none;
+}
+.budget-amount svg { flex: none; color: var(--text-tertiary); }
+.budget-amount:hover:not(:disabled) { color: var(--text-primary); background: var(--field-bg); border-color: var(--field-border-hover); }
+.budget-amount:active:not(:disabled) { transform: none; background: var(--fill); }
+.budget-amount:focus-visible { outline: none; border-color: var(--accent); box-shadow: 0 0 0 4px var(--focus-ring); }
+
+.budget-edit { display: flex; align-items: center; justify-content: flex-end; gap: var(--space-2); }
+.budget-edit > button {
+  color: var(--btn-fg); background: var(--btn-bg); box-shadow: var(--shadow-button);
+}
+.budget-edit > button:hover:not(:disabled) { background: var(--btn-bg-hover); color: var(--btn-fg); }
+
+/* ==========================================================================
+   银行对账
+   ========================================================================== */
+
+/* 对账单日期 / 余额是摘要网格里的两格，原来没有任何样式：标签文字和
+   输入框挤在一行，贴着卡片左边缘。 */
+.reconciliation-summary > label {
+  display: flex; flex-direction: column; gap: var(--space-1);
+  margin: 0; padding: var(--space-4) var(--space-5);
+  box-shadow: -1px 0 0 var(--border-primary);
+  font-size: var(--text-sm); font-weight: 500; color: var(--text-secondary);
+}
+.reconciliation-summary > label > input { width: 100%; min-width: 0; }
+/* 150px 一格放不下日期框，金额也会在「RM」后面折行。 */
+.reconciliation-summary { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
+.reconciliation-summary > div > span:last-child { white-space: nowrap; }
+/* 日期和类型不折行：备注那一列最宽，原来「收入」被挤成一字一行。 */
+.reconciliation-table td:nth-child(2), .reconciliation-table td:nth-child(4) { white-space: nowrap; }
+.cleared-toggle { display: inline-flex; align-items: center; justify-content: center; min-width: 32px; min-height: 32px; margin: 0; cursor: pointer; }
+
+@media (max-width: 540px) {
+  .reconciliation-summary > label { padding: var(--space-3) var(--space-4); box-shadow: 0 -1px 0 var(--border-primary); }
+  /* 五个数在手机上各占一整格、上下叠放，一屏放不下。改成 iOS 的
+     「标签在左、数在右」，一行一个。 */
+  .reconciliation-summary > div {
+    display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-3);
+    padding: var(--space-3) var(--space-4);
+  }
+  .reconciliation-summary > div > span:first-child { margin-bottom: 0; }
+  .reconciliation-summary > div > span:last-child { font-size: var(--text-md); text-align: right; }
+}
+
+/* ==========================================================================
+   导出页
+   ========================================================================== */
+
+.export-form .option-text { display: flex; flex-direction: column; min-width: 0; }
+
+/* ==========================================================================
+   手机：横向滑动的报表表格
+   ==========================================================================
+   只在屏幕上：打印纸的宽度同样落在 767px 以内。 */
+
+@media screen and (max-width: 767px) {
+  /* 右缘一道阴影说「右边还有」，滑到头时被贴在内容末端的同色遮罩盖住
+     （background-attachment: local 跟内容走，scroll 钉在容器上）。 */
+  .table-scroll {
+    /* 表格里视觉隐藏的绝对定位文字（读屏副本、预算按钮的说明）以它为
+       包含块：否则它们按视口定位、不受这层横向裁切，整页被撑宽。 */
+    position: relative;
+    background:
+      linear-gradient(to left, var(--bg-secondary) 50%, transparent) right center / 40px 100% no-repeat local,
+      radial-gradient(farthest-side at 100% 50%, var(--scroll-edge-shadow), transparent) right center / 16px 100% no-repeat scroll,
+      var(--bg-secondary);
+  }
+  /* 表头在这里吸不住顶（容器本身就是滚动容器），它的底色只会挡住那道阴影。 */
+  .table-scroll > table > thead th { background: transparent; }
+
+  /* 第一列（科目、客户、日期）钉在左边：滑去看后面的金额列时，还知道
+     这一行是谁。跨列的格子（分组标题、期间、「期末余额」）不钉——
+     它们一钉就会滑过去盖住右边那一格的金额。 */
+  .table-scroll > table > :is(thead, tbody, tfoot) > tr > :first-child:not([colspan]) {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--bg-secondary);
+  }
+  .table-scroll > table > thead > tr > :first-child:not([colspan]) { z-index: 3; }
+  .table-scroll > table .section-header > :first-child:not([colspan]) { background: var(--bg-tertiary); }
+  /* 窄列里的科目名按行均分，不留「家具及装 / 修」这种单字一行。 */
+  .table-scroll > table > tbody > tr > :first-child { text-wrap: balance; }
+
+  .table-scroll .mobile-echo { display: inline; margin-left: var(--space-3); }
+  .table-scroll .mobile-echo-source {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap;
+  }
+  /* 平衡校验的结论在钉住的第一列里、标签下面一行：表格怎么滑都看得见。 */
+  .report-table tr.balance-check > * { padding: var(--space-2) var(--space-3); }
+  .report-table tr.balance-check > :first-child { white-space: nowrap; }
+  .table-scroll tr.balance-check .mobile-echo { display: block; margin-left: 0; white-space: normal; }
+  .report-table th.report-period { padding-inline: var(--space-3); }
+
+  /* 对账表的第一列只放一个勾选框：全局给多列表第一列的 9em 在这里是白占，
+     日期反被挤成两行。勾选框的可点范围撑到 44px。 */
+  .table-scroll > table.report-table.reconciliation-table :is(td, th):first-child { min-width: 0; width: 1%; }
+  .cleared-toggle { min-width: 44px; min-height: 44px; margin: calc(-1 * var(--space-2)) 0; }
+
+  /* 预算编辑框：桌面那 140px 在手机上和「保存」一起放不进可视区。 */
+  .budget-input { width: 7.5em; }
+}
+
+/* 钉住的第一列在内容滑到它底下时浮起一道边。支持滚动驱动动画的浏览器
+   才有；不支持的照样能用，只是没有这道边。 */
+@supports (animation-timeline: scroll()) {
+  @media screen and (max-width: 767px) {
+    .table-scroll { scroll-timeline: --table-scroll-x x; }
+    .table-scroll > table > :is(thead, tbody, tfoot) > tr > :first-child:not([colspan]) {
+      animation: sticky-column-edge linear both;
+      animation-timeline: --table-scroll-x;
+      animation-range: 0 24px;
+    }
+  }
+}
+@keyframes sticky-column-edge {
+  to { box-shadow: 1px 0 0 var(--border-primary), 8px 0 10px -8px var(--scroll-edge-shadow); }
+}
+
+@media screen and (max-width: 767px) and (hover: hover) {
+  .table-scroll > table > tbody > tr:hover > :first-child:not([colspan]) {
+    background: linear-gradient(var(--bg-hover), var(--bg-hover)), var(--bg-secondary);
+  }
+}
+
+/* 打印：纸面宽度也在 767px 以内，手机上的横向滑动容器会把放不下的列
+   直接裁掉。纸上没有滑动，全部摊开。 */
+@media print {
+  .table-scroll { overflow: visible; background: none; box-shadow: none; border-radius: 0; }
+}
+
+/* ==========================================================================
+   导出页
+   ========================================================================== */
+
+/* 第一组「导出内容」直接贴着卡片的内边距：.export-form fieldset 那 20px
+   上边距对它也生效，卡片顶上空出一条 40px 的白带。 */
+.export-form > fieldset:first-child { margin-top: 0; }
+
+/* ==========================================================================
+   预算
+   ========================================================================== */
+
+/* 科目代码退成名称下面一行小字。 */
+.budget-account-code {
+  display: block;
+  font-size: var(--text-xs); color: var(--text-tertiary);
+  overflow-wrap: anywhere;
+}
+/* 每个金额按钮各按自己的内容定宽，在右对齐的格子里左缘参差不齐。
+   撑满这一列（列宽本来就由最宽的那个按钮决定），一列框一样宽。 */
+.budget-table .budget-amount { width: 100%; }
+
+/* ==========================================================================
+   银行对账：差异 + 完成对账
+   ========================================================================== */
+
+.reconcile-actions {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end;
+  gap: var(--space-3) var(--space-4);
+}
+.reconcile-diff {
+  display: inline-flex; align-items: baseline; gap: var(--space-2);
+  font-size: var(--text-sm); color: var(--text-secondary);
+}
+.reconcile-diff > .mono { font-size: var(--text-md); font-weight: 600; color: var(--text-primary); white-space: nowrap; }
+.reconcile-diff > .mono.positive { color: var(--green); }
+.reconcile-diff > .mono.negative { color: var(--red); }
+
+@media screen and (max-width: 767px) {
+  /* 浮在标签栏上方：标签栏 61px 高，中间的「+」再高出 6px，留 13px 空。
+     按钮能和差异并排就并排，放不下（英文、窄屏）就整条换到下一行。 */
+  .reconcile-actions {
+    position: sticky; bottom: calc(80px + env(safe-area-inset-bottom)); z-index: 5;
+    justify-content: space-between;
+    padding: var(--space-3) var(--space-4);
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-raised);
+  }
+  .reconcile-actions > .reconcile-submit { flex: 1 1 auto; }
+
+  /* 钉住的第一列（总账的日期、对账的勾选框 + 日期）占走了宽度，说明那一列
+     只剩几十像素，一条备注折成六行。表格本来就横向滑动，给它一个下限。 */
+  .table-scroll > table.gl-table > tbody > tr > td:nth-child(2),
+  .table-scroll > table.reconciliation-table > tbody > tr > td:nth-child(3) { min-width: 11em; }
+
+  /* 手机上只给名称，和试算平衡表、资产负债表一致。 */
+  .budget-table .budget-account-code { display: none; }
+}
+
+/* ==========================================================================
+   Phone layout: settings, fixed assets, projects
+   ========================================================================== */
+
+/* ==========================================================================
+   设置里的列表行（分类、税率、联系人、库存、科目）
+   ========================================================================== */
+
+/* 行尾的几个按钮收进一个 .row-actions：一起换行、一起靠右。原来它们是
+   .list-item-line 的直接子元素，手机上一个一个地掉到下一行。 */
+.row-actions {
+  display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end;
+  gap: var(--space-2);
+  flex: 0 0 auto; margin-left: auto;
+}
+
+/* 新增表单的按钮行：独占一整行，主按钮在前。 */
+.add-form > .add-form-actions,
+.row-form > .add-form-actions {
+  grid-column: 1 / -1;
+  display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2);
+}
+.add-form .checkbox-label { min-height: 44px; font-size: var(--text-sm); }
+/* 页头的「新增」锚点跳到这里：别贴着屏幕上沿。 */
+.add-form[id] { scroll-margin-top: var(--space-4); }
+/* 分组列表的最后一组后面紧跟新增表单：组的下边距 32 + 表单上边距 20 太空。 */
+.named-list > .coa-section:last-child { margin-bottom: 0; }
+
+/* 行内编辑表单：带标签的字段网格，放在列表行里。 */
+.row-form {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: var(--space-3); align-items: end;
+  padding: var(--space-4) var(--space-4) var(--space-4) var(--space-5);
+}
+.row-form input:not([type='checkbox']):not([type='radio']),
+.row-form select, .row-form textarea { width: 100%; min-width: 0; }
+
+/* 「详情 ▾」一类的展开按钮：箭头跟着开合转向。 */
+.disclosure-button { min-width: 44px; }
+.disclosure-button svg { transition: transform var(--dur-fast) var(--ease); }
+.disclosure-button[aria-expanded='true'] svg { transform: rotate(180deg); }
+
+/* 联系人一行：名字与联系方式在左，按钮在右；展开的详情在下面占满。 */
+.contact-row {
+  display: grid; grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas: 'name actions' 'meta actions' 'detail detail';
+  align-items: center; column-gap: var(--space-3); row-gap: 2px;
+  min-height: 52px;
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5);
+}
+.contact-row > .contact-name { grid-area: name; min-width: 0; overflow-wrap: anywhere; }
+.contact-row > .contact-meta { grid-area: meta; }
+.contact-row > .row-actions { grid-area: actions; margin-left: 0; }
+.contact-row > .contact-detail-list { grid-area: detail; }
+.contact-meta {
+  display: flex; flex-wrap: wrap; gap: 0 var(--space-3); min-width: 0;
+  font-size: var(--text-xs); color: var(--text-secondary);
+}
+.contact-meta > span { min-width: 0; overflow-wrap: anywhere; }
+.contact-detail-list {
+  display: grid; grid-template-columns: max-content minmax(0, 1fr);
+  gap: var(--space-1) var(--space-3);
+  margin: var(--space-2) 0 0; padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  background: var(--bg-primary); border-radius: var(--radius-sm);
+}
+.contact-detail-list dt { color: var(--text-secondary); }
+.contact-detail-list dd { margin: 0; color: var(--text-primary); overflow-wrap: anywhere; white-space: pre-line; }
+
+/* 库存页：表格、停用组、新增表单之间统一的间距。外层不再是 .named-list。 */
+.inventory-list { display: flex; flex-direction: column; gap: var(--space-5); }
+.inventory-list > .coa-section { margin: 0; }
+.inventory-list > .add-form, .inventory-list > .form-error { margin: 0; }
+
+@media (max-width: 767px) {
+  /* 名称至少留七个字宽，按钮组整组换到第二行，而不是把名称挤成一列竖字。 */
+  .list-item-line > span:first-child:not(.coa-code) { flex: 1 1 0; min-width: 7em; }
+  /* 三个按钮的行（税率）：按钮组在手机上直接放第二行、靠左。 */
+  .list-item-line--stacked > .row-actions { flex-basis: 100%; justify-content: flex-start; margin-left: 0; }
+
+  /* 科目代码可以缩、可以断：长代码原来按内容宽度撑出卡片右边。
+     （globals 里 span.coa-code 是 flex: 0 0 auto。） */
+  .list-item-line > span.coa-code { flex: 0 1 auto; min-width: 0; overflow-wrap: anywhere; }
+
+  .add-form > .add-form-actions,
+  .row-form > .add-form-actions { flex-direction: column; align-items: stretch; }
+
+  .contact-row { grid-template-columns: minmax(0, 1fr); grid-template-areas: 'name' 'meta' 'actions' 'detail'; }
+  .contact-row > .row-actions { justify-content: flex-start; margin-top: var(--space-2); }
+  .contact-detail-list { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .contact-detail-list dd + dt { margin-top: var(--space-2); }
+}
+
+/* ==========================================================================
+   设置 → 公司资料
+   ========================================================================== */
+
+/* 每一组字段是一张卡片，组名在卡片里作标题。原来字段直接落在灰底上。 */
+.settings-form { display: flex; flex-direction: column; gap: var(--space-5); max-width: 620px; }
+.settings-form > .settings-fieldset {
+  margin: 0; padding: var(--space-5);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+/* float + width 100%：让 legend 落进 fieldset 的内边距里，像普通标题一样排。 */
+.settings-form legend {
+  float: left; width: 100%;
+  margin: 0 0 var(--space-3); padding: 0;
+  font-size: var(--text-md); font-weight: 650; color: var(--text-primary);
+}
+.settings-form legend + * { clear: both; }
+.settings-form label { margin: var(--space-4) 0 var(--space-2); }
+.settings-form legend + label,
+.settings-form legend + .field-hint + label { margin-top: 0; }
+.settings-form label.attachment-upload-label { margin: 0; }
+.settings-form input:not([type='checkbox']):not([type='radio']):not([type='file']),
+.settings-form select, .settings-form textarea { width: 100%; min-width: 0; }
+.settings-form > .form-success { margin: 0; }
+.settings-form > button[type='submit'] { align-self: flex-start; min-height: 48px; font-size: var(--text-base); }
+
+.settings-card {
+  max-width: 620px; padding: var(--space-5);
+  background: var(--bg-secondary);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-card);
+}
+.settings-lock-status { margin: 0 0 var(--space-1); font-weight: 600; color: var(--text-primary); }
+.settings-card > .form-success { margin: var(--space-3) 0 0; }
+/* 年结页「去封账」「修改财年」直接跳到这两处。 */
+#lock, #fiscalYearStartMonth { scroll-margin-top: var(--space-4); }
+
+/* 没有 logo 时的占位框。白底是为真 logo 垫的（看到的就是印出来的样子），
+   空着的时候在暗色模式里是整页唯一一块刺眼的白。 */
+.logo-uploader-preview:not(:has(img)) { background: var(--bg-primary); border-style: dashed; }
+.logo-uploader-preview:not(:has(img)) .text-muted { color: var(--text-tertiary); }
+
+@media (max-width: 767px) {
+  .settings-form > .settings-fieldset, .settings-card { padding: var(--space-5) var(--space-4); }
+  .settings-form > button[type='submit'] { align-self: stretch; }
+}
+
+/* ==========================================================================
+   设置 → 年结
+   ========================================================================== */
+
+/* 区块之间原来是 gap 40 + h2 自己的 margin-top 40，整整 80px。 */
+.ye-section > h2 { margin-top: 0; }
+@media (max-width: 767px) {
+  .ye-panel { gap: var(--space-8); }
+}
+
+/* ==========================================================================
+   设置 → 操作记录
+   ========================================================================== */
+
+@media (max-width: 767px) {
+  /* 一行记录：做了什么（粗）+ 时间在第一行，谁 + 对象编号在第二行。
+     原来四行同样大小、同样颜色，分不出哪一句是重点。 */
+  .audit-table td.audit-what {
+    grid-row: 1; grid-column: 1; min-width: 0; overflow-wrap: anywhere;
+    font-size: var(--text-base); font-weight: 600; color: var(--text-primary);
+  }
+  .audit-table td.audit-when {
+    grid-row: 1; grid-column: 2; align-self: center;
+    font-size: var(--text-xs); color: var(--text-tertiary); text-align: right; white-space: nowrap;
+  }
+  .audit-table td.audit-who {
+    grid-row: 2; grid-column: 1; min-width: 0; overflow-wrap: anywhere;
+    font-size: var(--text-xs); color: var(--text-secondary);
+  }
+  .audit-table td.audit-target {
+    grid-row: 2; grid-column: 2;
+    font-size: var(--text-xs); color: var(--text-tertiary); text-align: right;
+  }
+}
+
+/* ==========================================================================
+   固定资产、项目：列表行
+   ========================================================================== */
+
+/* 手机上这两页是从「更多」推进来的，需要返回；桌面上侧栏一直在。 */
+@media (min-width: 768px) { .more-back { display: none; } }
+
+/* 一张卡片一条记录：名字 + 状态，一行小字的要点，一排按钮。 */
+.record-row {
+  position: relative;
+  display: flex; flex-direction: column; gap: var(--space-2);
+  padding: var(--space-3) var(--space-4) var(--space-3) var(--space-5);
+}
+.record-row-head { display: flex; align-items: center; gap: var(--space-2); min-width: 0; }
+.record-row-head > .badge { flex: 0 0 auto; }
+.record-row-link {
+  flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere;
+  font-size: var(--text-base); font-weight: 600; color: var(--text-primary);
+}
+.record-row-link:hover { text-decoration: none; color: var(--text-primary); }
+/* 要点之间用「·」隔开。换行时行首不该挂着一个点：每一项的点画在它左边的
+   空隙里，整行往左挪出一个空隙宽、再用 clip-path 裁掉，于是行首那一项的
+   点正好落在裁掉的那一条里。 */
+.record-row-meta {
+  display: flex; flex-wrap: wrap;
+  margin: 0 0 0 calc(-1 * var(--space-4));
+  clip-path: inset(0 0 0 var(--space-4));
+  font-size: var(--text-sm); color: var(--text-secondary);
+}
+.record-row-meta > span { position: relative; min-width: 0; padding-left: var(--space-4); overflow-wrap: anywhere; }
+.record-row-meta > span::before {
+  content: '·'; position: absolute; left: calc(var(--space-4) / 2); transform: translateX(-50%);
+  color: var(--text-tertiary);
+}
+.record-row-meta + .record-row-meta { margin-top: calc(-1 * var(--space-2)); }
+.record-row-actions { margin-top: var(--space-1); }
+.record-row-extra { display: flex; flex-direction: column; gap: var(--space-2); }
+.record-row-extra .transaction-table { box-shadow: none; background: var(--bg-primary); }
+.record-row-extra > .field-hint { margin: 0; }
+.doc-actions > .form-error { flex-basis: 100%; margin: 0; }
+
+@media screen {
+  /* 整张卡都能点进详情（原来只有那一行名字能点）。按钮与展开的内容
+     浮在这层之上；按钮之间的空白不拦点击，点下去照样进详情。 */
+  .record-row-link::after { content: ''; position: absolute; inset: 0; }
+  .record-row-link:focus-visible { outline: none; }
+  .record-row:has(.record-row-link:focus-visible) { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .record-row-actions, .record-row-extra { position: relative; z-index: 1; }
+  .record-row-actions { pointer-events: none; }
+  .record-row-actions > * { pointer-events: auto; }
+}
+@media (hover: hover) {
+  .record-row:has(.record-row-link:hover) { background: var(--bg-hover); }
+}
+
+/* ==========================================================================
+   详情页（固定资产、项目）
+   ========================================================================== */
+
+.record-heading { min-width: 0; }
+/* 1 1 20rem：长标题自己换行，按钮仍留在右边，不被挤到下一行。只在横排的
+   页头里用：≤540px 页头竖排，flex-basis 就成了高度。 */
+@media (min-width: 541px) {
+  .record-heading, .page-header > h1.record-title { flex: 1 1 20rem; }
+}
+.page-header h1.record-title { overflow-wrap: anywhere; }
+.record-heading > .page-subtitle { overflow-wrap: anywhere; }
+.project-status-row { margin-top: var(--space-4); }
+
+/* 编辑页的返回胶囊上是项目名：截成一行。 */
+.back-link-clamp .back-link { max-width: 100%; }
+.back-link-clamp .back-link > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* 固定资产的表单：字段之间统一隔开，两两并排的字段在窄屏上自动叠起来。 */
+.fa-form { gap: var(--space-5); }
+.fa-form > .field-hint, .fa-form > .form-error, .fa-form > .form-success { margin: 0; }
+.app-main .fa-form > button[type='submit'] { margin-top: var(--space-3); align-self: stretch; }
+/* 编辑表单在 <section> 里，globals 的 .app-main > section form input 把输入框
+   限到 440px；同一张表单在新建页是满宽的。 */
+.app-main .fa-form :is(input, select, textarea) { max-width: none; }
+.form-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 180px), 1fr));
+  gap: var(--space-5) var(--space-4);
+}
+.schedule-toggle { margin-top: var(--space-3); }
+.dispose-asset-panel > .record-detail { margin-bottom: var(--space-3); }
+
+@media (max-width: 767px) {
+  /* 记录的名字是用户起的，可能很长：手机上字号收一档、允许在任意处断行。
+     原来一个长项目名占五行、半个首屏。 */
+  .app-main .page-header h1.record-title { font-size: clamp(1.375rem, 6.5vw, var(--text-xl)); }
+  .page-header:has(.record-title) .page-header-actions > a { flex: 1 1 0; }
+}
+
+/* 返回胶囊里的 ‹ 不许被压扁：.back-link-clamp 让文字缩成省略号时，图标
+   作为 flex 项也跟着缩，只剩一半宽。 */
+.back-link > svg { flex-shrink: 0; }
+
+/* 列表行名字下面的一行小字（分类的「收入 / 支出」）。 */
+.list-item-sub {
+  display: block; margin-top: 2px;
+  font-size: var(--text-xs); color: var(--text-secondary);
+}
+.list-item.inactive .list-item-sub { color: var(--text-tertiary); }
+
+/* 定期交易表单的按钮行：保存在前，取消在后。 */
+.recurring-form > .add-form-actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); }
+/* 点卡片上的「编辑」时表单会滚到顶上：别贴着屏幕上沿。 */
+.recurring-form { scroll-margin-top: var(--space-4); }
+
+@media screen and (max-width: 767px) {
+  /* 卡片底部的按钮行（项目、固定资产、库存）：按钮按内容宽，放不下的那一个
+     单独掉到第二行、缩在左边。改成每行的按钮一起撑满整行。 */
+  .record-row-actions > :is(button, a),
+  .inventory-list .doc-table td.doc-actions-cell > .doc-actions > button { flex: 1 1 auto; }
+
+  .recurring-form > .add-form-actions { flex-direction: column; align-items: stretch; }
+}
+
+/* 固定资产的摘要卡在手机上改成标签在上、值在下（与项目详情一样）。
+   标签在左、值在右时，右列按最宽的那个值（大号的原值）定宽，320 宽的
+   英文界面里「Purchase Date」「Depreciation Method」都被挤成两行。 */
+@media screen and (max-width: 520px) {
+  .record-detail--inline.fa-summary dl { grid-template-columns: minmax(0, 1fr); }
+  .record-detail--inline.fa-summary dt { padding-bottom: 0; }
+  .record-detail--inline.fa-summary dd { border-top: none; padding-top: var(--space-1); text-align: left; }
+}
+
+/* 新增表单里的复选框（税率的「设为默认」、科目的「资金账户」）与旁边的输入框
+   对齐，而不是悬在「标签 + 输入框」这一格的正中间。 */
+.add-form > .checkbox-label { align-self: end; margin-bottom: 0; }
+
+@media (min-width: 1100px) {
+  /* 定期交易表在宽屏上：类型、频率、日期这些短值不折行（「支/出」「每/月」
+     被拆成两行），两个按钮并排；由备注那一列让出宽度。更窄时（侧栏还在、
+     内容区不到 700px）放开，否则整张表撑出内容区。 */
+  .recurring-list .doc-table td:not(.doc-title) { white-space: nowrap; }
+  .recurring-list .doc-table td.doc-actions-cell > .doc-actions { flex-wrap: nowrap; }
+}
+
+/* ==========================================================================
    Print
    ==========================================================================
    报表要能打印出来交给会计。打印时强制回到黑白、去掉卡片与阴影。 */
 
 @media print {
-  .sidebar, .floating-dock, .offline-banner, .filters, .filters-disclosure, .primary-button,
+  .sidebar, .mobile-bar, .floating-dock, .offline-banner, .filters, .filters-disclosure, .primary-button,
   .sidebar-action, .page-header-actions, .report-tabs button:not(.active),
   .pagination, .back-link { display: none !important; }
   html, body { background: #fff !important; color: #000 !important; }

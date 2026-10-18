@@ -13,7 +13,7 @@
 import React from 'react';
 import Link from 'next/link';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName, interpolate } from '@/lib/i18n';
+import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type {
   DashboardKpis,
@@ -79,7 +79,7 @@ export function DashboardView({ kpis, trends, expenses, balances, locale, baseCu
         <ExpenseBreakdown expenses={expenses} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
       </div>
       <BankBalancesSection balances={balances} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
-      <RecentActivity kpis={kpis} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
+      <OverdueSummary kpis={kpis} locale={locale} baseCurrency={baseCurrency} i18n={i18n} />
     </div>
   );
 }
@@ -100,10 +100,12 @@ function UncertainBanner({
 }) {
   if (count <= 0) return null;
 
+  // 角标只放数字：标题已经说了「待确认」，中文的「2 笔待确认」等于把标题
+  // 再念一遍。
   return (
     <Link href={`/${orgSlug}/uncertain`} className="uncertain-banner">
       <span className="uncertain-banner-title">{i18n.uncertain.title}</span>
-      <span className="badge">{interpolate(i18n.uncertain.badge, { count })}</span>
+      <span className="badge">{count}</span>
     </Link>
   );
 }
@@ -159,6 +161,11 @@ function DashboardQuestions({
   ];
 
   const [lead, ...rest] = questions;
+  // 币种符号和数字之间用不换行空格：首要数字放不下一行时，宁可整串缩小，
+  // 也不要把「RM」单独甩在上一行。--kpi-chars 给手机上的 CSS 按字数算字号
+  // （见 app/globals.css 的「Phone layout」段 的 .kpi-lead .kpi-value）。
+  const money = (value: bigint) => formatMoney(value, baseCurrency, locale).replace(' ', '\u00a0');
+  const leadText = money(lead.value);
 
   /* 一个 44px 的首要数字 + 三个 22px 的次要数字，不是四张等宽卡片。
      四个同等大小的东西并排等于没有重点；而「这个月赚钱了吗」正是用户
@@ -167,8 +174,11 @@ function DashboardQuestions({
     <section className="kpi-band" aria-label={i18n.overview.title}>
       <Link href={lead.href} className="kpi-lead">
         <span className="kpi-question">{lead.question}</span>
-        <span className={`kpi-value ${lead.className}`}>
-          {formatMoney(lead.value, baseCurrency, locale)}
+        <span
+          className={`kpi-value ${lead.className}`}
+          style={{ '--kpi-chars': leadText.length } as React.CSSProperties}
+        >
+          {leadText}
         </span>
         <span className="kpi-hint">{lead.hint}</span>
       </Link>
@@ -176,9 +186,7 @@ function DashboardQuestions({
         {rest.map((q) => (
           <Link key={q.key} href={q.href} className="kpi-item">
             <span className="kpi-question">{q.question}</span>
-            <span className={`kpi-value ${q.className}`}>
-              {formatMoney(q.value, baseCurrency, locale)}
-            </span>
+            <span className={`kpi-value ${q.className}`}>{money(q.value)}</span>
             <span className="kpi-hint">{q.hint}</span>
           </Link>
         ))}
@@ -198,11 +206,69 @@ function MonthlyTrendsChart({
 }) {
   if (trends.length === 0) return null;
 
-  const chartW = 760;
-  const chartH = 240;
-  const padLeft = 52;
-  const padBottom = 30;
-  const padTop = 14;
+  // 两张图：桌面一张宽的，手机一张窄的（CSS 按宽度只显示其一）。SVG 按
+  // viewBox 等比缩放，760 宽的图塞进手机上 300 来像素的卡片，10px 的刻度字
+  // 会被缩到 4px 左右，根本读不出来。窄图用更窄的画布、更大的字号，
+  // 月份隔一个标一个（12 个月挤在 300px 里，每格只有二十几像素）。
+  // 窄图画布取 280：320px 手机上卡片内容宽 240，13px 的字缩成约 11px，
+  // 不再低于可读下限（原来 340 宽、12px，实际只有 8.5px）。
+  // 宽图实际只有 380–712px 宽（1280 下两栏时约 500px），760 的画布要缩到
+  // 0.5–0.9 倍：原来 10 的字号在 1280 下只剩 6.5px。改成 16，约 8–15px；
+  // 左边距跟着放宽，放得下「128.8k」。
+  return (
+    <section className="dashboard-section">
+      <h3>{i18n.overview.monthlyTrends}</h3>
+      <TrendsSvg
+        trends={trends}
+        monthLabels={monthLabels}
+        i18n={i18n}
+        className="chart-svg chart-svg--wide"
+        chartW={760}
+        chartH={260}
+        padLeft={64}
+        fontSize={16}
+        labelEvery={1}
+      />
+      <TrendsSvg
+        trends={trends}
+        monthLabels={monthLabels}
+        i18n={i18n}
+        className="chart-svg chart-svg--narrow"
+        chartW={280}
+        chartH={210}
+        padLeft={50}
+        fontSize={13}
+        labelEvery={2}
+      />
+    </section>
+  );
+}
+
+function TrendsSvg({
+  trends,
+  monthLabels,
+  i18n,
+  className,
+  chartW,
+  chartH,
+  padLeft,
+  fontSize,
+  labelEvery,
+}: {
+  trends: MonthlyTrend[];
+  monthLabels: string[];
+  i18n: Messages;
+  className: string;
+  chartW: number;
+  chartH: number;
+  padLeft: number;
+  fontSize: number;
+  labelEvery: number;
+}) {
+  const padBottom = fontSize * 3;
+  // 图例单独占顶上一条，不再压在柱子上（最高的那根柱子顶到 padTop）。
+  const legendH = fontSize + 10;
+  const padTop = legendH + 8;
   const padRight = 16;
   const plotW = chartW - padLeft - padRight;
   const plotH = chartH - padTop - padBottom;
@@ -215,54 +281,62 @@ function MonthlyTrendsChart({
   const groupW = plotW / trends.length;
   const barW = Math.max(4, Math.floor(groupW * 0.32));
   const gap = Math.max(2, Math.floor(groupW * 0.06));
+  // 图例宽度跟着字号走：原来按 10px 写死的 170/95/81 在 12px 下会挤到一起。
+  const legendStep = fontSize * 7.5;
 
   return (
-    <section className="dashboard-section">
-      <h3>{i18n.overview.monthlyTrends}</h3>
-      <svg
-        viewBox={`0 0 ${chartW} ${chartH}`}
-        className="chart-svg"
-        role="img"
-        aria-label={i18n.overview.monthlyTrends}
-      >
-        {Array.from({ length: yTicks + 1 }, (_, i) => {
-          const val = (maxVal / yTicks) * i;
-          const y = padTop + plotH - (val / maxVal) * plotH;
-          return (
-            <g key={i}>
-              {/* --rule 是 DESIGN.md 里那套从未被实现的设计系统的变量名，
-                  globals.css 里根本没有定义它。未定义的 var() 会让整条
-                  声明在计算时失效，stroke 落回继承值 none——这几条 Y 轴
-                  网格线从写下这一行的那天起就是看不见的。用实际存在的
-                  边框色。 */}
-              <line x1={padLeft} y1={y} x2={chartW - padRight} y2={y} style={{stroke:'var(--border-primary)',strokeWidth:1}} />
-              <text x={padLeft - 6} y={y + 4} textAnchor="end" style={{fontSize:10,fill:'var(--text-tertiary)'}}>
-                {formatAxisTick(val)}
-              </text>
-            </g>
-          );
-        })}
-        {trends.map((t, idx) => {
-          const groupX = padLeft + idx * groupW;
-          const incomeH = maxVal > 0 ? (Number(t.income) / maxVal) * plotH : 0;
-          const expenseH = maxVal > 0 ? (Number(t.expense) / maxVal) * plotH : 0;
-          const barCenterY = padTop + plotH;
-          return (
-            <g key={t.month}>
-              <rect x={groupX + groupW / 2 - barW - gap / 2} y={barCenterY - incomeH} width={barW} height={incomeH || 1} rx={Math.min(4, barW / 2)} style={{fill:'var(--green)'}} />
-              <rect x={groupX + groupW / 2 + gap / 2} y={barCenterY - expenseH} width={barW} height={expenseH || 1} rx={Math.min(4, barW / 2)} style={{fill:'var(--red)'}} />
-              <text x={groupX + groupW / 2} y={chartH - 6} textAnchor="middle" style={{fontSize:10,fill:'var(--text-tertiary)'}}>
+    <svg
+      viewBox={`0 0 ${chartW} ${chartH}`}
+      className={className}
+      role="img"
+      aria-label={i18n.overview.monthlyTrends}
+    >
+      {Array.from({ length: yTicks + 1 }, (_, i) => {
+        const val = (maxVal / yTicks) * i;
+        const y = padTop + plotH - (val / maxVal) * plotH;
+        return (
+          <g key={i}>
+            {/* --rule 是 DESIGN.md 里那套从未被实现的设计系统的变量名，
+                globals.css 里根本没有定义它。未定义的 var() 会让整条
+                声明在计算时失效，stroke 落回继承值 none——这几条 Y 轴
+                网格线从写下这一行的那天起就是看不见的。用实际存在的
+                边框色。 */}
+            <line x1={padLeft} y1={y} x2={chartW - padRight} y2={y} style={{stroke:'var(--border-primary)',strokeWidth:1}} />
+            <text x={padLeft - 6} y={y + fontSize * 0.4} textAnchor="end" style={{fontSize,fill:'var(--text-tertiary)'}}>
+              {formatAxisTick(val)}
+            </text>
+          </g>
+        );
+      })}
+      {trends.map((t, idx) => {
+        const groupX = padLeft + idx * groupW;
+        const incomeH = maxVal > 0 ? (Number(t.income) / maxVal) * plotH : 0;
+        const expenseH = maxVal > 0 ? (Number(t.expense) / maxVal) * plotH : 0;
+        const barCenterY = padTop + plotH;
+        return (
+          <g key={t.month}>
+            {/* 没有发生额的月份不画柱：原来画一根 1px 高的色条，一排红绿小短线
+                看着像有数据。零线本身就是那条最底下的网格线。 */}
+            {incomeH > 0 ? (
+              <rect x={groupX + groupW / 2 - barW - gap / 2} y={barCenterY - incomeH} width={barW} height={incomeH} rx={Math.min(4, barW / 2, incomeH / 2)} style={{fill:'var(--green)'}} />
+            ) : null}
+            {expenseH > 0 ? (
+              <rect x={groupX + groupW / 2 + gap / 2} y={barCenterY - expenseH} width={barW} height={expenseH} rx={Math.min(4, barW / 2, expenseH / 2)} style={{fill:'var(--red)'}} />
+            ) : null}
+            {/* 从最后一个月往前数着隔：最近的月份永远有标签。 */}
+            {(trends.length - 1 - idx) % labelEvery === 0 ? (
+              <text x={groupX + groupW / 2} y={chartH - fontSize * 0.8} textAnchor="middle" style={{fontSize,fill:'var(--text-tertiary)'}}>
                 {monthLabels[Number(t.month.slice(5, 7)) - 1]}
               </text>
-            </g>
-          );
-        })}
-        <rect x={chartW - 170} y={padTop} width="8" height="8" rx="4" style={{fill:'var(--green)'}} />
-        <text x={chartW - 156} y={padTop + 7} style={{fontSize:10,fill:'var(--text-secondary)'}}>{i18n.transaction.income}</text>
-        <rect x={chartW - 95} y={padTop} width="8" height="8" rx="4" style={{fill:'var(--red)'}} />
-        <text x={chartW - 81} y={padTop + 7} style={{fontSize:10,fill:'var(--text-secondary)'}}>{i18n.transaction.expense}</text>
-      </svg>
-    </section>
+            ) : null}
+          </g>
+        );
+      })}
+      <rect x={chartW - padRight - legendStep * 2} y={legendH / 2 - 4} width="8" height="8" rx="4" style={{fill:'var(--green)'}} />
+      <text x={chartW - padRight - legendStep * 2 + 13} y={legendH / 2 + fontSize * 0.36} style={{fontSize,fill:'var(--text-secondary)'}}>{i18n.transaction.income}</text>
+      <rect x={chartW - padRight - legendStep} y={legendH / 2 - 4} width="8" height="8" rx="4" style={{fill:'var(--red)'}} />
+      <text x={chartW - padRight - legendStep + 13} y={legendH / 2 + fontSize * 0.36} style={{fontSize,fill:'var(--text-secondary)'}}>{i18n.transaction.expense}</text>
+    </svg>
   );
 }
 
@@ -341,7 +415,13 @@ function BankBalancesSection({
   );
 }
 
-function RecentActivity({
+/**
+ * 原来这张卡片叫「最近记录 / Recent activity」，里面却没有任何一条记录，
+ * 只是把上面「谁欠我钱 / 我欠谁钱」两行的金额再说一遍。真正上面没说的
+ * 只有逾期那部分，于是只留逾期金额、标题照实写；两项都没有逾期就整张不画，
+ * 手机上少划一屏。
+ */
+function OverdueSummary({
   kpis,
   locale,
   baseCurrency,
@@ -352,45 +432,28 @@ function RecentActivity({
   baseCurrency: string;
   i18n: Messages;
 }) {
-  const invoiceUnpaid = kpis.unpaidInvoices > 0n;
-  const billUnpaid = kpis.unpaidBills > 0n;
+  const rows = [
+    { key: 'invoices', label: i18n.overview.overdueInvoices, value: kpis.overdueInvoices, className: 'invoice-icon' },
+    { key: 'bills', label: i18n.overview.overdueBills, value: kpis.overdueBills, className: 'bill-icon' },
+  ].filter((row) => row.value > 0n);
 
-  if (!invoiceUnpaid && !billUnpaid) {
-    return (
-      <section className="dashboard-section">
-        <h3>{i18n.overview.recentTransactions}</h3>
-        <p className="empty-state">{i18n.overview.empty}</p>
-      </section>
-    );
-  }
+  if (rows.length === 0) return null;
 
   return (
     <section className="dashboard-section">
-      <h3>{i18n.overview.recentTransactions}</h3>
-      <div className="activity-list">
-        {invoiceUnpaid && (
-          <div className="activity-item">
-            <span className="activity-icon invoice-icon" aria-hidden="true" />
+      <h3>{i18n.overview.overdueTitle}</h3>
+      <ul className="balance-list overdue-list">
+        {rows.map((row) => (
+          <li key={row.key}>
             <span>
-              {i18n.overview.unpaidInvoices}:{' '}
-              {i18n.overview.unpaidCount
-                .replace('{unpaid}', formatMoney(kpis.unpaidInvoices, baseCurrency, locale))
-                .replace('{overdue}', formatMoney(kpis.overdueInvoices, baseCurrency, locale))}
+              {/* 两个点有语义：绿是「别人欠我」，红是「我欠别人」。 */}
+              <span className={`activity-icon ${row.className}`} aria-hidden="true" />
+              {row.label}
             </span>
-          </div>
-        )}
-        {billUnpaid && (
-          <div className="activity-item">
-            <span className="activity-icon bill-icon" aria-hidden="true" />
-            <span>
-              {i18n.overview.unpaidBills}:{' '}
-              {i18n.overview.unpaidCount
-                .replace('{unpaid}', formatMoney(kpis.unpaidBills, baseCurrency, locale))
-                .replace('{overdue}', formatMoney(kpis.overdueBills, baseCurrency, locale))}
-            </span>
-          </div>
-        )}
-      </div>
+            <span className="mono">{formatMoney(row.value, baseCurrency, locale)}</span>
+          </li>
+        ))}
+      </ul>
     </section>
   );
 }

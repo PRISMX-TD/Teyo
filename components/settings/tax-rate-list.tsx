@@ -1,8 +1,8 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
-import { localizedName } from '@/lib/i18n';
+import { interpolate, localizedName } from '@/lib/i18n';
 import { createTaxRate, updateTaxRateAction, setDefaultTaxRateAction, deleteTaxRateAction } from '@/server/actions/tax';
 import { parseDecimalToMinor } from '@/server/domain/money';
 
@@ -72,7 +72,7 @@ type Props = {
 };
 
 export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
-  const [showAdd, setShowAdd] = useState(false);
+  const uid = useId();
   const [nameEn, setNameEn] = useState('');
   const [nameZh, setNameZh] = useState('');
   const [ratePct, setRatePct] = useState('6');
@@ -101,9 +101,6 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
       setNameZh('');
       setRatePct('6');
       setIsDefault(false);
-      // 成功之后才收起表单。原来先收起再提交，失败时用户填的内容被藏起来，
-      // 只剩一句错误，得重新点「添加」才能看到刚才填了什么。
-      setShowAdd(false);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -169,126 +166,158 @@ export function TaxRateList({ orgSlug, locale, i18n: t, taxRates }: Props) {
   const inactive = taxRates.filter((r) => !r.isActive);
 
   return (
-    <div className="named-list">
-      {active.map((item) => (
-        <div key={item.id} className="list-item">
-          {editing === item.id ? (
-            <div className="inline-edit">
-              <input
-                value={editNameEn}
-                onChange={(e) => setEditNameEn(e.target.value)}
-                placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
-              />
-              <input
-                value={editNameZh}
-                onChange={(e) => setEditNameZh(e.target.value)}
-                placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
-              />
-              <input
-                type="text"
-                inputMode="decimal"
-                value={editRatePct}
-                onChange={(e) => setEditRatePct(e.target.value)}
-                placeholder={t.tax.ratePercent} aria-label={t.tax.ratePercent}
-              />
-              <span className="hint">%</span>
-              <label className="checkbox-label">
-                <input
-                  type="checkbox"
-                  checked={editIsDefault}
-                  onChange={(e) => setEditIsDefault(e.target.checked)}
-                />
-                {t.tax.defaultRate}
-              </label>
-              <button
-                onClick={() => handleUpdate(item.id)}
-                disabled={pending || !isValidPercent(editRatePct)}
-              >
-                {t.settings.save}
-              </button>
-              <button onClick={() => setEditing(null)}>{t.common.cancel}</button>
-            </div>
-          ) : (
-            <div className="list-item-line">
-              <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</span>
-              <span className="badge">{ratePercent(item.rateBps)}</span>
-              {item.isDefault ? <span className="badge badge-info">★ {t.tax.defaultRate}</span> : null}
-              <span className="badge">{t.settings.active}</span>
-              <button onClick={() => startEdit(item)}>
-                {t.settings.rename ?? 'Edit'}
-              </button>
-              {!item.isDefault && (
-                <button onClick={() => handleSetDefault(item.id)} disabled={pending}>
-                  {t.tax.defaultRate}
-                </button>
-              )}
-              <button onClick={() => handleDelete(item.id)} disabled={pending}>
-                {t.common.delete}
-              </button>
-            </div>
-          )}
-        </div>
-      ))}
-
-      {inactive.length > 0 ? (
-        <div className="coa-section">
-          <h2 className="coa-section-title">{t.settings.inactive}</h2>
-          {inactive.map((item) => (
-            <div key={item.id} className="list-item inactive">
-              <div className="list-item-line">
-                <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</span>
-                <span className="badge">{ratePercent(item.rateBps)}</span>
-                <span className="badge">{t.settings.inactive}</span>
+    <>
+      {taxRates.length > 0 ? (
+        <div className="named-list">
+          {active.length > 0 ? (
+            <div className="coa-section">
+              <div className="coa-group">
+                {active.map((item) => (
+                  <div key={item.id} className="list-item">
+                    {editing === item.id ? (
+                      <div className="inline-edit">
+                        <input
+                          value={editNameEn}
+                          onChange={(e) => setEditNameEn(e.target.value)}
+                          placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
+                        />
+                        <input
+                          value={editNameZh}
+                          onChange={(e) => setEditNameZh(e.target.value)}
+                          placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
+                        />
+                        <input
+                          type="text"
+                          inputMode="decimal"
+                          value={editRatePct}
+                          onChange={(e) => setEditRatePct(e.target.value)}
+                          placeholder={t.tax.ratePercent} aria-label={t.tax.ratePercent}
+                        />
+                        <span className="hint">%</span>
+                        <label className="checkbox-label">
+                          <input
+                            type="checkbox"
+                            checked={editIsDefault}
+                            onChange={(e) => setEditIsDefault(e.target.checked)}
+                          />
+                          {t.tax.makeDefault}
+                        </label>
+                        <button
+                          type="button"
+                          onClick={() => handleUpdate(item.id)}
+                          disabled={pending || !isValidPercent(editRatePct)}
+                        >
+                          {t.settings.save}
+                        </button>
+                        <button type="button" onClick={() => setEditing(null)}>{t.common.cancel}</button>
+                      </div>
+                    ) : (
+                      <div className="list-item-line list-item-line--stacked">
+                        <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</span>
+                        <span className="badge">{ratePercent(item.rateBps)}</span>
+                        {/* 「启用」徽章去掉了：这一组本来就全是启用的。默认税率用
+                            绿色徽章，和旁边灰色的「设为默认」按钮分开——原来两者
+                            都是灰色胶囊、都写着「默认」，一个是状态一个是动作。 */}
+                        {item.isDefault ? <span className="badge badge-success">★ {t.tax.defaultRate}</span> : null}
+                        <span className="row-actions">
+                          {/* 「重命名」改叫「编辑」：这一下改的还有税率与默认与否。 */}
+                          <button type="button" onClick={() => startEdit(item)}>
+                            {t.common.edit}
+                          </button>
+                          {!item.isDefault && (
+                            <button type="button" onClick={() => handleSetDefault(item.id)} disabled={pending}>
+                              {t.tax.makeDefault}
+                            </button>
+                          )}
+                          {/* 删除原来一点就删、长得和旁边两个按钮一模一样。 */}
+                          <button
+                            type="button"
+                            className="btn-small btn-danger"
+                            onClick={() => {
+                              const label = localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale);
+                              if (!window.confirm(interpolate(t.tax.deleteConfirm, { name: label }))) return;
+                              void handleDelete(item.id);
+                            }}
+                            disabled={pending}
+                          >
+                            {t.common.delete}
+                          </button>
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                ))}
               </div>
             </div>
-          ))}
+          ) : null}
+
+          {inactive.length > 0 ? (
+            <div className="coa-section">
+              <h2 className="coa-section-title">{t.settings.inactive}</h2>
+              <div className="coa-group">
+                {inactive.map((item) => (
+                  <div key={item.id} className="list-item inactive">
+                    <div className="list-item-line">
+                      <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</span>
+                      <span className="badge">{ratePercent(item.rateBps)}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : null}
         </div>
       ) : null}
 
       {error ? <p role="alert" className="form-error">{error}</p> : null}
 
-      {!showAdd ? (
-        <button onClick={() => setShowAdd(true)} className="add-button">
-          {t.tax.addRate}
-        </button>
-      ) : (
-        <div className="add-form">
-          <h3>{t.tax.addRate}</h3>
+      {/* 新增表单常驻在列表下面，入口在页头（#add-tax），与分类、联系人一样。
+          原来是列表下面一颗「新增税率」按钮，点开才出表单，按钮还贴着卡片底边。 */}
+      <form
+        id="add-tax"
+        className="add-form"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleCreate();
+        }}
+      >
+        <h3>{t.tax.addRate}</h3>
+        <div className="form-field">
+          <label htmlFor={`${uid}-en`}>{t.settings.nameEn}</label>
+          <input id={`${uid}-en`} value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-zh`}>{t.settings.nameZh}</label>
+          <input id={`${uid}-zh`} value={nameZh} onChange={(e) => setNameZh(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-rate`}>{t.tax.ratePercent}</label>
           <input
-            placeholder={t.settings.nameEn} aria-label={t.settings.nameEn}
-            value={nameEn}
-            onChange={(e) => setNameEn(e.target.value)}
-          />
-          <input
-            placeholder={t.settings.nameZh} aria-label={t.settings.nameZh}
-            value={nameZh}
-            onChange={(e) => setNameZh(e.target.value)}
-          />
-          <input
+            id={`${uid}-rate`}
             type="text"
             inputMode="decimal"
-            placeholder={t.tax.ratePercent} aria-label={t.tax.ratePercent}
             value={ratePct}
             onChange={(e) => setRatePct(e.target.value)}
           />
-          <span className="hint">%</span>
-          <label className="checkbox-label">
-            <input
-              type="checkbox"
-              checked={isDefault}
-              onChange={(e) => setIsDefault(e.target.checked)}
-            />
-            {t.tax.defaultRate}
-          </label>
+        </div>
+        <label className="checkbox-label">
+          <input
+            type="checkbox"
+            checked={isDefault}
+            onChange={(e) => setIsDefault(e.target.checked)}
+          />
+          {t.tax.makeDefault}
+        </label>
+        <div className="add-form-actions">
           <button
-            onClick={handleCreate}
+            type="submit"
             disabled={pending || !nameEn.trim() || !nameZh.trim() || !isValidPercent(ratePct)}
           >
             {t.tax.addRate}
           </button>
-          <button onClick={() => setShowAdd(false)}>{t.common.cancel}</button>
         </div>
-      )}
-    </div>
+      </form>
+    </>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Locale, Messages } from '@/lib/i18n';
@@ -55,6 +55,7 @@ export function DisposeAssetPanel({
   i18n: t,
 }: Props) {
   const router = useRouter();
+  const uid = useId();
   const decimals = currencyExponent(baseCurrency);
 
   // 默认今天，但不早于购入日——服务端会拒绝早于购入日的处置。
@@ -107,24 +108,31 @@ export function DisposeAssetPanel({
     return (
       <section id="dispose" className="dispose-asset-panel">
         <h2>{t.fixedAssets.disposalTitle}</h2>
+        {/* 处置结果用和详情页顶上同一种摘要卡（标签在左、值在右），原来是
+            几段「标签: 值」的散文。 */}
         {disposal ? (
           <>
-            <p>{t.fixedAssets.disposalDate}: {disposal.disposalDate}</p>
-            <p>
-              {t.fixedAssets.disposalProceeds}:{' '}
-              {disposal.proceedsMinor === 0n
-                ? `${formatMoney(0n, baseCurrency, locale)} (${t.fixedAssets.scrapped})`
-                : formatMoney(disposal.proceedsMinor, baseCurrency, locale)}
-            </p>
-            <p>
-              {disposal.gainLossMinor >= 0n ? t.fixedAssets.disposalGain : t.fixedAssets.disposalLoss}:{' '}
-              {formatMoney(
-                disposal.gainLossMinor >= 0n ? disposal.gainLossMinor : -disposal.gainLossMinor,
-                baseCurrency,
-                locale,
-              )}
-            </p>
-            <p>
+            <article className="record-detail record-detail--inline fa-summary">
+              <dl>
+                <dt>{t.fixedAssets.disposalDate}</dt>
+                <dd>{disposal.disposalDate}</dd>
+                <dt>{t.fixedAssets.disposalProceeds}</dt>
+                <dd className="mono">
+                  {disposal.proceedsMinor === 0n
+                    ? `${formatMoney(0n, baseCurrency, locale)} (${t.fixedAssets.scrapped})`
+                    : formatMoney(disposal.proceedsMinor, baseCurrency, locale)}
+                </dd>
+                <dt>{disposal.gainLossMinor >= 0n ? t.fixedAssets.disposalGain : t.fixedAssets.disposalLoss}</dt>
+                <dd className="mono amount">
+                  {formatMoney(
+                    disposal.gainLossMinor >= 0n ? disposal.gainLossMinor : -disposal.gainLossMinor,
+                    baseCurrency,
+                    locale,
+                  )}
+                </dd>
+              </dl>
+            </article>
+            <p className="dispose-entry-link">
               <Link href={`/${orgSlug}/transactions/${disposal.transactionId}`}>
                 {t.fixedAssets.viewDisposalEntry}
               </Link>
@@ -137,7 +145,7 @@ export function DisposeAssetPanel({
 
         {error ? <p role="alert" className="form-error">{error}</p> : null}
 
-        <button onClick={handleUndo} disabled={pending} className="secondary-button">
+        <button type="button" onClick={handleUndo} disabled={pending} className="secondary-button">
           {pending ? t.common.loading : t.fixedAssets.undoDisposal}
         </button>
       </section>
@@ -148,10 +156,11 @@ export function DisposeAssetPanel({
     <section id="dispose" className="dispose-asset-panel">
       <h2>{t.fixedAssets.disposalTitle}</h2>
       <p className="field-hint">{t.fixedAssets.disposalHint}</p>
-      <div className="transaction-form">
+      <div className="transaction-form fa-form">
         <div className="form-field">
-          <label>{t.fixedAssets.disposalDate}</label>
+          <label htmlFor={`${uid}-date`}>{t.fixedAssets.disposalDate}</label>
           <input
+            id={`${uid}-date`}
             type="date"
             value={disposalDate}
             min={purchaseDate}
@@ -160,10 +169,11 @@ export function DisposeAssetPanel({
         </div>
 
         <div className="form-field">
-          <label>
+          <label htmlFor={`${uid}-proceeds`}>
             {t.fixedAssets.disposalProceeds} ({baseCurrency})
           </label>
           <input
+            id={`${uid}-proceeds`}
             value={proceeds}
             onChange={(e) => setProceeds(e.target.value)}
             placeholder={decimals === 0 ? '0' : '0.00'}
@@ -179,8 +189,8 @@ export function DisposeAssetPanel({
 
         {hasProceeds ? (
           <div className="form-field">
-            <label>{t.fixedAssets.disposalMoneyAccount}</label>
-            <select value={moneyAccountId} onChange={(e) => setMoneyAccountId(e.target.value)}>
+            <label htmlFor={`${uid}-account`}>{t.fixedAssets.disposalMoneyAccount}</label>
+            <select id={`${uid}-account`} value={moneyAccountId} onChange={(e) => setMoneyAccountId(e.target.value)}>
               {moneyAccounts.map((account) => (
                 <option key={account.id} value={account.id}>
                   {localizedName(account, locale)}
@@ -193,6 +203,7 @@ export function DisposeAssetPanel({
         {error ? <p role="alert" className="form-error">{error}</p> : null}
 
         <button
+          type="button"
           onClick={handleDispose}
           disabled={
             pending ||

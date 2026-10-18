@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { AssetForm } from '@/components/fixed-assets/asset-form';
 import { DepreciationSchedule } from '@/components/fixed-assets/depreciation-schedule';
 import { DisposeAssetPanel } from '@/components/fixed-assets/dispose-asset-panel';
-import { getMessages } from '@/lib/i18n';
+import { getMessages, interpolate } from '@/lib/i18n';
+import { formatMoney, toIsoDate } from '@/lib/format';
 import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -75,10 +76,61 @@ export default async function FixedAssetDetailPage({
     name_zh: a.nameZh ?? '',
   }));
 
+  const money = (minor: bigint) => formatMoney(minor, context.baseCurrency, locale);
+  const disposed = Boolean(asset.disposedAt) || !asset.isActive;
+
   return (
     <>
       <BackLink href={`/${orgSlug}/fixed-assets`}>{t.fixedAssets.title}</BackLink>
-      <h1>{t.fixedAssets.title}</h1>
+      {/* 标题是资产自己的名字。原来 h1 是「固定资产」，和上面的返回胶囊
+          一字不差；真正的名字是下面一个更小的 h2。 */}
+      <div className="page-header">
+        <div className="record-heading">
+          <h1 className="record-title">{asset.name}</h1>
+          {asset.description ? <p className="page-subtitle">{asset.description}</p> : null}
+        </div>
+        {/* 编辑与处置原来要翻过整张 60 行的折旧表才看得到。 */}
+        {asset.isActive ? (
+          <div className="page-header-actions">
+            <a href="#edit" className="secondary-button">
+              {t.common.edit}
+            </a>
+            <a href="#dispose" className="secondary-button">
+              {t.fixedAssets.dispose}
+            </a>
+          </div>
+        ) : null}
+      </div>
+
+      {/* 摘要卡：标签在左、值在右，和项目详情、单据详情同一个组件。原来是
+          一组左右乱跳的「标签: 值」段落。.fa-summary：手机上改成标签在上、
+          值在下（见 settings.css），大号的原值不再把左边的标签挤成两行。 */}
+      <article className="record-detail record-detail--inline fa-summary">
+        <dl>
+          <dt>{t.fixedAssets.status}</dt>
+          <dd>
+            <span className={`badge ${disposed ? 'badge-warning' : 'badge-success'}`}>
+              {disposed ? t.fixedAssets.disposed : t.settings.active}
+            </span>
+          </dd>
+          <dt>{t.fixedAssets.cost}</dt>
+          <dd className="mono amount">{money(asset.costMinor)}</dd>
+          <dt>{t.fixedAssets.purchaseDate}</dt>
+          <dd>{toIsoDate(asset.purchaseDate)}</dd>
+          <dt>{t.fixedAssets.salvageValue}</dt>
+          <dd className="mono">{money(asset.salvageValueMinor)}</dd>
+          <dt>{t.fixedAssets.usefulLifeLabel}</dt>
+          <dd>{interpolate(t.fixedAssets.monthsShort, { n: asset.usefulLifeMonths })}</dd>
+          <dt>{t.fixedAssets.method}</dt>
+          <dd>
+            {asset.method === 'straight_line' ? t.fixedAssets.straightLine : t.fixedAssets.decliningBalance}
+            {asset.method === 'declining_balance' && asset.decliningRateBps !== null
+              ? ` · ${asset.decliningRateBps / 100}%`
+              : null}
+          </dd>
+        </dl>
+      </article>
+
       <DepreciationSchedule
         orgSlug={orgSlug}
         baseCurrency={context.baseCurrency}
@@ -87,6 +139,23 @@ export default async function FixedAssetDetailPage({
         locale={locale}
         i18n={t}
       />
+
+      {/* 已处置的资产不给编辑：updateFixedAssetAction 会拒绝，要改先撤销处置。
+          编辑排在处置前面：改参数比处置常用得多。 */}
+      {asset.isActive ? (
+        <section id="edit" className="fa-section">
+          <h2>{t.fixedAssets.editTitle}</h2>
+          <AssetForm
+            orgSlug={orgSlug}
+            locale={locale}
+            i18n={t}
+            accounts={accountOptions}
+            baseCurrency={context.baseCurrency}
+            currencies={[...SUPPORTED_CURRENCIES]}
+            asset={asset}
+          />
+        </section>
+      ) : null}
 
       <DisposeAssetPanel
         orgSlug={orgSlug}
@@ -100,22 +169,6 @@ export default async function FixedAssetDetailPage({
         locale={locale}
         i18n={t}
       />
-
-      {/* 已处置的资产不给编辑：updateFixedAssetAction 会拒绝，要改先撤销处置。 */}
-      {asset.isActive ? (
-        <>
-          <h2>{t.fixedAssets.editTitle}</h2>
-          <AssetForm
-            orgSlug={orgSlug}
-            locale={locale}
-            i18n={t}
-            accounts={accountOptions}
-            baseCurrency={context.baseCurrency}
-            currencies={[...SUPPORTED_CURRENCIES]}
-            asset={asset}
-          />
-        </>
-      ) : null}
     </>
   );
 }

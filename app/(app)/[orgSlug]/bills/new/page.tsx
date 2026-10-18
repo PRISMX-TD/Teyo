@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { BillForm, type BillFromPurchaseOrder } from '@/components/bills/bill-form';
-import { getMessages, interpolate } from '@/lib/i18n';
+import { BackLink } from '@/components/ui/back-link';
+import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
@@ -95,6 +96,7 @@ export default async function NewBillPage({
   if (contactOptions.length === 0) {
     return (
       <>
+        <BackLink href={`/${orgSlug}/bills`}>{t.bills.title}</BackLink>
         <h1>{t.bills.newTitle}</h1>
         <p className="empty-state">
           {t.bills.noVendors}{' '}
@@ -104,16 +106,32 @@ export default async function NewBillPage({
     );
   }
 
+  const [fromPoBefore, fromPoAfter = ''] = t.bills.fromPurchaseOrder.split('{number}');
+
   const currencies: string[] = [...SUPPORTED_CURRENCIES];
   if (sourcePo && !currencies.includes(sourcePo.currency)) currencies.push(sourcePo.currency);
 
   return (
     <>
-      <h1>
-        {sourcePo
-          ? `${t.bills.newTitle} · ${interpolate(t.bills.fromPurchaseOrder, { number: sourcePo.poNumber })}`
-          : t.bills.newTitle}
-      </h1>
+      <BackLink href={`/${orgSlug}/bills`}>{t.bills.title}</BackLink>
+      {/* 来自采购单时，「由采购订单 … 转来」放在标题下面一行，并链回那张采购单：
+          原来整句拼在 h1 里，手机上大标题折成三行。 */}
+      {sourcePo ? (
+        <div className="page-header">
+          <div>
+            <h1>{t.bills.newTitle}</h1>
+            <p className="page-subtitle bill-from-po">
+              {fromPoBefore}
+              <Link href={`/${orgSlug}/purchase-orders/${sourcePo.id}`} className="doc-no">
+                {sourcePo.poNumber}
+              </Link>
+              {fromPoAfter}
+            </p>
+          </div>
+        </div>
+      ) : (
+        <h1>{t.bills.newTitle}</h1>
+      )}
       {fromPo && !sourcePo ? (
         <p role="alert" className="form-error">
           {t.bills.fromPoUnavailable}

@@ -71,7 +71,7 @@ export function Sidebar({ orgSlug, i18n, orgs, role }: Props) {
       ],
     },
     {
-      label: i18n.nav.settings,
+      label: i18n.nav.groupSettings,
       items: [
         { href: `/${orgSlug}/settings`, label: i18n.nav.settings, icon: 'settings' },
         { href: `/${orgSlug}/settings/tax`, label: i18n.nav.tax, icon: 'tax', action: 'account:manage' },
@@ -186,7 +186,8 @@ export function Sidebar({ orgSlug, i18n, orgs, role }: Props) {
           <span>{i18n.nav.toggleTheme}</span>
           <span className="theme-switch" aria-hidden="true" />
         </button>
-        <Link href="/account">
+        {/* from：/account 的「返回」回到这里，而不是 '/'（见 account-link.tsx）。 */}
+        <Link href={`/account?from=${encodeURIComponent(pathname)}`}>
           <NavIcon name="account" size={18} />
           <span>{i18n.nav.account}</span>
         </Link>

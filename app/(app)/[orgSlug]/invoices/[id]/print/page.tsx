@@ -83,19 +83,23 @@ export default async function InvoicePrintPage({
         </div>
       </div>
 
+      {/* 三个选项装在一条分段轨道里：原来是三颗散开的 30px 胶囊，320 宽时
+          「English + 中文」掉到第二行，也够不到 44px 的触控线。 */}
       <nav className="invoice-language-switch no-print" aria-label={t.invoicePdf.printLanguage}>
         <span>{t.invoicePdf.printLanguage}</span>
-        {INVOICE_LOCALES.map((option) => (
-          <Link
-            key={option}
-            href={`/${orgSlug}/invoices/${id}/print?lang=${option}`}
-            className={option === lang ? 'is-current' : undefined}
-            aria-current={option === lang ? 'true' : undefined}
-            replace
-          >
-            {INVOICE_LOCALE_NAMES[option]}
-          </Link>
-        ))}
+        <div className="invoice-language-switch__options">
+          {INVOICE_LOCALES.map((option) => (
+            <Link
+              key={option}
+              href={`/${orgSlug}/invoices/${id}/print?lang=${option}`}
+              className={option === lang ? 'is-current' : undefined}
+              aria-current={option === lang ? 'true' : undefined}
+              replace
+            >
+              {INVOICE_LOCALE_NAMES[option]}
+            </Link>
+          ))}
+        </div>
       </nav>
 
       <p className="hint no-print">{t.invoicePdf.printHint}</p>

@@ -251,7 +251,10 @@ export function ReconciliationView({
         </label>
       </div>
 
-      {loading && <p>{t.common.loading}</p>}
+      {/* 没选账户时原来只有一个下拉，下面空白一大片，看不出这一页是做什么的。 */}
+      {!selectedAccount && <p className="empty-state">{t.reconciliation.pickAccountHint}</p>}
+
+      {loading && <p className="empty-state" aria-busy="true">{t.common.loading}</p>}
 
       {!loading && selectedAccount && (
         <>
@@ -276,27 +279,27 @@ export function ReconciliationView({
             </label>
 
             <div>
-              <span>{t.reconciliation.bookBalance}: </span>
+              <span>{t.reconciliation.bookBalance}</span>
               <span className="mono">{formatMoney(bookBalanceBig, baseCurrency, locale)}</span>
             </div>
 
             <div>
-              <span>{t.reconciliation.priorBalance}: </span>
+              <span>{t.reconciliation.priorBalance}</span>
               <span className="mono">{formatMoney(priorBalanceMinor, baseCurrency, locale)}</span>
             </div>
 
             <div>
-              <span>{t.reconciliation.clearedTotal}: </span>
+              <span>{t.reconciliation.clearedTotal}</span>
               <span className="mono">{formatMoney(clearedMinor, baseCurrency, locale)}</span>
             </div>
 
             <div>
-              <span>{t.reconciliation.expectedBalance}: </span>
+              <span>{t.reconciliation.expectedBalance}</span>
               <span className="mono">{formatMoney(expectedBalanceMinor, baseCurrency, locale)}</span>
             </div>
 
             <div>
-              <span>{t.reconciliation.difference}: </span>
+              <span>{t.reconciliation.difference}</span>
               <span className={`mono ${differenceMinor > 0n ? 'positive' : differenceMinor < 0n ? 'negative' : ''}`}>
                 {formatMoney(differenceMinor, baseCurrency, locale)}
               </span>
@@ -307,68 +310,89 @@ export function ReconciliationView({
             <p className="hint">{t.reconciliation.mustBalance}</p>
           )}
 
-          <button
-            onClick={handleSubmit}
-            disabled={submitting || checked.size === 0 || differenceMinor !== 0n}
-          >
-            {submitting ? t.common.loading : t.reconciliation.complete}
-          </button>
+          {txns.length === 0 ? (
+            <p className="empty-state">{t.reconciliation.empty}</p>
+          ) : (
+            <div className="table-scroll">
+              <table className="report-table reconciliation-table">
+                <thead>
+                  <tr>
+                    <th>{t.reconciliation.cleared}</th>
+                    <th>{t.transaction.date}</th>
+                    <th>{t.transaction.description}</th>
+                    <th>{t.transaction.kind}</th>
+                    <th className="numeric">{t.transaction.amount}</th>
+                    <th className="numeric">{t.reconciliation.adjustment}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {txns.map((txn) => (
+                    <tr key={txn.id}>
+                      <td>
+                        {/* 18px 的勾选框在手机上很难点中：包一层 label，整格都能点。 */}
+                        <label className="cleared-toggle">
+                          <input
+                            type="checkbox"
+                            checked={checked.has(txn.id)}
+                            onChange={() => handleCheck(txn.id)}
+                            aria-label={`${t.reconciliation.cleared}: ${txn.occurredOn} ${txn.description}`}
+                          />
+                        </label>
+                      </td>
+                      <td>{txn.occurredOn}</td>
+                      <td>{txn.description}</td>
+                      <td>{kindLabel(txn.kind)}</td>
+                      <td
+                        className={`numeric mono ${
+                          effectOf(txn) > 0n ? 'positive' : effectOf(txn) < 0n ? 'negative' : ''
+                        }`}
+                      >
+                        {formatMoney(effectOf(txn), baseCurrency, locale)}
+                      </td>
+                      <td>
+                        <input
+                          type="text"
+                          className="adjustment-input"
+                          value={adjustments[txn.id] ?? ''}
+                          onChange={(e) => handleAdjustment(txn.id, e.target.value)}
+                          placeholder="0.00"
+                          disabled={!checked.has(txn.id)}
+                        />
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {/* 「完成对账」和它等着归零的差异放在要勾的那张表后面：原来在表格
+              上方，手机上隔着一屏多，每勾一笔都得翻回去看平没平。手机上
+              这一条贴在标签栏上方，勾到哪里都看得见。 */}
+          <div className="reconcile-actions">
+            <span className="reconcile-diff">
+              <span>{t.reconciliation.difference}</span>
+              <span
+                className={`mono ${differenceMinor > 0n ? 'positive' : differenceMinor < 0n ? 'negative' : ''}`}
+              >
+                {formatMoney(differenceMinor, baseCurrency, locale)}
+              </span>
+            </span>
+            <button
+              type="button"
+              className="primary-button reconcile-submit"
+              onClick={handleSubmit}
+              disabled={submitting || checked.size === 0 || differenceMinor !== 0n}
+            >
+              {submitting ? t.common.loading : t.reconciliation.complete}
+            </button>
+          </div>
 
           {submitError ? (
             <p role="alert" className="form-error">
               {submitError}
             </p>
           ) : null}
-
-          {txns.length === 0 ? (
-            <p className="empty-state">{t.reconciliation.empty}</p>
-          ) : (
-            <table className="report-table">
-              <thead>
-                <tr>
-                  <th>{t.reconciliation.cleared}</th>
-                  <th>{t.transaction.date}</th>
-                  <th>{t.transaction.description}</th>
-                  <th>{t.transaction.kind}</th>
-                  <th className="numeric">{t.transaction.amount}</th>
-                  <th className="numeric">{t.reconciliation.adjustment}</th>
-                </tr>
-              </thead>
-              <tbody>
-                {txns.map((txn) => (
-                  <tr key={txn.id}>
-                    <td>
-                      <input
-                        type="checkbox"
-                        checked={checked.has(txn.id)}
-                        onChange={() => handleCheck(txn.id)}
-                      />
-                    </td>
-                    <td>{txn.occurredOn}</td>
-                    <td>{txn.description}</td>
-                    <td>{kindLabel(txn.kind)}</td>
-                    <td
-                      className={`numeric mono ${
-                        effectOf(txn) > 0n ? 'positive' : effectOf(txn) < 0n ? 'negative' : ''
-                      }`}
-                    >
-                      {formatMoney(effectOf(txn), baseCurrency, locale)}
-                    </td>
-                    <td>
-                      <input
-                        type="text"
-                        className="adjustment-input"
-                        value={adjustments[txn.id] ?? ''}
-                        onChange={(e) => handleAdjustment(txn.id, e.target.value)}
-                        placeholder="0.00"
-                        disabled={!checked.has(txn.id)}
-                      />
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
 
           {pastReconciliations.length > 0 && (
             <div className="past-reconciliations">

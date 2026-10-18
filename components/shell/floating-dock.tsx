@@ -57,7 +57,11 @@ export function FloatingDock({ orgSlug, i18n, role }: Props) {
         className={isActive || isBranch ? 'active' : ''}
       >
         <NavIcon name={item.label} active={isActive || isBranch} size={24} />
-        <span>{i18n.nav[item.label]}</span>
+        {/* 标签栏一格只有 57px：英文「Transactions」加粗后放不下，被截成
+            「Transacti…」。这里单用一个短词，侧栏和页面标题仍用全称。英文用
+            「Records」（全站文案管一笔流水就叫 record）；不用「Activity」，
+            设置里的「Activity log」是另一个页面。 */}
+        <span>{item.label === 'transactions' ? i18n.nav.dockRecords : i18n.nav[item.label]}</span>
       </Link>
     );
   });

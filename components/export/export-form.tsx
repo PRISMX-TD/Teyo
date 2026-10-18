@@ -50,16 +50,22 @@ export function ExportForm({ orgSlug, locale }: Props) {
   return (
     <form action={handleSubmit} className="export-form">
       <fieldset>
-        <legend>{t.exportPage.title}</legend>
+        <legend>{t.exportPage.kindLegend}</legend>
+        {/* 名称和说明包成一列：label 是 flex，裸文字和说明原来是并排的两栏，
+            英文窄屏上各自折成两行。 */}
         <label>
           <input type="radio" name="kind" value="transaction-detail" defaultChecked />
-          {t.exportPage.transactionDetail}
-          <span className="field-hint">{t.exportPage.transactionDetailHint}</span>
+          <span className="option-text">
+            <span>{t.exportPage.transactionDetail}</span>
+            <span className="field-hint">{t.exportPage.transactionDetailHint}</span>
+          </span>
         </label>
         <label>
           <input type="radio" name="kind" value="account-summary" />
-          {t.exportPage.accountSummary}
-          <span className="field-hint">{t.exportPage.accountSummaryHint}</span>
+          <span className="option-text">
+            <span>{t.exportPage.accountSummary}</span>
+            <span className="field-hint">{t.exportPage.accountSummaryHint}</span>
+          </span>
         </label>
       </fieldset>
 

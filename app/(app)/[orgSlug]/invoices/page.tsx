@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -59,6 +59,7 @@ export default async function InvoicesListPage({
         emptyLabel={t.invoices.empty}
         canIssue={canCreate}
         canEdit={canEdit}
+        today={todayInOrg(context)}
       />
     </>
   );

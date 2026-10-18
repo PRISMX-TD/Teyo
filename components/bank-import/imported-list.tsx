@@ -282,161 +282,163 @@ export function ImportedList({
         </div>
       ) : null}
 
-      <table className="report-table">
-        <thead>
-          <tr>
-            {canPost ? (
-              // 空表头的整一列在读屏器里是没有名字的：按列导航时念到这里
-              // 只有「空白」。勾选列也要有名字，哪怕它在视觉上不需要。
-              <th>
-                <span className="visually-hidden">{i18n.bankImport.selectLine}</span>
-              </th>
-            ) : null}
-            <th>{i18n.transaction.date}</th>
-            <th>{i18n.transaction.description}</th>
-            <th className="numeric">{i18n.transaction.amount}</th>
-            {canPost ? <th>{i18n.bankImport.category}</th> : null}
-            <th>{i18n.bankImport.status}</th>
-            <th>{i18n.common.actions}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filtered.map((txn) => (
-            <tr key={txn.id}>
+      <div className="table-scroll">
+        <table className="report-table">
+          <thead>
+            <tr>
               {canPost ? (
-                <td>
-                  {txn.status === 'pending' ? (
-                    <input
-                      type="checkbox"
-                      aria-label={`${i18n.bankImport.selectLine} ${txn.transactionDate} ${txn.description ?? ''}`}
-                      checked={ticked[txn.id] === true}
-                      onChange={(e) =>
-                        setTicked((prev) => ({ ...prev, [txn.id]: e.target.checked }))
-                      }
-                    />
-                  ) : null}
-                </td>
+                // 空表头的整一列在读屏器里是没有名字的：按列导航时念到这里
+                // 只有「空白」。勾选列也要有名字，哪怕它在视觉上不需要。
+                <th>
+                  <span className="visually-hidden">{i18n.bankImport.selectLine}</span>
+                </th>
               ) : null}
-              <td>{txn.transactionDate}</td>
-              <td>{txn.description ?? '-'}</td>
-              <td className="numeric mono">
-                {formatMoney(txn.amountMinor, baseCurrency, locale)}
-              </td>
-              {canPost ? (
-                <td>
-                  {txn.status === 'pending' ? (
-                    <select
-                      aria-label={`${i18n.bankImport.category} ${txn.transactionDate} ${txn.description ?? ''}`}
-                      value={chosenCategory[txn.id] ?? ''}
-                      onChange={(e) =>
-                        setChosenCategory((prev) => ({ ...prev, [txn.id]: e.target.value }))
-                      }
-                    >
-                      <option value="">{i18n.bankImport.categoryPrompt}</option>
-                      {(txn.amountMinor > 0n ? incomeCategories : expenseCategories).map((c) => (
-                        <option key={c.id} value={c.id}>
-                          {localizedName({ name_en: c.nameEn, name_zh: c.nameZh }, locale)}
-                        </option>
-                      ))}
-                    </select>
-                  ) : null}
+              <th>{i18n.transaction.date}</th>
+              <th>{i18n.transaction.description}</th>
+              <th className="numeric">{i18n.transaction.amount}</th>
+              {canPost ? <th>{i18n.bankImport.category}</th> : null}
+              <th>{i18n.bankImport.status}</th>
+              <th>{i18n.common.actions}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {filtered.map((txn) => (
+              <tr key={txn.id}>
+                {canPost ? (
+                  <td>
+                    {txn.status === 'pending' ? (
+                      <input
+                        type="checkbox"
+                        aria-label={`${i18n.bankImport.selectLine} ${txn.transactionDate} ${txn.description ?? ''}`}
+                        checked={ticked[txn.id] === true}
+                        onChange={(e) =>
+                          setTicked((prev) => ({ ...prev, [txn.id]: e.target.checked }))
+                        }
+                      />
+                    ) : null}
+                  </td>
+                ) : null}
+                <td>{txn.transactionDate}</td>
+                <td>{txn.description ?? '-'}</td>
+                <td className="numeric mono">
+                  {formatMoney(txn.amountMinor, baseCurrency, locale)}
                 </td>
-              ) : null}
-              <td>
-                <span className={STATUS_BADGE[txn.status] ?? 'badge'}>
-                  {statusLabel[txn.status] ?? txn.status}
-                </span>
-              </td>
-              <td className="actions-cell">
-                {txn.status === 'pending' && canPost && (
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => handlePost([txn.id])}
-                    // 没选分类就禁用：这一步一定失败，而「请选分类」这件事
-                    // 就摆在左边那一格里，一个灰掉的按钮在这里说得清。
-                    disabled={posting || (chosenCategory[txn.id] ?? '') === ''}
-                  >
-                    {i18n.bankImport.createTransaction}
-                  </button>
-                )}
-
-                {txn.status === 'pending' && (
-                  <>
-                    {matchDropdown === txn.id ? (
-                      <div className="match-dropdown">
-                        <input
-                          type="text"
-                          value={searchQuery}
-                          onChange={(e) => handleSearch(e.target.value)}
-                          placeholder={i18n.bankImport.searchPlaceholder}
-                          autoFocus
-                        />
-                        {searching && <span>{i18n.common.loading}</span>}
-                        {searchResults.length > 0 && (
-                          <ul>
-                            {searchResults.map((r) => (
-                              <li key={r.id}>
-                                <button
-                                  type="button"
-                                  onClick={() => handleMatch(txn.id, r.id)}
-                                  disabled={acting === txn.id}
-                                >
-                                  {r.occurredOn} · {r.description}
-                                </button>
-                              </li>
-                            ))}
-                          </ul>
-                        )}
-                        <button
-                          type="button"
-                          className="text-button"
-                          onClick={() => {
-                            setMatchDropdown(null);
-                            setSearchQuery('');
-                            setSearchResults([]);
-                          }}
-                        >
-                          {i18n.common.cancel}
-                        </button>
-                      </div>
-                    ) : (
-                      <button
-                        type="button"
-                        className="text-button"
-                        onClick={() => setMatchDropdown(txn.id)}
-                        disabled={acting === txn.id}
+                {canPost ? (
+                  <td>
+                    {txn.status === 'pending' ? (
+                      <select
+                        aria-label={`${i18n.bankImport.category} ${txn.transactionDate} ${txn.description ?? ''}`}
+                        value={chosenCategory[txn.id] ?? ''}
+                        onChange={(e) =>
+                          setChosenCategory((prev) => ({ ...prev, [txn.id]: e.target.value }))
+                        }
                       >
-                        {i18n.bankImport.match}
-                      </button>
-                    )}
-
+                        <option value="">{i18n.bankImport.categoryPrompt}</option>
+                        {(txn.amountMinor > 0n ? incomeCategories : expenseCategories).map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {localizedName({ name_en: c.nameEn, name_zh: c.nameZh }, locale)}
+                          </option>
+                        ))}
+                      </select>
+                    ) : null}
+                  </td>
+                ) : null}
+                <td>
+                  <span className={STATUS_BADGE[txn.status] ?? 'badge'}>
+                    {statusLabel[txn.status] ?? txn.status}
+                  </span>
+                </td>
+                <td className="actions-cell">
+                  {txn.status === 'pending' && canPost && (
                     <button
                       type="button"
                       className="text-button"
-                      onClick={() => handleIgnore(txn.id)}
+                      onClick={() => handlePost([txn.id])}
+                      // 没选分类就禁用：这一步一定失败，而「请选分类」这件事
+                      // 就摆在左边那一格里，一个灰掉的按钮在这里说得清。
+                      disabled={posting || (chosenCategory[txn.id] ?? '') === ''}
+                    >
+                      {i18n.bankImport.createTransaction}
+                    </button>
+                  )}
+
+                  {txn.status === 'pending' && (
+                    <>
+                      {matchDropdown === txn.id ? (
+                        <div className="match-dropdown">
+                          <input
+                            type="text"
+                            value={searchQuery}
+                            onChange={(e) => handleSearch(e.target.value)}
+                            placeholder={i18n.bankImport.searchPlaceholder}
+                            autoFocus
+                          />
+                          {searching && <span>{i18n.common.loading}</span>}
+                          {searchResults.length > 0 && (
+                            <ul>
+                              {searchResults.map((r) => (
+                                <li key={r.id}>
+                                  <button
+                                    type="button"
+                                    onClick={() => handleMatch(txn.id, r.id)}
+                                    disabled={acting === txn.id}
+                                  >
+                                    {r.occurredOn} · {r.description}
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                          <button
+                            type="button"
+                            className="text-button"
+                            onClick={() => {
+                              setMatchDropdown(null);
+                              setSearchQuery('');
+                              setSearchResults([]);
+                            }}
+                          >
+                            {i18n.common.cancel}
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-button"
+                          onClick={() => setMatchDropdown(txn.id)}
+                          disabled={acting === txn.id}
+                        >
+                          {i18n.bankImport.match}
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        className="text-button"
+                        onClick={() => handleIgnore(txn.id)}
+                        disabled={acting === txn.id}
+                      >
+                        {i18n.bankImport.ignore}
+                      </button>
+                    </>
+                  )}
+
+                  {(txn.status === 'matched' || txn.status === 'ignored') && (
+                    <button
+                      type="button"
+                      className="text-button"
+                      onClick={() => handleReset(txn.id)}
                       disabled={acting === txn.id}
                     >
-                      {i18n.bankImport.ignore}
+                      {i18n.bankImport.reset}
                     </button>
-                  </>
-                )}
-
-                {(txn.status === 'matched' || txn.status === 'ignored') && (
-                  <button
-                    type="button"
-                    className="text-button"
-                    onClick={() => handleReset(txn.id)}
-                    disabled={acting === txn.id}
-                  >
-                    {i18n.bankImport.reset}
-                  </button>
-                )}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
     </div>
   );
 }

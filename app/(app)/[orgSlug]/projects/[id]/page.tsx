@@ -1,12 +1,15 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
+import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getProject, getProjectProfitability } from '@/server/repositories/projects';
 import { ProjectProfitability } from '@/components/projects/project-profitability';
+import { ProjectStatusActions } from '@/components/projects/project-status-actions';
 
 /**
  * 一个项目的详情页。
@@ -58,15 +61,25 @@ export default async function ProjectDetailPage({
     cancelled: t.projects.statusCancelled,
   };
 
+  const canManage = can(context.role, 'account:manage');
+
   return (
     <>
+      {/* 返回放在标题上方，和其他详情页一样。原来是标题下面一个 29px 高的
+          绿色「返回」二字（手机上 .page-header 竖排，它掉到了标题下面）。 */}
+      <BackLink href={`/${orgSlug}/projects`}>{t.projects.title}</BackLink>
       <div className="page-header">
-        <h1>{project.name}</h1>
-        <div className="page-header-actions">
-          <Link href={`/${orgSlug}/projects`} className="text-button">
-            {t.common.back}
-          </Link>
-        </div>
+        {/* 用户起的名字可能很长：.record-title 在手机上缩小字号、允许断词，
+            不再占掉半个首屏。 */}
+        <h1 className="record-title">{project.name}</h1>
+        {/* 原来这一页什么都改不了，要回列表去改。 */}
+        {canManage ? (
+          <div className="page-header-actions">
+            <Link href={`/${orgSlug}/projects/${project.id}/edit`} className="secondary-button">
+              {t.common.edit}
+            </Link>
+          </div>
+        ) : null}
       </div>
 
       <article className="record-detail">
@@ -79,7 +92,7 @@ export default async function ProjectDetailPage({
                   ? 'badge-success'
                   : project.status === 'completed'
                     ? 'badge-info'
-                    : 'badge'
+                    : 'badge-voided'
               }`}
             >
               {statusLabel[project.status] ?? project.status}
@@ -91,7 +104,7 @@ export default async function ProjectDetailPage({
           {/* 预算是 bigint 最小货币单位，一律交给 formatMoney 按本位币的小数位
               渲染。任何 Number(x) / 100 这类换算在零小数币种（JPY/KRW/VND）上
               都会差 100 倍——project-list.tsx 里刚修过同一处。 */}
-          <dd className="amount">
+          <dd className="mono amount">
             {project.budgetMinor === null
               ? '—'
               : formatMoney(project.budgetMinor, context.baseCurrency, locale)}
@@ -104,6 +117,18 @@ export default async function ProjectDetailPage({
           <dd>{project.description || '—'}</dd>
         </dl>
       </article>
+
+      {canManage ? (
+        <div className="doc-actions project-status-row">
+          <ProjectStatusActions
+            orgSlug={orgSlug}
+            projectId={project.id}
+            projectName={project.name}
+            status={project.status}
+            locale={locale}
+          />
+        </div>
+      ) : null}
 
       <h2 className="section-title">{t.projects.profitability}</h2>
       <ProjectProfitability

@@ -162,33 +162,37 @@ export default async function TransactionsListPage({
         locale={locale}
         baseCurrency={context.baseCurrency}
         emptyLabel={t.transaction.empty}
+        showCreator={data.members.length > 1}
       />
 
-      <nav className="pagination" aria-label={t.transaction.pagination}>
-        {page > 1 ? (
-          <Link
-            className="secondary-button"
-            href={`/${orgSlug}/transactions?${new URLSearchParams({
-              ...currentQuery,
-              page: String(page - 1),
-            })}`}
-          >
-            {t.common.previous}
-          </Link>
-        ) : null}
-        <span className="pagination-page">{interpolate(t.common.pageN, { page })}</span>
-        {hasNextPage ? (
-          <Link
-            className="secondary-button"
-            href={`/${orgSlug}/transactions?${new URLSearchParams({
-              ...currentQuery,
-              page: String(page + 1),
-            })}`}
-          >
-            {t.common.next}
-          </Link>
-        ) : null}
-      </nav>
+      {/* 只有一页时不渲染：孤零零一个「第 1 页」什么也没告诉用户。 */}
+      {page > 1 || hasNextPage ? (
+        <nav className="pagination" aria-label={t.transaction.pagination}>
+          {page > 1 ? (
+            <Link
+              className="secondary-button"
+              href={`/${orgSlug}/transactions?${new URLSearchParams({
+                ...currentQuery,
+                page: String(page - 1),
+              })}`}
+            >
+              {t.common.previous}
+            </Link>
+          ) : null}
+          <span className="pagination-page">{interpolate(t.common.pageN, { page })}</span>
+          {hasNextPage ? (
+            <Link
+              className="secondary-button"
+              href={`/${orgSlug}/transactions?${new URLSearchParams({
+                ...currentQuery,
+                page: String(page + 1),
+              })}`}
+            >
+              {t.common.next}
+            </Link>
+          ) : null}
+        </nav>
+      ) : null}
     </>
   );
 }

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
@@ -9,7 +9,7 @@ import { addMonthsLocalISO, todayLocalISO } from '@/lib/date';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import type { BillDetail } from '@/server/repositories/bills';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
-import { X } from '@/components/ui/icons';
+import { Plus, X } from '@/components/ui/icons';
 
 type Contact = {
   id: string;
@@ -45,6 +45,10 @@ type Props = {
    * 明细与税率可改，供应商实际开来的账单不一定与采购单一字不差。
    */
   fromPurchaseOrder?: BillFromPurchaseOrder | null;
+  /** 详情页的摘要卡（合计 / 已付 / 待付），由页面在服务端算好，画在状态条与表单之间。 */
+  summary?: ReactNode;
+  /** 已过到期日且没付清。逾期不落库，由页面按公司时区的「今天」推出来。 */
+  overdue?: boolean;
 };
 
 export type BillFromPurchaseOrder = {
@@ -90,6 +94,8 @@ export function BillForm({
   bill = null,
   readOnly = false,
   fromPurchaseOrder = null,
+  summary = null,
+  overdue = false,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
@@ -224,26 +230,37 @@ export function BillForm({
       voided={isVoided}
       voidedLabel={t.bills.statusVoided}
       notice={
-        isVoided
-          ? t.bills.voidedNotice
-          : readOnly
-            ? t.common.noEditPermission
-            : status === 'paid'
-              ? t.bills.paidNotice
-              : isPosted
-                ? t.bills.postedNotice
-                : t.bills.draftNotice
+        <>
+          {overdue && !isVoided ? (
+            <span className="doc-inline-error bill-overdue-notice">{t.bills.overdueNotice}</span>
+          ) : null}
+          {isVoided
+            ? t.bills.voidedNotice
+            : readOnly
+              ? t.common.noEditPermission
+              : status === 'paid'
+                ? t.bills.paidNotice
+                : isPosted
+                  ? t.bills.postedNotice
+                  : t.bills.draftNotice}
+        </>
       }
     />
   ) : null;
 
   if (isVoided) {
-    return <>{lifecycle}</>;
+    return (
+      <>
+        {lifecycle}
+        {summary}
+      </>
+    );
   }
 
   return (
     <>
       {lifecycle}
+      {summary}
 
       <form onSubmit={handleSubmit} className="transaction-form">
         {/* display: contents：这一层只为把 disabled 一次传给所有字段，不参与
@@ -349,16 +366,21 @@ export function BillForm({
                 onChange={(e) => updateItem(index, 'description', e.target.value)}
                 required
               />
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder={t.bills.amount} aria-label={t.bills.amount}
-                value={item.amount}
-                onChange={(e) => updateItem(index, 'amount', e.target.value)}
-                required
-              />
-              {items.length > 1 ? (
+              {/* 金额包一层 .item-field：手机上表头收起，标签露在输入框上方。 */}
+              <label className="item-field">
+                <span className="item-field__label">{t.bills.amount}</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  placeholder={t.bills.amount}
+                  value={item.amount}
+                  onChange={(e) => updateItem(index, 'amount', e.target.value)}
+                  required
+                />
+              </label>
+              {items.length > 1 && !readOnly ? (
                 <button
                   type="button"
                   onClick={() => removeItem(index)}
@@ -371,9 +393,13 @@ export function BillForm({
             </div>
           ))}
 
-          <button type="button" onClick={addItem} className="btn-small">
-            {t.bills.addItem}
-          </button>
+          {/* 只读时不画增删明细的按钮：灰着的「添加明细」只是在说一件做不到的事。 */}
+          {!readOnly ? (
+            <button type="button" onClick={addItem} className="add-button">
+              <Plus size={16} weight="bold" aria-hidden="true" />
+              {t.bills.addItem}
+            </button>
+          ) : null}
         </fieldset>
 
         <label htmlFor="notes">{t.bills.notes}</label>

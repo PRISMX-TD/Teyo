@@ -79,53 +79,57 @@ export function TaxReportView({
         <p className="empty-state">{t.reports.empty}</p>
       ) : (
         <>
-          <table className="report-table">
-            <thead>
-              <tr>
-                <th>{t.tax.side}</th>
-                <th className="numeric">{t.tax.netBase}</th>
-                <th className="numeric">{t.tax.taxAmount}</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <td>{t.tax.outputTax}</td>
-                <td className="numeric mono">{money(outNet)}</td>
-                <td className="numeric mono">{money(outTax)}</td>
-              </tr>
-              <tr>
-                <td>{t.tax.inputTax}</td>
-                <td className="numeric mono">{money(inNet)}</td>
-                <td className="numeric mono">{money(inTax)}</td>
-              </tr>
-            </tbody>
-            <tfoot>
-              <tr className="total-row">
-                <th>{t.tax.netTaxPayable}</th>
-                <th />
-                <th className="numeric mono">
-                  {netPayable >= 0n ? money(netPayable) : `(${money(-netPayable)})`}
-                </th>
-              </tr>
-            </tfoot>
-          </table>
+          <div className="table-scroll">
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th>{t.tax.side}</th>
+                  <th className="numeric">{t.tax.netBase}</th>
+                  <th className="numeric">{t.tax.taxAmount}</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td>{t.tax.outputTax}</td>
+                  <td className="numeric mono">{money(outNet)}</td>
+                  <td className="numeric mono">{money(outTax)}</td>
+                </tr>
+                <tr>
+                  <td>{t.tax.inputTax}</td>
+                  <td className="numeric mono">{money(inNet)}</td>
+                  <td className="numeric mono">{money(inTax)}</td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr className="total-row grand-total">
+                  <th>{t.tax.netTaxPayable}</th>
+                  <th />
+                  <th className="numeric mono">
+                    {netPayable >= 0n ? money(netPayable) : `(${money(-netPayable)})`}
+                  </th>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
 
           {hasUnmatched && (
             <div className="tax-unmatched">
               <h3>{t.tax.unmatched}</h3>
               <p className="hint">{t.tax.unmatchedHint}</p>
-              <table className="report-table">
-                <tbody>
-                  <tr>
-                    <td>{t.tax.outputTax}</td>
-                    <td className="numeric mono">{money(outUnmatched)}</td>
-                  </tr>
-                  <tr>
-                    <td>{t.tax.inputTax}</td>
-                    <td className="numeric mono">{money(inUnmatched)}</td>
-                  </tr>
-                </tbody>
-              </table>
+              <div className="table-scroll">
+                <table className="report-table">
+                  <tbody>
+                    <tr>
+                      <td>{t.tax.outputTax}</td>
+                      <td className="numeric mono">{money(outUnmatched)}</td>
+                    </tr>
+                    <tr>
+                      <td>{t.tax.inputTax}</td>
+                      <td className="numeric mono">{money(inUnmatched)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
               {/*
                 这一句是让人能把报表和总账对上的钥匙：税科目本期的净发生额
                 恒等于「税额 + 无对应基数的部分」。没有它，读表的人会以为

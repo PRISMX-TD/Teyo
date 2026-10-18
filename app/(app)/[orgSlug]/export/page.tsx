@@ -15,10 +15,13 @@ export default async function ExportPage({
 
   return (
     <>
+      {/* 副标题放进页头：原来它是页头下面一段裸 <p>，下边紧贴着表单卡片。 */}
       <div className="page-header">
-        <h1>{t.exportPage.title}</h1>
+        <div>
+          <h1>{t.exportPage.title}</h1>
+          <p className="page-subtitle">{t.exportPage.subtitle}</p>
+        </div>
       </div>
-      <p>{t.exportPage.subtitle}</p>
       <ExportForm orgSlug={orgSlug} locale={locale} />
     </>
   );

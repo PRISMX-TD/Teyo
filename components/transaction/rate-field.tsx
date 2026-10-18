@@ -4,6 +4,16 @@ import { useEffect, useRef, useState, useTransition } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { lookupRate } from '@/server/actions/rates';
+import { formatMoney } from '@/lib/format';
+import { currencyExponent } from '@/server/domain/money';
+
+/**
+ * 汇率列是 numeric(18,8)，读出来永远是 '4.21500000'。去掉小数部分末尾的零
+ * 再放进框里——数值不变（手动汇率照样按这个值提交），只是不再满屏的零。
+ */
+function trimRate(value: string): string {
+  return value.includes('.') ? value.replace(/\.?0+$/, '') : value;
+}
 
 type Props = {
   orgSlug: string;
@@ -32,7 +42,7 @@ export function RateField({
   initialSource,
 }: Props) {
   const t = getMessages(locale);
-  const [rate, setRate] = useState(initialRate ?? '');
+  const [rate, setRate] = useState(initialRate ? trimRate(initialRate) : '');
   const [source, setSource] = useState<'auto' | 'manual' | 'unavailable'>(initialSource ?? 'auto');
   const [, startTransition] = useTransition();
 
@@ -68,7 +78,7 @@ export function RateField({
     startTransition(async () => {
       const result = await lookupRate(orgSlug, currency, occurredOn);
       if (result.rate) {
-        setRate(result.rate);
+        setRate(trimRate(result.rate));
         setSource('auto');
       } else {
         setRate('');
@@ -93,7 +103,17 @@ export function RateField({
     const parsedAmount = Number(amount.replace(/,/g, ''));
     const parsedRate = Number(rate);
     if (!Number.isFinite(parsedAmount) || !Number.isFinite(parsedRate)) return null;
-    return (parsedAmount * parsedRate).toFixed(2);
+    // 和列表里同一种写法（RM 10,326.75），不再是裸的 10326.75 MYR。
+    // 这只是给人看的估算，入账金额由服务端按同一汇率另算。
+    let exponent: number;
+    try {
+      exponent = currencyExponent(baseCurrency);
+    } catch {
+      return null;
+    }
+    const minor = Math.round(parsedAmount * parsedRate * 10 ** exponent);
+    if (!Number.isSafeInteger(minor)) return null;
+    return formatMoney(BigInt(minor), baseCurrency, locale);
   })();
 
   return (
@@ -142,7 +162,7 @@ export function RateField({
 
       {converted ? (
         <p className="field-hint">
-          {t.transaction.convertedAmount} {converted} {baseCurrency}
+          {t.transaction.convertedAmount} {converted}
         </p>
       ) : null}
     </div>

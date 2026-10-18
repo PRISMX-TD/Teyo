@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { PoForm } from '@/components/purchase-orders/po-form';
+import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -38,6 +39,7 @@ export default async function NewPurchaseOrderPage({
   if (vendors.length === 0) {
     return (
       <>
+        <BackLink href={`/${orgSlug}/purchase-orders`}>{t.purchaseOrders.title}</BackLink>
         <h1>{t.purchaseOrders.newTitle}</h1>
         <p className="empty-state">
           {t.purchaseOrders.noVendors}{' '}
@@ -49,6 +51,7 @@ export default async function NewPurchaseOrderPage({
 
   return (
     <>
+      <BackLink href={`/${orgSlug}/purchase-orders`}>{t.purchaseOrders.title}</BackLink>
       <h1>{t.purchaseOrders.newTitle}</h1>
       <PoForm
         orgSlug={orgSlug}

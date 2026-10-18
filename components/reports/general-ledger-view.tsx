@@ -60,6 +60,15 @@ export function GeneralLedgerView({
 }) {
   const router = useRouter();
 
+  // 分组标题原来直接印科目类型的枚举值（asset / liability），中文界面也是英文。
+  const typeLabels: Record<string, string> = {
+    asset: t.settings.typeAsset,
+    liability: t.settings.typeLiability,
+    equity: t.settings.typeEquity,
+    revenue: t.settings.typeRevenue,
+    expense: t.settings.typeExpense,
+  };
+
   const grouped = new Map<string, AccountOption[]>();
   for (const a of accounts) {
     const g = grouped.get(a.type) ?? [];
@@ -89,11 +98,11 @@ export function GeneralLedgerView({
             「日期选择器」，哪个是起、哪个是止无从判断，而其余每一张工具条
             （对账、预算、对账单）都是有标签的。 */}
         <label htmlFor="gl-account">
-          {t.generalLedger.selectAccount}
+          {t.reports.account}
           <select id="gl-account" name="account" defaultValue={defaultAccountId}>
             <option value="">{t.generalLedger.selectAccount}</option>
             {[...grouped.entries()].map(([type, options]) => (
-              <optgroup key={type} label={type}>
+              <optgroup key={type} label={typeLabels[type] ?? type}>
                 {options.map((a) => (
                   <option key={a.id} value={a.id}>
                     {a.code} · {localizedName(toOption(a), locale)}
@@ -115,15 +124,25 @@ export function GeneralLedgerView({
       </form>
 
       {!ledger ? (
-        <p className="empty-state">{t.generalLedger.empty}</p>
+        // 还没选科目时 ledger 也是 null——那时说「无交易」是一句假话。
+        <p className="empty-state">
+          {defaultAccountId ? t.generalLedger.empty : t.generalLedger.pickAccount}
+        </p>
       ) : (
         <>
           <h2>
             {ledger.accountCode} · {localizedName(toOption({ nameEn: ledger.accountNameEn, nameZh: ledger.accountNameZh }), locale)}
           </h2>
-          <p>
-            {t.generalLedger.openingBalance}: {formatMoney(ledger.openingBalance, baseCurrency, locale)}
-          </p>
+          {/* 期初、期末放在表格上方的摘要卡里：手机上余额是第六列，期末余额
+              那一格落在横向滑动的可视区以外，表尾只剩一个标签。 */}
+          <article className="record-detail record-detail--inline gl-summary">
+            <dl>
+              <dt>{t.generalLedger.openingBalance}</dt>
+              <dd className="mono">{formatMoney(ledger.openingBalance, baseCurrency, locale)}</dd>
+              <dt>{t.generalLedger.closingBalance}</dt>
+              <dd className="mono amount">{formatMoney(ledger.closingBalance, baseCurrency, locale)}</dd>
+            </dl>
+          </article>
           {ledger.total > ledger.lines.length ? (
             <p className="hint">
               {interpolate(t.generalLedger.truncated, {
@@ -132,40 +151,57 @@ export function GeneralLedgerView({
               })}
             </p>
           ) : null}
-          <table className="report-table">
-            <thead>
-              <tr>
-                <th>{t.generalLedger.date}</th>
-                <th>{t.generalLedger.description}</th>
-                <th>{t.generalLedger.kind}</th>
-                <th className="numeric">{t.generalLedger.debit}</th>
-                <th className="numeric">{t.generalLedger.credit}</th>
-                <th className="numeric">{t.generalLedger.balance}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {ledger.lines.map((line, i) => (
-                <tr key={i}>
-                  <td>{line.date}</td>
-                  <td>{line.description || '\u2014'}</td>
-                  <td>{kindLabel(line.kind, t)}</td>
-                  <td className="numeric mono">
-                    {line.debitMinor > 0n ? formatMoney(line.debitMinor, baseCurrency, locale) : ''}
-                  </td>
-                  <td className="numeric mono">
-                    {line.creditMinor > 0n ? formatMoney(line.creditMinor, baseCurrency, locale) : ''}
-                  </td>
-                  <td className="numeric mono">{formatMoney(line.balanceMinor, baseCurrency, locale)}</td>
-                </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th colSpan={5}>{t.generalLedger.closingBalance}</th>
-                <th className="numeric mono">{formatMoney(ledger.closingBalance, baseCurrency, locale)}</th>
-              </tr>
-            </tfoot>
-          </table>
+          {ledger.lines.length === 0 ? (
+            // 期间内没有分录：原来是一张只有表头和「期末余额」的空表，没有一句话。
+            // 期初、期末上面的摘要卡已经有了，这里只需说明为什么是空的。
+            <p className="empty-state">{t.generalLedger.empty}</p>
+          ) : (
+            <div className="table-scroll">
+              <table className="report-table gl-table">
+                <thead>
+                  <tr>
+                    <th>{t.generalLedger.date}</th>
+                    <th>{t.generalLedger.description}</th>
+                    <th>{t.generalLedger.kind}</th>
+                    <th className="numeric">{t.generalLedger.debit}</th>
+                    <th className="numeric">{t.generalLedger.credit}</th>
+                    <th className="numeric">{t.generalLedger.balance}</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {ledger.lines.map((line, i) => (
+                    <tr key={i}>
+                      <td>{line.date}</td>
+                      <td>{line.description || '\u2014'}</td>
+                      <td>{kindLabel(line.kind, t)}</td>
+                      <td className="numeric mono">
+                        {line.debitMinor > 0n ? formatMoney(line.debitMinor, baseCurrency, locale) : ''}
+                      </td>
+                      <td className="numeric mono">
+                        {line.creditMinor > 0n ? formatMoney(line.creditMinor, baseCurrency, locale) : ''}
+                      </td>
+                      <td className="numeric mono">{formatMoney(line.balanceMinor, baseCurrency, locale)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr className="grand-total">
+                    <th colSpan={5}>
+                      {t.generalLedger.closingBalance}
+                      <span className="mobile-echo mono" aria-hidden="true">
+                        {formatMoney(ledger.closingBalance, baseCurrency, locale)}
+                      </span>
+                    </th>
+                    <th className="numeric mono">
+                      <span className="mobile-echo-source">
+                        {formatMoney(ledger.closingBalance, baseCurrency, locale)}
+                      </span>
+                    </th>
+                  </tr>
+                </tfoot>
+              </table>
+            </div>
+          )}
         </>
       )}
     </div>

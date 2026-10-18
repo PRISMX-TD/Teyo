@@ -42,6 +42,13 @@ export const viewport: Viewport = {
   ],
   width: 'device-width',
   initialScale: 1,
+  // cover：装到主屏幕后（manifest display: standalone）页面铺到 Home 指示条
+  // 下面，globals.css 里那些 env(safe-area-inset-*) 才有值——不写它们全是 0，
+  // 底部标签栏会被指示条压住。
+  viewportFit: 'cover',
+  // 键盘弹出时缩小布局视口（Android Chrome）：贴底的弹出层随之上移，
+  // 「确认作废」不会被键盘盖住。
+  interactiveWidget: 'resizes-content',
 };
 
 /**

@@ -19,6 +19,8 @@ type Props = {
   rows: BillListRow[];
   locale: Locale;
   emptyLabel: string;
+  /** 公司时区的「今天」，由页面在服务端算好：逾期按它现推，不落库。 */
+  today: string;
 };
 
 /** partially_paid 同发票，见 components/invoices/invoice-list.tsx 的注释。 */
@@ -33,7 +35,7 @@ const STATUS_CLASS: Record<string, string> = {
 
 const OPEN_STATUSES = new Set(['draft', 'received', 'partially_paid', 'overdue']);
 
-export function BillList({ orgSlug, rows, locale, emptyLabel }: Props) {
+export function BillList({ orgSlug, rows, locale, emptyLabel, today }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
 
@@ -92,7 +94,7 @@ export function BillList({ orgSlug, rows, locale, emptyLabel }: Props) {
         </p>
       ) : null}
 
-      <table className="transaction-table">
+      <table className="transaction-table doc-table">
         <caption className="visually-hidden">{t.bills.title}</caption>
         <thead>
           <tr>
@@ -109,6 +111,11 @@ export function BillList({ orgSlug, rows, locale, emptyLabel }: Props) {
           {rows.map((row) => {
             const status: string = row.status;
             const isVoided = status === 'voided' || row.voidedAt !== null;
+            // 逾期从不落库：已接收或部分付款、过了到期日的，徽章上就说「逾期」。
+            const shown =
+              !isVoided && (status === 'received' || status === 'partially_paid') && row.dueDate < today
+                ? 'overdue'
+                : status;
             const busy = pendingId === row.id;
             // 账单号允许为 null（唯一约束里 null 不参与），而 receiveBill 会
             // 因为分录摘要写不出单据号而拒绝过账。既然服务端一定会拒，
@@ -117,19 +124,19 @@ export function BillList({ orgSlug, rows, locale, emptyLabel }: Props) {
 
             return (
               <tr key={row.id} className={isVoided ? 'row-voided' : undefined}>
-                <td>
+                <td className="doc-number">
                   <Link href={`/${orgSlug}/bills/${row.id}`}>{row.billNumber ?? '—'}</Link>
                 </td>
-                <td>{row.contactName}</td>
-                <td>{row.issueDate}</td>
-                <td>{row.dueDate}</td>
-                <td>
-                  <span className={STATUS_CLASS[status] ?? 'badge'}>
-                    {statusLabel[status] ?? status}
+                <td className="doc-title">{row.contactName}</td>
+                <td data-label={t.bills.issueDate}>{row.issueDate}</td>
+                <td data-label={t.bills.dueDate}>{row.dueDate}</td>
+                <td className="doc-status">
+                  <span className={STATUS_CLASS[shown] ?? 'badge'}>
+                    {statusLabel[shown] ?? shown}
                   </span>
                 </td>
-                <td className="numeric money-out">{formatMoney(row.totalMinor, row.currency)}</td>
-                <td>
+                <td className="numeric money-out doc-amount">{formatMoney(row.totalMinor, row.currency)}</td>
+                <td className="doc-actions-cell">
                   <span className="doc-actions">
                     {status === 'draft' && !isVoided && hasNumber ? (
                       <button

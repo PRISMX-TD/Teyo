@@ -83,25 +83,29 @@ export default async function UncertainPage({
             ))}
           </ul>
 
-          <nav className="pagination" aria-label={t.transaction.pagination}>
-            {page > 1 ? (
-              <Link
-                className="secondary-button"
-                href={`/${orgSlug}/uncertain?page=${page - 1}`}
-              >
-                {t.common.previous}
-              </Link>
-            ) : null}
-            <span className="pagination-page">{interpolate(t.common.pageN, { page })}</span>
-            {hasNextPage ? (
-              <Link
-                className="secondary-button"
-                href={`/${orgSlug}/uncertain?page=${page + 1}`}
-              >
-                {t.common.next}
-              </Link>
-            ) : null}
-          </nav>
+          {/* 只有一页时不画：原来列表底下孤零零一句「第 1 页」，前后都没有按钮，
+              看着像漏删的字。 */}
+          {page > 1 || hasNextPage ? (
+            <nav className="pagination" aria-label={t.transaction.pagination}>
+              {page > 1 ? (
+                <Link
+                  className="secondary-button"
+                  href={`/${orgSlug}/uncertain?page=${page - 1}`}
+                >
+                  {t.common.previous}
+                </Link>
+              ) : null}
+              <span className="pagination-page">{interpolate(t.common.pageN, { page })}</span>
+              {hasNextPage ? (
+                <Link
+                  className="secondary-button"
+                  href={`/${orgSlug}/uncertain?page=${page + 1}`}
+                >
+                  {t.common.next}
+                </Link>
+              ) : null}
+            </nav>
+          ) : null}
         </>
       )}
     </>

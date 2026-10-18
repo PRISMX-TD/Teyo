@@ -4,6 +4,7 @@ import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 import { Sidebar } from '@/components/shell/sidebar';
 import { FloatingDock } from '@/components/shell/floating-dock';
+import { MobileBar } from '@/components/shell/mobile-bar';
 import React from 'react';
 
 export default async function AppLayout({
@@ -45,6 +46,13 @@ export default async function AppLayout({
         i18n={t}
         orgs={allOrgs.map((o) => ({ id: o.id, slug: o.slug, name: o.name }))}
         role={context.role}
+      />
+      {/* 手机上侧栏隐藏，公司名与「我的账号」由这一条顶上来（≥768px 不显示）。 */}
+      <MobileBar
+        orgSlug={orgSlug}
+        orgName={allOrgs.find((o) => o.slug === orgSlug)?.name ?? ''}
+        orgCount={allOrgs.length}
+        i18n={t}
       />
       {/* tabIndex={-1}：跳转链接把焦点送到这里，<main> 本身不可聚焦的话，
           浏览器只会滚动过去而焦点仍留在链接上，下一次 Tab 又回到导航。 */}

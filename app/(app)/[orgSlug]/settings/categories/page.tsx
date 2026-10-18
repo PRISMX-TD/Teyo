@@ -1,4 +1,5 @@
 import { BackLink } from '@/components/ui/back-link';
+import { Plus } from '@/components/ui/icons';
 import { NamedList } from '@/components/settings/named-list';
 import { getMessages } from '@/lib/i18n';
 import { createCategoryFromNamedList, renameCategory, setCategoryActive } from '@/server/actions/categories';
@@ -44,8 +45,18 @@ export default async function CategoriesSettingsPage({
   return (
     <>
       <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
-      <h1>{t.settings.categories}</h1>
+      {/* 新增表单在十几行分类的最下面；页头给一个跳过去的入口。 */}
+      <div className="page-header">
+        <h1>{t.settings.categories}</h1>
+        <div className="page-header-actions">
+          <a href="#add-category" className="add-button">
+            <Plus size={16} weight="bold" aria-hidden="true" />
+            {t.settings.addCategory}
+          </a>
+        </div>
+      </div>
       <NamedList
+        addFormId="add-category"
         orgSlug={orgSlug}
         items={items}
         locale={locale}

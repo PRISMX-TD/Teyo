@@ -1,4 +1,5 @@
 import { ProjectForm } from '@/components/projects/project-form';
+import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -26,6 +27,8 @@ export default async function NewProjectPage({
 
   return (
     <>
+      {/* 装成 PWA 后没有浏览器返回键，这一页原来是个死胡同。 */}
+      <BackLink href={`/${orgSlug}/projects`}>{t.projects.title}</BackLink>
       <h1>{t.projects.newTitle}</h1>
       <ProjectForm
         orgSlug={orgSlug}

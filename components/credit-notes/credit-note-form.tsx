@@ -1,13 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale, Messages } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
-import { createCreditNote, updateCreditNoteAction } from '@/server/actions/credit-notes';
+import {
+  createCreditNote,
+  issueCreditNote,
+  updateCreditNoteAction,
+} from '@/server/actions/credit-notes';
 import { todayLocalISO } from '@/lib/date';
 import { RateField } from '@/components/transaction/rate-field';
-import { X } from '@/components/ui/icons';
+import { Plus, X } from '@/components/ui/icons';
+import { useHeaderIssue } from '@/components/invoices/header-issue';
 
 type Contact = { id: string; name: string };
 type InvoiceRef = { id: string; invoice_number: string; contact_id: string; currency: string };
@@ -129,15 +134,33 @@ export function CreditNoteForm({
     }
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  const formRef = useRef<HTMLFormElement>(null);
+  // 详情页页头的「发出」：先过一遍与保存按钮相同的浏览器校验，再存、再发出。
+  const header = useHeaderIssue(() => {
+    const form = formRef.current;
+    if (pending || !form?.reportValidity()) return;
+    void save(form, true);
+  });
+
+  function setBusy(busy: boolean) {
+    setPending(busy);
+    header?.setPending(busy);
+  }
+
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    setPending(true);
+    await save(e.currentTarget, false);
+  }
+
+  async function save(form: HTMLFormElement, thenIssue: boolean) {
+    setBusy(true);
     setError(null);
+    header?.setError(null);
 
     // 汇率从 form 里取而不是 state：RateField 只在用户手工改过时才提交
     // exchangeRate，自动查到的那个值刻意不带 name——否则服务端会把一个
     // 缓存汇率记成「用户手工输入」。见 components/transaction/rate-field.tsx。
-    const formData = new FormData(e.currentTarget as HTMLFormElement);
+    const formData = new FormData(form);
     const exchangeRate = formData.get('exchangeRate')
       ? String(formData.get('exchangeRate'))
       : undefined;
@@ -165,6 +188,12 @@ export function CreditNoteForm({
           // （最小单位整数的含义由币种决定），少传一次就是一句报错。
           items: payloadItems,
         });
+        if (thenIssue) {
+          await issueCreditNote(orgSlug, creditNote.id);
+          // 留在这一页：发出之后它换成只读视图，页头的下一步变成「应用」。
+          router.refresh();
+          return;
+        }
       } else {
         await createCreditNote(orgSlug, {
           invoiceId: invoiceId || null,
@@ -180,14 +209,16 @@ export function CreditNoteForm({
       router.push(`/${orgSlug}/credit-notes`);
       router.refresh();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      if (thenIssue && header) header.setError(message);
+      else setError(message);
     } finally {
-      setPending(false);
+      setBusy(false);
     }
   }
 
   return (
-    <form onSubmit={handleSubmit} className="transaction-form">
+    <form ref={formRef} onSubmit={handleSubmit} className="transaction-form">
       {/* 草稿说明。发票和账单表单都告诉了用户「存下来还没进账」，只有贷项
           通知单没有——而这里的落差最伤人：用户以为已经把钱从客户欠款里
           减掉了，实际上那张发票的应收一分没动。
@@ -301,23 +332,32 @@ export function CreditNoteForm({
               onChange={(e) => updateItem(index, 'description', e.target.value)}
               required
             />
-            <input
-              type="number"
-              min="0.0001"
-              step="0.0001"
-              placeholder={i18n.invoices.quantity} aria-label={i18n.invoices.quantity}
-              value={item.quantity}
-              onChange={(e) => updateItem(index, 'quantity', e.target.value)}
-            />
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder={i18n.invoices.unitPrice} aria-label={i18n.invoices.unitPrice}
-              value={item.unitPrice}
-              onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
-              required
-            />
+            {/* 数量、单价各包一层 label：手机上表头收起，标签露出来。 */}
+            <label className="item-field">
+              <span className="item-field__label">{i18n.invoices.quantity}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0.0001"
+                step="0.0001"
+                placeholder={i18n.invoices.quantity} aria-label={i18n.invoices.quantity}
+                value={item.quantity}
+                onChange={(e) => updateItem(index, 'quantity', e.target.value)}
+              />
+            </label>
+            <label className="item-field">
+              <span className="item-field__label">{i18n.invoices.unitPrice}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                placeholder={i18n.invoices.unitPrice} aria-label={i18n.invoices.unitPrice}
+                value={item.unitPrice}
+                onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
+                required
+              />
+            </label>
             {items.length > 1 ? (
               <button
                 type="button"
@@ -331,7 +371,8 @@ export function CreditNoteForm({
           </div>
         ))}
 
-        <button type="button" onClick={addItem} className="btn-small">
+        <button type="button" onClick={addItem} className="add-button">
+          <Plus size={16} weight="bold" aria-hidden="true" />
           {i18n.invoices.addItem}
         </button>
       </fieldset>

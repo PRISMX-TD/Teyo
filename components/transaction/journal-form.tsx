@@ -136,8 +136,11 @@ export function JournalForm({ orgSlug, baseCurrency, locale, accounts }: Props) 
       </select>
 
       <label htmlFor="description">{t.transaction.description}</label>
-      <input
+      {/* 与记一笔的备注同一个多行框，理由见 transaction-form.tsx。 */}
+      <textarea
         id="description"
+        className="tx-note"
+        rows={2}
         maxLength={500}
         value={description}
         onChange={(e) => setDescription(e.target.value)}

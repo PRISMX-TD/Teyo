@@ -140,6 +140,9 @@ const METHODS = [
   { value: 'other', key: 'methodOther' },
 ] as const;
 
+/** 手机上快捷清单先露出的张数。 */
+const QUICK_PICK_PREVIEW = 5;
+
 export function PaymentForm({
   orgSlug,
   locale,
@@ -200,6 +203,8 @@ export function PaymentForm({
   const [error, setError] = useState<string | null>(null);
   const [submitted, setSubmitted] = useState(false);
   const [pending, setPending] = useState(false);
+  /** 手机上快捷清单先只露前几张，见下面 .payment-quick-pick 那一段。 */
+  const [showAllPicks, setShowAllPicks] = useState(false);
 
   // 这个币种有几位小数。写死 2 的代价是零位小数的币种（JPY/KRW/VND）
   // 整整差两个数量级；`step="0.01"` 同理——它在 JPY 上允许用户敲出一个
@@ -480,7 +485,14 @@ export function PaymentForm({
         单据清单才肯列出来。按到期日排，逾期的标出来：先收最该收的那一笔。
       */}
       {visiblePicks.length > 0 ? (
-        <section className="payment-quick-pick" aria-labelledby="quickPickTitle">
+        // 手机上不给这张清单内嵌滚动条（页面里再套一层滚动，拇指一滑就分不清
+        // 在滚哪一层），改成先列前 5 张、其余收在「显示全部」后面；桌面上
+        // 仍是固定高度的滚动清单，data-expanded 只在手机那一段里起作用。
+        <section
+          className="payment-quick-pick"
+          aria-labelledby="quickPickTitle"
+          data-expanded={showAllPicks || visiblePicks.length <= QUICK_PICK_PREVIEW || undefined}
+        >
           <h2 id="quickPickTitle">
             {paymentType === 'received'
               ? i18n.payments.quickPickInvoices
@@ -518,6 +530,15 @@ export function PaymentForm({
               );
             })}
           </ul>
+          {!showAllPicks && visiblePicks.length > QUICK_PICK_PREVIEW ? (
+            <button
+              type="button"
+              className="payment-quick-pick-more"
+              onClick={() => setShowAllPicks(true)}
+            >
+              {interpolate(i18n.payments.showAllPicks, { count: String(visiblePicks.length) })}
+            </button>
+          ) : null}
         </section>
       ) : null}
 

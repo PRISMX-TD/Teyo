@@ -1,4 +1,5 @@
 import { PaymentForm } from '@/components/payments/payment-form';
+import { BackLink } from '@/components/ui/back-link';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -104,6 +105,7 @@ export default async function NewPaymentPage({
   if (contacts.length === 0) {
     return (
       <>
+        <BackLink href={`/${orgSlug}/payments`}>{t.payments.title}</BackLink>
         <h1>{t.payments.newTitle}</h1>
         <p className="empty-state">{t.payments.noContacts}</p>
       </>
@@ -118,6 +120,7 @@ export default async function NewPaymentPage({
 
   return (
     <>
+      <BackLink href={`/${orgSlug}/payments`}>{t.payments.title}</BackLink>
       <h1>{t.payments.newTitle}</h1>
       {requested && !initialDocument ? (
         <p role="status" className="hint">

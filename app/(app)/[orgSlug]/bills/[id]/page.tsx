@@ -2,8 +2,10 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { BillForm } from '@/components/bills/bill-form';
 import { AttachmentPanel } from '@/components/transaction/attachment-panel';
-import { getMessages, interpolate } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { BackLink } from '@/components/ui/back-link';
+import { getMessages } from '@/lib/i18n';
+import { formatMoney } from '@/lib/format';
+import { requirePermission, todayInOrg } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -12,6 +14,18 @@ import { hasBalanceToSettle, sumDeductedByDocument } from '@/server/repositories
 import { listAttachments } from '@/server/repositories/attachments';
 import { listTaxRates } from '@/server/repositories/tax';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
+
+/** 把「编辑账单 {number}」拆开，单号单独包一层，不在连字符处折行。 */
+function titleWithNumber(template: string, number: string) {
+  const [before, after = ''] = template.split('{number}');
+  return (
+    <>
+      {before}
+      <span className="doc-no">{number}</span>
+      {after}
+    </>
+  );
+}
 
 /**
  * 一张账单的详情/编辑页。与发票那一侧对称，存在的理由也相同：
@@ -70,30 +84,75 @@ export default async function BillDetailPage({
     ? contacts
     : [{ id: bill.contactId, name: bill.contactName }, ...contacts];
 
+  const isVoided = bill.status === 'voided' || bill.voidedAt !== null;
+  const isDraft = bill.status === 'draft';
+  // 已付讫、已作废、或者没有编辑权限的账单，这一页是查看，不是编辑。
+  const isViewOnly = !canEdit || isVoided || bill.status === 'paid';
+  const balanceMinor = bill.totalMinor - deductedMinor;
+  // 逾期从不落库（没有任何地方把 status 写成 overdue），按公司时区的
+  // 「今天」现推：已入账、还欠着钱、过了到期日。
+  const overdue =
+    !isVoided && !isDraft && balanceMinor > 0n && bill.dueDate < todayInOrg(context);
+  // 草稿与作废的账单没有「已付 / 待付」可言，只列合计。
+  const showSettlement = !isVoided && !isDraft;
+
+  const summary = (
+    <article
+      className={`record-detail record-detail--inline doc-summary bill-summary${isVoided ? ' voided' : ''}`}
+    >
+      <dl>
+        <dt>{t.bills.total}</dt>
+        <dd className={showSettlement && balanceMinor > 0n ? 'mono' : 'mono amount'}>
+          {formatMoney(bill.totalMinor, bill.currency, locale)}
+        </dd>
+        {showSettlement ? (
+          <>
+            <dt>{t.bills.paidAmount}</dt>
+            <dd className="mono">{formatMoney(deductedMinor, bill.currency, locale)}</dd>
+            {balanceMinor > 0n ? (
+              <>
+                <dt>{t.bills.balanceDue}</dt>
+                <dd className="mono amount">{formatMoney(balanceMinor, bill.currency, locale)}</dd>
+              </>
+            ) : null}
+          </>
+        ) : null}
+        {/* 逾期徽章跟在标签后面（同发票页）：放在值那一格会把整列值撑宽，
+            320 宽时每一行的标签都被挤成两行。 */}
+        <dt>
+          {t.bills.dueDate}
+          {overdue ? <span className="badge badge-danger">{t.bills.statusOverdue}</span> : null}
+        </dt>
+        <dd className="mono">{bill.dueDate}</dd>
+        {/* 从哪张采购订单转来。原来是页头动作区里的一个文字链接，和主按钮挤在一行。 */}
+        {bill.purchaseOrderId ? (
+          <>
+            <dt>{t.bills.sourcePo}</dt>
+            <dd>
+              <Link href={`/${orgSlug}/purchase-orders/${bill.purchaseOrderId}`} className="mono">
+                {bill.purchaseOrderNumber ?? '—'}
+              </Link>
+            </dd>
+          </>
+        ) : null}
+      </dl>
+    </article>
+  );
+
   return (
     <>
+      <BackLink href={`/${orgSlug}/bills`}>{t.bills.title}</BackLink>
       <div className="page-header">
-        <h1>{interpolate(t.bills.editTitle, { number: bill.billNumber ?? '—' })}</h1>
-        <div className="page-header-actions">
-          {mayRecordPayment ? (
+        <h1>
+          {titleWithNumber(isViewOnly ? t.bills.viewTitle : t.bills.editTitle, bill.billNumber ?? '—')}
+        </h1>
+        {mayRecordPayment ? (
+          <div className="page-header-actions">
             <Link href={`/${orgSlug}/payments/new?bill=${bill.id}`} className="primary-button">
               {t.bills.recordPayment}
             </Link>
-          ) : null}
-          {bill.purchaseOrderId ? (
-            <Link
-              href={`/${orgSlug}/purchase-orders/${bill.purchaseOrderId}`}
-              className="text-button"
-            >
-              {interpolate(t.bills.fromPurchaseOrder, {
-                number: bill.purchaseOrderNumber ?? '—',
-              })}
-            </Link>
-          ) : null}
-          <Link href={`/${orgSlug}/bills`} className="text-button">
-            {t.bills.backToList}
-          </Link>
-        </div>
+          </div>
+        ) : null}
       </div>
 
       <BillForm
@@ -109,6 +168,8 @@ export default async function BillDetailPage({
         }))}
         bill={bill}
         readOnly={!canEdit}
+        summary={summary}
+        overdue={overdue}
       />
 
       {/*
@@ -126,7 +187,7 @@ export default async function BillDetailPage({
           sizeBytes: file.sizeBytes,
         }))}
         t={t}
-        readOnly={!canEdit || bill.status === 'voided'}
+        readOnly={!canEdit || isVoided}
         labels={{
           title: t.bills.attachments,
           empty: t.bills.noAttachments,

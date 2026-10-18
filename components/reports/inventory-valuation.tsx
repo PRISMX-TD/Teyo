@@ -32,7 +32,7 @@ export function InventoryValuation({ valuation, locale, baseCurrency }: Props) {
   );
 
   return (
-    <table className="transaction-table">
+    <table className="transaction-table doc-table">
       <caption className="visually-hidden">{t.inventory.valuation}</caption>
       <thead>
         <tr>
@@ -47,21 +47,23 @@ export function InventoryValuation({ valuation, locale, baseCurrency }: Props) {
       <tbody>
         {valuation.map((v) => (
           <tr key={v.itemId}>
-            <td>{v.sku}</td>
-            <td>{localizedName({ name_en: v.nameEn, name_zh: v.nameZh }, locale)}</td>
-            <td>{v.unit}</td>
-            <td className="numeric">{v.quantity}</td>
-            <td className="numeric">{formatMoney(v.avgCostMinor, baseCurrency, locale)}</td>
-            <td className="numeric">{formatMoney(v.totalValueMinor, baseCurrency, locale)}</td>
+            <td data-label={t.inventory.sku}>{v.sku}</td>
+            <td className="doc-title">{localizedName({ name_en: v.nameEn, name_zh: v.nameZh }, locale)}</td>
+            <td data-label={t.inventory.unit}>{v.unit}</td>
+            <td className="numeric" data-label={t.inventory.quantity}>{v.quantity}</td>
+            <td className="numeric" data-label={t.inventory.avgCost}>
+              {formatMoney(v.avgCostMinor, baseCurrency, locale)}
+            </td>
+            <td className="numeric doc-amount">{formatMoney(v.totalValueMinor, baseCurrency, locale)}</td>
           </tr>
         ))}
       </tbody>
       <tfoot>
         <tr>
-          <td colSpan={5} className="numeric">
+          <td colSpan={5} className="numeric doc-title">
             <strong>{t.reports.total}</strong>
           </td>
-          <td className="numeric">
+          <td className="numeric doc-amount">
             <strong>{formatMoney(totalValue, baseCurrency, locale)}</strong>
           </td>
         </tr>

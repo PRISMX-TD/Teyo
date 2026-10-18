@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useCallback, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -60,15 +60,24 @@ function BalanceCheckRow({
   baseCurrency: string;
   t: Messages;
 }) {
+  const verdict = check.balanced
+    ? t.reports.balanced
+    : interpolate(t.reports.outOfBalanceBy, {
+        amount: formatMoney(check.differenceMinor, baseCurrency, locale),
+      });
+  // 手机上表格横向滑动，右对齐的「已平」原来落在滑出屏幕的最后一列底下。
+  // 那里改由第一列（钉在左边、一直看得见）里的副本显示，原格子只留给读屏；
+  // 桌面与打印照旧是右边那一格。
   return (
-    <tr>
-      <th>{t.reports.balanceCheck}</th>
+    <tr className={`balance-check ${check.balanced ? 'is-ok' : 'is-off'}`}>
+      <th>
+        {t.reports.balanceCheck}
+        <span className="balance-verdict mobile-echo" aria-hidden="true">
+          {verdict}
+        </span>
+      </th>
       <th className="numeric" colSpan={colSpan}>
-        {check.balanced
-          ? t.reports.balanced
-          : interpolate(t.reports.outOfBalanceBy, {
-              amount: formatMoney(check.differenceMinor, baseCurrency, locale),
-            })}
+        <span className="balance-verdict mobile-echo-source">{verdict}</span>
       </th>
     </tr>
   );
@@ -133,9 +142,57 @@ export function ReportsView({
     [tabs],
   );
 
+  /**
+   * 页签条在手机上放不下九个报表，只露出前三个。两件事：
+   *  - 哪一侧还有被挡住的页签，就在那一侧标个属性，CSS 据此把边缘淡出
+   *    （直接改 DOM 属性，不走 state：滚动时每一帧都触发，不值得重渲染）；
+   *  - 点了半露在边上的页签，把它滚到中间。用 scrollTo 而不是
+   *    scrollIntoView：后者会连整页一起纵向滚动。
+   */
+  const stripRef = useRef<HTMLDivElement>(null);
+  const updateStripEdges = useCallback(() => {
+    const strip = stripRef.current;
+    if (!strip) return;
+    const maxScroll = strip.scrollWidth - strip.clientWidth;
+    // 容差取首尾页签自己的左右内边距（16px）：只挡住这段空白时字是完整的，
+    // 不必淡出。桌面 1280 宽时页签条正好多出 10px，原来按 1px 算，最后一个
+    // 「税额汇总」被淡成半透明，像是不能点。
+    const slack = 16;
+    strip.toggleAttribute('data-more-before', strip.scrollLeft > slack);
+    strip.toggleAttribute('data-more-after', strip.scrollLeft < maxScroll - slack);
+  }, []);
+
+  useEffect(() => {
+    updateStripEdges();
+    const strip = stripRef.current;
+    if (!strip || typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(updateStripEdges);
+    observer.observe(strip);
+    return () => observer.disconnect();
+  }, [updateStripEdges]);
+
+  useEffect(() => {
+    const strip = stripRef.current;
+    const active = strip?.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (!strip || !active || strip.scrollWidth <= strip.clientWidth) return;
+    const stripBox = strip.getBoundingClientRect();
+    const tabBox = active.getBoundingClientRect();
+    const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    strip.scrollTo({
+      left: strip.scrollLeft + (tabBox.left - stripBox.left) - (strip.clientWidth - tabBox.width) / 2,
+      behavior: reduceMotion ? 'auto' : 'smooth',
+    });
+  }, [tab]);
+
   return (
     <>
-      <div className="report-tabs" role="tablist" aria-label={t.reports.tabsLabel}>
+      <div
+        ref={stripRef}
+        className="report-tabs"
+        role="tablist"
+        aria-label={t.reports.tabsLabel}
+        onScroll={updateStripEdges}
+      >
         {tabs.map((tabItem, index) => {
           const selected = tab === tabItem.key;
           return (
@@ -165,7 +222,7 @@ export function ReportsView({
       ) : tab === 'profit-loss' ? (
         <ProfitLossTable data={profitLoss} locale={locale} baseCurrency={baseCurrency} t={t} period={period} />
       ) : tab === 'balance-sheet' ? (
-        <BalanceSheetTable data={balanceSheet} locale={locale} baseCurrency={baseCurrency} t={t} />
+        <BalanceSheetTable data={balanceSheet} locale={locale} baseCurrency={baseCurrency} t={t} asOf={period.to} />
       ) : tab === 'cash-flow' ? (
         <CashFlowTable data={cashFlow} locale={locale} baseCurrency={baseCurrency} t={t} period={period} />
       ) : tab === 'ar-aging' ? (
@@ -225,53 +282,55 @@ function TrialBalanceTable({
   const totalCredit = rows.reduce((s, r) => s + r.creditMinor, 0n);
 
   return (
-    <table className="report-table">
-      <thead>
-        <tr>
-          <th>{t.reports.account}</th>
-          <th className="numeric">{t.reports.debit}</th>
-          <th className="numeric">{t.reports.credit}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          /* 预置科目表有 40 个科目，一家刚起步的公司只动了其中七八个——
-             试算平衡表照规矩要把它们全部列出（会计要看到「这个科目确实是
-             零」，而不是「这一行不见了」），于是有数的那几行被三十行空行
-             埋掉。row-zero 只调透明度，不删行、不改导出：数据一行不少，
-             但扫一眼就知道该看哪几行。 */
-          <tr
-            key={row.code}
-            className={row.debitMinor === 0n && row.creditMinor === 0n ? 'row-zero' : undefined}
-          >
-            <td>
-              {localizedName(toOption(row), locale)}
-              {row.isActive ? null : <span className="badge badge-voided">{t.reports.archived}</span>}
-            </td>
-            <td className="numeric mono">
-              {row.debitMinor > 0n ? formatMoney(row.debitMinor, baseCurrency, locale) : ''}
-            </td>
-            <td className="numeric mono">
-              {row.creditMinor > 0n ? formatMoney(row.creditMinor, baseCurrency, locale) : ''}
-            </td>
+    <div className="table-scroll">
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th>{t.reports.account}</th>
+            <th className="numeric">{t.reports.debit}</th>
+            <th className="numeric">{t.reports.credit}</th>
           </tr>
-        ))}
-      </tbody>
-      <tfoot>
-        <tr>
-          <th>{t.reports.total}</th>
-          <th className="numeric mono">{formatMoney(totalDebit, baseCurrency, locale)}</th>
-          <th className="numeric mono">{formatMoney(totalCredit, baseCurrency, locale)}</th>
-        </tr>
-        <BalanceCheckRow
-          check={checkTrialBalance(rows)}
-          colSpan={2}
-          locale={locale}
-          baseCurrency={baseCurrency}
-          t={t}
-        />
-      </tfoot>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            /* 预置科目表有 40 个科目，一家刚起步的公司只动了其中七八个——
+               试算平衡表照规矩要把它们全部列出（会计要看到「这个科目确实是
+               零」，而不是「这一行不见了」），于是有数的那几行被三十行空行
+               埋掉。row-zero 只调透明度，不删行、不改导出：数据一行不少，
+               但扫一眼就知道该看哪几行。 */
+            <tr
+              key={row.code}
+              className={row.debitMinor === 0n && row.creditMinor === 0n ? 'row-zero' : undefined}
+            >
+              <td>
+                {localizedName(toOption(row), locale)}
+                {row.isActive ? null : <span className="badge badge-voided">{t.reports.archived}</span>}
+              </td>
+              <td className="numeric mono">
+                {row.debitMinor > 0n ? formatMoney(row.debitMinor, baseCurrency, locale) : ''}
+              </td>
+              <td className="numeric mono">
+                {row.creditMinor > 0n ? formatMoney(row.creditMinor, baseCurrency, locale) : ''}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="grand-total">
+            <th>{t.reports.total}</th>
+            <th className="numeric mono">{formatMoney(totalDebit, baseCurrency, locale)}</th>
+            <th className="numeric mono">{formatMoney(totalCredit, baseCurrency, locale)}</th>
+          </tr>
+          <BalanceCheckRow
+            check={checkTrialBalance(rows)}
+            colSpan={2}
+            locale={locale}
+            baseCurrency={baseCurrency}
+            t={t}
+          />
+        </tfoot>
+      </table>
+    </div>
   );
 }
 
@@ -293,67 +352,69 @@ function ProfitLossTable({
   if (!hasRevenue && !hasExpense) return <p className="empty-state">{t.reports.empty}</p>;
 
   return (
-    <table className="report-table">
-      <thead>
-        <tr>
-          <th colSpan={2}>{t.reports.profitLoss}</th>
-        </tr>
-        {/* 期间必须写在表上。财年可以从任何一个月开始，而「本年度」这三个
-            字在 7 月起的公司里指的不是 1 月到今天——不写出来，用户没有任何
-            办法判断眼前这张表算的是哪一段。 */}
-        <tr>
-          <th colSpan={2} className="report-period">
-            {interpolate(t.reports.periodRange, { from: period.from, to: period.to })}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.revenueRows.length > 0 && (
-          <>
-            <tr className="section-header">
-              <td colSpan={2}>{t.reports.revenue}</td>
-            </tr>
-            {data.revenueRows.map((row) => (
-              <tr key={row.code}>
-                <td>{localizedName(toOption(row), locale)}</td>
-                <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+    <div className="table-scroll">
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th colSpan={2}>{t.reports.profitLoss}</th>
+          </tr>
+          {/* 期间必须写在表上。财年可以从任何一个月开始，而「本年度」这三个
+              字在 7 月起的公司里指的不是 1 月到今天——不写出来，用户没有任何
+              办法判断眼前这张表算的是哪一段。 */}
+          <tr>
+            <th colSpan={2} className="report-period">
+              {interpolate(t.reports.periodRange, { from: period.from, to: period.to })}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.revenueRows.length > 0 && (
+            <>
+              <tr className="section-header">
+                <td colSpan={2}>{t.reports.revenue}</td>
               </tr>
-            ))}
-            <tr className="subtotal">
-              <td>{t.reports.total} {t.reports.revenue}</td>
-              <td className="numeric mono">{formatMoney(data.revenueTotal, baseCurrency, locale)}</td>
-            </tr>
-          </>
-        )}
-
-        {data.expenseRows.length > 0 && (
-          <>
-            <tr className="section-header">
-              <td colSpan={2}>{t.reports.expense}</td>
-            </tr>
-            {data.expenseRows.map((row) => (
-              <tr key={row.code}>
-                <td>{localizedName(toOption(row), locale)}</td>
-                <td className="numeric mono">({formatMoney(row.totalMinor, baseCurrency, locale)})</td>
+              {data.revenueRows.map((row) => (
+                <tr key={row.code}>
+                  <td>{localizedName(toOption(row), locale)}</td>
+                  <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+                </tr>
+              ))}
+              <tr className="subtotal">
+                <td>{t.reports.totalRevenue}</td>
+                <td className="numeric mono">{formatMoney(data.revenueTotal, baseCurrency, locale)}</td>
               </tr>
-            ))}
-            <tr className="subtotal">
-              <td>{t.reports.total} {t.reports.expense}</td>
-              <td className="numeric mono">({formatMoney(data.expenseTotal, baseCurrency, locale)})</td>
-            </tr>
-          </>
-        )}
+            </>
+          )}
 
-        <tr className="total-row">
-          <th>{t.reports.netIncome}</th>
-          <th className="numeric mono">
-            {data.netIncome >= 0
-              ? formatMoney(data.netIncome, baseCurrency, locale)
-              : `(${formatMoney(-data.netIncome, baseCurrency, locale)})`}
-          </th>
-        </tr>
-      </tbody>
-    </table>
+          {data.expenseRows.length > 0 && (
+            <>
+              <tr className="section-header">
+                <td colSpan={2}>{t.reports.expense}</td>
+              </tr>
+              {data.expenseRows.map((row) => (
+                <tr key={row.code}>
+                  <td>{localizedName(toOption(row), locale)}</td>
+                  <td className="numeric mono">({formatMoney(row.totalMinor, baseCurrency, locale)})</td>
+                </tr>
+              ))}
+              <tr className="subtotal">
+                <td>{t.reports.totalExpense}</td>
+                <td className="numeric mono">({formatMoney(data.expenseTotal, baseCurrency, locale)})</td>
+              </tr>
+            </>
+          )}
+
+          <tr className="total-row grand-total">
+            <th>{t.reports.netIncome}</th>
+            <th className="numeric mono">
+              {data.netIncome >= 0
+                ? formatMoney(data.netIncome, baseCurrency, locale)
+                : `(${formatMoney(-data.netIncome, baseCurrency, locale)})`}
+            </th>
+          </tr>
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -403,73 +464,76 @@ function CashFlowTable({
   };
 
   return (
-    <table className="report-table">
-      <thead>
-        <tr>
-          <th colSpan={2}>{t.reports.cashFlow}</th>
-        </tr>
-        {/* 与损益表同一个理由：这张表也是期间表，期间由财年决定。 */}
-        <tr>
-          <th colSpan={2} className="report-period">
-            {interpolate(t.reports.periodRange, { from: period.from, to: period.to })}
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {([data.operating, data.investing, data.financing] as const).map((section) => (
-          <React.Fragment key={section.label}>
-            <tr className="section-header">
-              <td colSpan={2}>{sectionLabels[section.label] ?? section.label}</td>
-            </tr>
-            {section.rows.map((row, i) => (
-              <tr key={i}>
-                <td>{lineLabels[row.label] ?? row.label}</td>
-                <td className="numeric mono">{formatMoney(row.amountMinor, baseCurrency, locale)}</td>
+    <div className="table-scroll">
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th colSpan={2}>{t.reports.cashFlow}</th>
+          </tr>
+          {/* 与损益表同一个理由：这张表也是期间表，期间由财年决定。 */}
+          <tr>
+            <th colSpan={2} className="report-period">
+              {interpolate(t.reports.periodRange, { from: period.from, to: period.to })}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {([data.operating, data.investing, data.financing] as const).map((section) => (
+            <React.Fragment key={section.label}>
+              <tr className="section-header">
+                <td colSpan={2}>{sectionLabels[section.label] ?? section.label}</td>
               </tr>
-            ))}
-          </React.Fragment>
-        ))}
-        {/* checkCashFlow now always reads balanced by construction (unclassified
-            folds into netChange) — the row below is what surfaces the gap honestly,
-            instead of the self-check silently reading "out of balance". */}
-        {data.unclassified !== 0n && (
-          <>
-            <tr className="section-header">
-              <td colSpan={2}>{t.reports.unclassified_cf}</td>
-            </tr>
-            <tr>
-              <td>{t.reports.unclassifiedHint_cf}</td>
-              <td className="numeric mono">{formatMoney(data.unclassified, baseCurrency, locale)}</td>
-            </tr>
-          </>
-        )}
-      </tbody>
-      <tfoot>
-        <tr>
-          <th>{t.reports.netCashFlow}</th>
-          <th className="numeric mono">{formatMoney(data.netChange, baseCurrency, locale)}</th>
-        </tr>
-        <tr>
-          <td>{t.reports.openingCash}</td>
-          <td className="numeric mono">{formatMoney(data.openingCash, baseCurrency, locale)}</td>
-        </tr>
-        <tr>
-          <td>{t.reports.closingCash}</td>
-          <td className="numeric mono">{formatMoney(data.closingCash, baseCurrency, locale)}</td>
-        </tr>
-        <BalanceCheckRow
-          check={checkCashFlow({
-            openingCash: data.openingCash,
-            netChange: data.netChange,
-            closingCash: data.closingCash,
-          })}
-          colSpan={1}
-          locale={locale}
-          baseCurrency={baseCurrency}
-          t={t}
-        />
-      </tfoot>
-    </table>
+              {section.rows.map((row, i) => (
+                <tr key={i}>
+                  <td>{lineLabels[row.label] ?? row.label}</td>
+                  <td className="numeric mono">{formatMoney(row.amountMinor, baseCurrency, locale)}</td>
+                </tr>
+              ))}
+            </React.Fragment>
+          ))}
+          {/* checkCashFlow now always reads balanced by construction (unclassified
+              folds into netChange) — the row below is what surfaces the gap honestly,
+              instead of the self-check silently reading "out of balance". */}
+          {data.unclassified !== 0n && (
+            <>
+              <tr className="section-header">
+                <td colSpan={2}>{t.reports.unclassified_cf}</td>
+              </tr>
+              <tr>
+                <td>{t.reports.unclassifiedHint_cf}</td>
+                <td className="numeric mono">{formatMoney(data.unclassified, baseCurrency, locale)}</td>
+              </tr>
+            </>
+          )}
+        </tbody>
+        <tfoot>
+          <tr>
+            <th>{t.reports.netCashFlow}</th>
+            <th className="numeric mono">{formatMoney(data.netChange, baseCurrency, locale)}</th>
+          </tr>
+          {/* 期初是一行普通数，期末才是这张表的落点：粗体 + 双线只给它。 */}
+          <tr className="footer-line">
+            <td>{t.reports.openingCash}</td>
+            <td className="numeric mono">{formatMoney(data.openingCash, baseCurrency, locale)}</td>
+          </tr>
+          <tr className="grand-total">
+            <th>{t.reports.closingCash}</th>
+            <th className="numeric mono">{formatMoney(data.closingCash, baseCurrency, locale)}</th>
+          </tr>
+          <BalanceCheckRow
+            check={checkCashFlow({
+              openingCash: data.openingCash,
+              netChange: data.netChange,
+              closingCash: data.closingCash,
+            })}
+            colSpan={1}
+            locale={locale}
+            baseCurrency={baseCurrency}
+            t={t}
+          />
+        </tfoot>
+      </table>
+    </div>
   );
 }
 
@@ -478,109 +542,119 @@ function BalanceSheetTable({
   locale,
   baseCurrency,
   t,
+  asOf,
 }: {
   data: BalanceSheetResult;
   locale: Locale;
   baseCurrency: string;
   t: Messages;
+  asOf: string;
 }) {
   const hasData = data.assetRows.length > 0 || data.liabilityRows.length > 0 || data.equityRows.length > 0;
   if (!hasData) return <p className="empty-state">{t.reports.empty}</p>;
 
   return (
-    <table className="report-table">
-      <thead>
-        <tr>
-          <th colSpan={2}>{t.reports.balanceSheet}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {data.assetRows.length > 0 && (
-          <>
-            <tr className="section-header">
-              <td colSpan={2}>{t.reports.assets}</td>
-            </tr>
-            {data.assetRows.map((row) => (
-              <tr key={row.code}>
-                <td>{localizedName(toOption(row), locale)}</td>
-                <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+    <div className="table-scroll">
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th colSpan={2}>{t.reports.balanceSheet}</th>
+          </tr>
+          {/* 资产负债表是时点表：损益表写期间，它写「截至哪天」。 */}
+          <tr>
+            <th colSpan={2} className="report-period">
+              {interpolate(t.reports.asOf, { date: asOf })}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {data.assetRows.length > 0 && (
+            <>
+              <tr className="section-header">
+                <td colSpan={2}>{t.reports.assets}</td>
               </tr>
-            ))}
-            <tr className="subtotal">
-              <th>{t.reports.totalAssets}</th>
-              <th className="numeric mono">{formatMoney(data.assetTotal, baseCurrency, locale)}</th>
-            </tr>
-          </>
-        )}
-
-        {data.liabilityRows.length > 0 && (
-          <>
-            <tr className="section-header">
-              <td colSpan={2}>{t.reports.liabilities}</td>
-            </tr>
-            {data.liabilityRows.map((row) => (
-              <tr key={row.code}>
-                <td>{localizedName(toOption(row), locale)}</td>
-                <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+              {data.assetRows.map((row) => (
+                <tr key={row.code}>
+                  <td>{localizedName(toOption(row), locale)}</td>
+                  <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+                </tr>
+              ))}
+              <tr className="subtotal">
+                <th>{t.reports.totalAssets}</th>
+                <th className="numeric mono">{formatMoney(data.assetTotal, baseCurrency, locale)}</th>
               </tr>
-            ))}
-            <tr className="subtotal">
-              <td>{t.reports.totalLiabilities}</td>
-              <td className="numeric mono">{formatMoney(data.liabilityTotal, baseCurrency, locale)}</td>
-            </tr>
-          </>
-        )}
+            </>
+          )}
 
-        {data.equityRows.length > 0 && (
-          <>
-            <tr className="section-header">
-              <td colSpan={2}>{t.reports.equity}</td>
-            </tr>
-            {data.equityRows.map((row) => (
-              <tr key={row.code}>
-                <td>{localizedName(toOption(row), locale)}</td>
-                <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+          {data.liabilityRows.length > 0 && (
+            <>
+              <tr className="section-header">
+                <td colSpan={2}>{t.reports.liabilities}</td>
               </tr>
-            ))}
-            <tr className="subtotal">
-              <td>{t.reports.totalEquity}</td>
-              <td className="numeric mono">{formatMoney(data.equityTotal, baseCurrency, locale)}</td>
-            </tr>
-          </>
-        )}
+              {data.liabilityRows.map((row) => (
+                <tr key={row.code}>
+                  <td>{localizedName(toOption(row), locale)}</td>
+                  <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+                </tr>
+              ))}
+              <tr className="subtotal">
+                <td>{t.reports.totalLiabilities}</td>
+                <td className="numeric mono">{formatMoney(data.liabilityTotal, baseCurrency, locale)}</td>
+              </tr>
+            </>
+          )}
 
-        <tr>
-          <td>{t.reports.currentYearEarnings}</td>
-          <td className="numeric mono">
-            {formatMoney(data.currentYearEarnings, baseCurrency, locale)}
-          </td>
-        </tr>
+          {data.equityRows.length > 0 && (
+            <>
+              <tr className="section-header">
+                <td colSpan={2}>{t.reports.equity}</td>
+              </tr>
+              {data.equityRows.map((row) => (
+                <tr key={row.code}>
+                  <td>{localizedName(toOption(row), locale)}</td>
+                  <td className="numeric mono">{formatMoney(row.totalMinor, baseCurrency, locale)}</td>
+                </tr>
+              ))}
+              <tr className="subtotal">
+                <td>{t.reports.totalEquity}</td>
+                <td className="numeric mono">{formatMoney(data.equityTotal, baseCurrency, locale)}</td>
+              </tr>
+            </>
+          )}
 
-        <tr className="total-row">
-          <th>{t.reports.liabilitiesAndEquity}</th>
-          <th className="numeric mono">
-            {formatMoney(
-              data.liabilityTotal + data.equityTotal + data.currentYearEarnings,
-              baseCurrency,
-              locale,
-            )}
-          </th>
-        </tr>
+          <tr>
+            <td>{t.reports.currentYearEarnings}</td>
+            <td className="numeric mono">
+              {formatMoney(data.currentYearEarnings, baseCurrency, locale)}
+            </td>
+          </tr>
 
-        <BalanceCheckRow
-          check={checkBalanceSheet({
-            assetTotal: data.assetTotal,
-            liabilityTotal: data.liabilityTotal,
-            equityTotal: data.equityTotal,
-            currentYearEarnings: data.currentYearEarnings,
-          })}
-          colSpan={1}
-          locale={locale}
-          baseCurrency={baseCurrency}
-          t={t}
-        />
-      </tbody>
-    </table>
+          <tr className="total-row grand-total">
+            <th>{t.reports.liabilitiesAndEquity}</th>
+            <th className="numeric mono">
+              {formatMoney(
+                data.liabilityTotal + data.equityTotal + data.currentYearEarnings,
+                baseCurrency,
+                locale,
+              )}
+            </th>
+          </tr>
+
+          <BalanceCheckRow
+            check={checkBalanceSheet({
+              assetTotal: data.assetTotal,
+              liabilityTotal: data.liabilityTotal,
+              equityTotal: data.equityTotal,
+              currentYearEarnings: data.currentYearEarnings,
+            })}
+            colSpan={1}
+            locale={locale}
+            baseCurrency={baseCurrency}
+            t={t}
+          />
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -616,49 +690,51 @@ function AgingTable({
   );
 
   return (
-    <table className="report-table">
-      <thead>
-        <tr>
-          <th>{type === 'ar' ? t.invoices.customer : t.bills.vendor}</th>
-          {/*
-            「逾期 1-30 天」这一列原来不存在，那笔钱被并进了 current。于是
-            表头写着「未逾期」的那一列里，躺着已经欠了快一个月的账——而账龄
-            表存在的全部理由就是回答「哪些钱该去催了」。文案键 days30 从建库
-            起就在，一直没被用过。
-          */}
-          <th className="numeric">{aging.current}</th>
-          <th className="numeric">{aging.days30}</th>
-          <th className="numeric">{aging.days60}</th>
-          <th className="numeric">{aging.days90}</th>
-          <th className="numeric">{aging.over90}</th>
-          <th className="numeric">{aging.total}</th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.contactId}>
-            <td>{row.contactName}</td>
-            <td className="numeric mono">{formatMoney(row.current, baseCurrency, locale)}</td>
-            <td className="numeric mono">{formatMoney(row.d1_30, baseCurrency, locale)}</td>
-            <td className="numeric mono">{formatMoney(row.d31_60, baseCurrency, locale)}</td>
-            <td className="numeric mono">{formatMoney(row.d61_90, baseCurrency, locale)}</td>
-            <td className="numeric mono">{formatMoney(row.over90, baseCurrency, locale)}</td>
-            <td className="numeric mono">{formatMoney(row.total, baseCurrency, locale)}</td>
+    <div className="table-scroll">
+      <table className="report-table">
+        <thead>
+          <tr>
+            <th>{type === 'ar' ? t.invoices.customer : t.bills.vendor}</th>
+            {/*
+              「逾期 1-30 天」这一列原来不存在，那笔钱被并进了 current。于是
+              表头写着「未逾期」的那一列里，躺着已经欠了快一个月的账——而账龄
+              表存在的全部理由就是回答「哪些钱该去催了」。文案键 days30 从建库
+              起就在，一直没被用过。
+            */}
+            <th className="numeric">{aging.current}</th>
+            <th className="numeric">{aging.days30}</th>
+            <th className="numeric">{aging.days60}</th>
+            <th className="numeric">{aging.days90}</th>
+            <th className="numeric">{aging.over90}</th>
+            <th className="numeric">{aging.total}</th>
           </tr>
-        ))}
-      </tbody>
-      <tfoot>
-        <tr>
-          <th>{t.reports.total}</th>
-          <th className="numeric mono">{formatMoney(totals.current, baseCurrency, locale)}</th>
-          <th className="numeric mono">{formatMoney(totals.d1_30, baseCurrency, locale)}</th>
-          <th className="numeric mono">{formatMoney(totals.d31_60, baseCurrency, locale)}</th>
-          <th className="numeric mono">{formatMoney(totals.d61_90, baseCurrency, locale)}</th>
-          <th className="numeric mono">{formatMoney(totals.over90, baseCurrency, locale)}</th>
-          <th className="numeric mono">{formatMoney(totals.total, baseCurrency, locale)}</th>
-        </tr>
-      </tfoot>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.contactId}>
+              <td>{row.contactName}</td>
+              <td className="numeric mono">{formatMoney(row.current, baseCurrency, locale)}</td>
+              <td className="numeric mono">{formatMoney(row.d1_30, baseCurrency, locale)}</td>
+              <td className="numeric mono">{formatMoney(row.d31_60, baseCurrency, locale)}</td>
+              <td className="numeric mono">{formatMoney(row.d61_90, baseCurrency, locale)}</td>
+              <td className="numeric mono">{formatMoney(row.over90, baseCurrency, locale)}</td>
+              <td className="numeric mono">{formatMoney(row.total, baseCurrency, locale)}</td>
+            </tr>
+          ))}
+        </tbody>
+        <tfoot>
+          <tr className="grand-total">
+            <th>{t.reports.total}</th>
+            <th className="numeric mono">{formatMoney(totals.current, baseCurrency, locale)}</th>
+            <th className="numeric mono">{formatMoney(totals.d1_30, baseCurrency, locale)}</th>
+            <th className="numeric mono">{formatMoney(totals.d31_60, baseCurrency, locale)}</th>
+            <th className="numeric mono">{formatMoney(totals.d61_90, baseCurrency, locale)}</th>
+            <th className="numeric mono">{formatMoney(totals.over90, baseCurrency, locale)}</th>
+            <th className="numeric mono">{formatMoney(totals.total, baseCurrency, locale)}</th>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
   );
 }
 
@@ -723,8 +799,8 @@ function TaxTab({
           {t.reports.to}
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
-        <button onClick={fetchReport} disabled={loading || from > to}>
-          {loading ? t.common.loading : t.tax.report}
+        <button type="button" onClick={fetchReport} disabled={loading || from > to}>
+          {loading ? t.common.loading : t.reports.generate}
         </button>
       </div>
 
@@ -767,6 +843,9 @@ function StatementTab({
 }) {
   const isCustomer = type === 'customer';
   const title = isCustomer ? t.customerStatement.title : t.vendorStatement.title;
+  // 标签写「客户 / 供应商」，「选择客户…」只留给下拉的空选项——两处同一句
+  // 话叠在一起，标签就什么也没说。
+  const contactLabel = isCustomer ? t.customerStatement.contact : t.vendorStatement.contact;
   const selectLabel = isCustomer ? t.customerStatement.selectContact : t.vendorStatement.selectContact;
 
   const [contactId, setContactId] = useState('');
@@ -814,7 +893,7 @@ function StatementTab({
 
       <div className="statement-controls">
         <label>
-          {selectLabel}
+          {contactLabel}
           <select value={contactId} onChange={(e) => setContactId(e.target.value)}>
             <option value="">{selectLabel}</option>
             {contacts.map((c) => (
@@ -832,8 +911,8 @@ function StatementTab({
           {t.reports.to}
           <input type="date" value={to} onChange={(e) => setTo(e.target.value)} />
         </label>
-        <button onClick={fetchStatement} disabled={!contactId || loading || from > to}>
-          {loading ? t.common.loading : title}
+        <button type="button" onClick={fetchStatement} disabled={!contactId || loading || from > to}>
+          {loading ? t.common.loading : t.reports.generate}
         </button>
       </div>
 
@@ -855,57 +934,68 @@ function StatementTab({
       )}
 
       {data && (
-        <table className="report-table">
-          <thead>
-            <tr>
-              <th>{t.statement.date}</th>
-              <th>{t.statement.description}</th>
-              <th>{t.statement.reference}</th>
-              <th className="numeric">{t.statement.amount}</th>
-              <th className="numeric">{t.statement.balance}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {BigInt(data.openingBalance) !== 0n && (
-              <tr className="opening-balance">
-                <td colSpan={3}>{t.statement.openingBalance}</td>
-                <td className="numeric mono" />
-                <td className="numeric mono">
-                  {formatMoney(BigInt(data.openingBalance), baseCurrency, locale)}
-                </td>
-              </tr>
-            )}
-            {data.lines.length === 0 && !loading ? (
+        <div className="table-scroll">
+          <table className="report-table">
+            <thead>
               <tr>
-                <td colSpan={5} className="empty-state">
-                  {t.statement.noTransactions}
-                </td>
+                <th>{t.statement.date}</th>
+                <th>{t.statement.description}</th>
+                <th>{t.statement.reference}</th>
+                <th className="numeric">{t.statement.amount}</th>
+                <th className="numeric">{t.statement.balance}</th>
               </tr>
-            ) : (
-              data.lines.map((line, i) => (
-                <tr key={i}>
-                  <td className="mono">{line.date}</td>
-                  <td>{line.description}</td>
-                  <td className="mono">{line.reference}</td>
+            </thead>
+            <tbody>
+              {BigInt(data.openingBalance) !== 0n && (
+                <tr className="opening-balance">
+                  <td colSpan={3}>{t.statement.openingBalance}</td>
+                  <td className="numeric mono" />
                   <td className="numeric mono">
-                    {formatMoney(BigInt(line.amount), baseCurrency, locale)}
-                  </td>
-                  <td className="numeric mono">
-                    {formatMoney(BigInt(line.balance), baseCurrency, locale)}
+                    {formatMoney(BigInt(data.openingBalance), baseCurrency, locale)}
                   </td>
                 </tr>
-              ))
-            )}
-          </tbody>
-          <tfoot>
-            <tr>
-              <th colSpan={4}>{t.statement.closingBalance}</th>
-              <th className="numeric mono">
-                {formatMoney(BigInt(data.closingBalance), baseCurrency, locale)}
-              </th>
-            </tr>
-          </tfoot>
-        </table>
+              )}
+              {data.lines.length === 0 && !loading ? (
+                <tr>
+                  <td colSpan={5} className="empty-state">
+                    {t.statement.noTransactions}
+                  </td>
+                </tr>
+              ) : (
+                data.lines.map((line, i) => (
+                  <tr key={i}>
+                    <td className="mono">{line.date}</td>
+                    <td>{line.description}</td>
+                    <td className="mono">{line.reference}</td>
+                    <td className="numeric mono">
+                      {formatMoney(BigInt(line.amount), baseCurrency, locale)}
+                    </td>
+                    <td className="numeric mono">
+                      {formatMoney(BigInt(line.balance), baseCurrency, locale)}
+                    </td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+            <tfoot>
+              {/* 手机上期末余额那一格在第五列、滑出可视区以外：标签后面跟一份
+                  只给眼睛看的副本（见 app/globals.css「Phone layout」段的 .mobile-echo）。 */}
+              <tr className="grand-total">
+                <th colSpan={4}>
+                  {t.statement.closingBalance}
+                  <span className="mobile-echo mono" aria-hidden="true">
+                    {formatMoney(BigInt(data.closingBalance), baseCurrency, locale)}
+                  </span>
+                </th>
+                <th className="numeric mono">
+                  <span className="mobile-echo-source">
+                    {formatMoney(BigInt(data.closingBalance), baseCurrency, locale)}
+                  </span>
+                </th>
+              </tr>
+            </tfoot>
+          </table>
+        </div>
       )}
     </div>
   );

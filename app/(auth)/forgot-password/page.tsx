@@ -31,8 +31,11 @@ export default async function ForgotPasswordPage({
       action={action}
       successMessage={t.auth.resetLinkSent}
       footer={
-        <p>
-          <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
+        <p className="auth-links">
+          <span>
+            {t.auth.rememberedPrompt}
+            <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
+          </span>
         </p>
       }
     >

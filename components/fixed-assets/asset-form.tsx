@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
@@ -48,6 +48,7 @@ export function AssetForm({
   onSuccess,
 }: Props) {
   const router = useRouter();
+  const uid = useId();
   const isEdit = asset !== null;
 
   // 编辑时的初值按本位币的小数位还原。cost_minor / salvage_value_minor
@@ -192,33 +193,56 @@ export function AssetForm({
     return localizedName({ name_en: acc.name_en, name_zh: acc.name_zh }, locale);
   }
 
+  const canSubmit =
+    !pending &&
+    !!name.trim() &&
+    !!cost &&
+    !costDecimalsError &&
+    !salvageDecimalsError &&
+    !!assetAccountId &&
+    !!depnExpenseAccountId &&
+    !!depnAccumAccountId;
+
+  // 每个标签都用 htmlFor 指向自己的输入框：原来 <label> 是孤立的，读屏器
+  // 念不出这一栏问的是什么，点标签也不会聚焦输入框。
+  const fid = (key: string) => `${uid}-${key}`;
+
   return (
-    <div className="transaction-form">
+    // 真正的 <form>：提交按钮原来是个不在表单里、没写 type 的 <button>，
+    // 拿不到主按钮的绿色与上边距，回车也提交不了。
+    <form
+      className="transaction-form fa-form"
+      noValidate
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (canSubmit) void handleSubmit();
+      }}
+    >
       <div className="form-field">
         {/* 原来是 `t.fixedAssets.title ?? 'Asset Name'`：title 在 Messages
             里是必填的 string，`??` 那一支永远到不了——真正生效的是
             t.fixedAssets.title，也就是「固定资产」这个**页面标题**被当成
-            了「资产名称」这个**字段标签**。改用 t.settings.name（「名称」），
-            和下面 placeholder 用的是同一个键。 */}
-        <label>{t.settings.name}</label>
-        <input
-          value={name}
-          onChange={(e) => setName(e.target.value)}
-          placeholder={t.settings.name}
-        />
+            了「资产名称」这个**字段标签**。改用 t.settings.name（「名称」）。
+            placeholder 和标签一模一样，去掉了。 */}
+        <label htmlFor={fid('name')}>{t.settings.name}</label>
+        <input id={fid('name')} value={name} onChange={(e) => setName(e.target.value)} />
       </div>
 
       <div className="form-field">
-        <label>{t.transaction.description}</label>
-        <input
+        <label htmlFor={fid('description')}>{t.transaction.description}</label>
+        {/* 多行：备注常常是一整句，单行框在手机上只露出开头几个字。 */}
+        <textarea
+          id={fid('description')}
+          rows={2}
           value={description}
           onChange={(e) => setDescription(e.target.value)}
         />
       </div>
 
       <div className="form-field">
-        <label>{t.fixedAssets.purchaseDate}</label>
+        <label htmlFor={fid('purchaseDate')}>{t.fixedAssets.purchaseDate}</label>
         <input
+          id={fid('purchaseDate')}
           type="date"
           value={purchaseDate}
           onChange={(e) => setPurchaseDate(e.target.value)}
@@ -231,13 +255,17 @@ export function AssetForm({
         </p>
       ) : null}
 
-      <div className="inline-edit-row">
+      {/* .form-grid 而不是 .inline-edit-row：后者是列表行的样式（上边线、
+          左右内边距、子项按内容宽），放在表单里就成了缩进、半宽、带一条
+          细线的两个字段。 */}
+      <div className="form-grid">
         {/* 购入币种只在新建时可选。编辑走的是 updateFixedAssetSchema，那张
             schema 收的 cost 是本位币账面原值，没有任何字段能改原币或汇率。 */}
         {!isEdit ? (
           <div className="form-field">
-            <label>{t.fixedAssets.purchaseCurrency}</label>
+            <label htmlFor={fid('currency')}>{t.fixedAssets.purchaseCurrency}</label>
             <select
+              id={fid('currency')}
               value={originalCurrency}
               onChange={(e) => {
                 const next = e.target.value;
@@ -255,10 +283,11 @@ export function AssetForm({
           </div>
         ) : null}
         <div className="form-field">
-          <label>
+          <label htmlFor={fid('cost')}>
             {t.fixedAssets.cost} ({originalCurrency})
           </label>
           <input
+            id={fid('cost')}
             value={cost}
             onChange={(e) => setCost(e.target.value)}
             placeholder={amountPlaceholder(costDecimals)}
@@ -272,12 +301,13 @@ export function AssetForm({
 
       {isForeign && (
         <div className="form-field">
-          <label>
+          <label htmlFor={fid('rate')}>
             {locale === 'zh'
               ? `购入日汇率（1 ${originalCurrency} = ? ${baseCurrency}）`
               : `Rate on purchase date (1 ${originalCurrency} = ? ${baseCurrency})`}
           </label>
           <input
+            id={fid('rate')}
             value={exchangeRate}
             onChange={(e) => setExchangeRate(e.target.value)}
             placeholder="1.00000000"
@@ -296,10 +326,11 @@ export function AssetForm({
       )}
 
       <div className="form-field">
-        <label>
+        <label htmlFor={fid('salvage')}>
           {t.fixedAssets.salvageValue} ({baseCurrency})
         </label>
         <input
+          id={fid('salvage')}
           value={salvageValue}
           onChange={(e) => setSalvageValue(e.target.value)}
           placeholder={amountPlaceholder(baseDecimals)}
@@ -310,19 +341,25 @@ export function AssetForm({
         ) : null}
       </div>
 
-      <div className="inline-edit-row">
+      <div className="form-grid">
         <div className="form-field">
-          <label>{t.fixedAssets.usefulLife}</label>
+          <label htmlFor={fid('life')}>{t.fixedAssets.usefulLife}</label>
           <input
+            id={fid('life')}
             type="number"
+            inputMode="numeric"
             value={usefulLifeMonths}
             onChange={(e) => setUsefulLifeMonths(Number(e.target.value))}
             min={1}
           />
         </div>
         <div className="form-field">
-          <label>{t.fixedAssets.method}</label>
-          <select value={method} onChange={(e) => setMethod(e.target.value as 'straight_line' | 'declining_balance')}>
+          <label htmlFor={fid('method')}>{t.fixedAssets.method}</label>
+          <select
+            id={fid('method')}
+            value={method}
+            onChange={(e) => setMethod(e.target.value as 'straight_line' | 'declining_balance')}
+          >
             <option value="straight_line">{t.fixedAssets.straightLine}</option>
             <option value="declining_balance">{t.fixedAssets.decliningBalance}</option>
           </select>
@@ -331,12 +368,14 @@ export function AssetForm({
 
       {method === 'declining_balance' && (
         <div className="form-field">
-          <label>{t.fixedAssets.decliningRate}</label>
+          <label htmlFor={fid('declining')}>{t.fixedAssets.decliningRate}</label>
           {/* 标签写的是「（%）」，输入框原来收的却是基点：照着标签填 200
               （双倍余额递减）存下去的是 2%。框里显示与输入一律按百分数，
               换算成基点只在这里做一次。 */}
           <input
+            id={fid('declining')}
             type="number"
+            inputMode="decimal"
             value={decliningRateBps / 100}
             onChange={(e) => setDecliningRateBps(Math.round(Number(e.target.value) * 100))}
             min={0}
@@ -346,8 +385,8 @@ export function AssetForm({
       )}
 
       <div className="form-field">
-        <label>{t.fixedAssets.assetAccount}</label>
-        <select value={assetAccountId} onChange={(e) => setAssetAccountId(e.target.value)}>
+        <label htmlFor={fid('assetAccount')}>{t.fixedAssets.assetAccount}</label>
+        <select id={fid('assetAccount')} value={assetAccountId} onChange={(e) => setAssetAccountId(e.target.value)}>
           <option value="">{t.transaction.choosePlaceholder}</option>
           {assetAccounts.map((acc) => (
             <option key={acc.id} value={acc.id}>{accountName(acc)}</option>
@@ -356,8 +395,12 @@ export function AssetForm({
       </div>
 
       <div className="form-field">
-        <label>{t.fixedAssets.depreciationExpense}</label>
-        <select value={depnExpenseAccountId} onChange={(e) => setDepnExpenseAccountId(e.target.value)}>
+        <label htmlFor={fid('expenseAccount')}>{t.fixedAssets.depreciationExpense}</label>
+        <select
+          id={fid('expenseAccount')}
+          value={depnExpenseAccountId}
+          onChange={(e) => setDepnExpenseAccountId(e.target.value)}
+        >
           <option value="">{t.transaction.choosePlaceholder}</option>
           {expenseAccounts.map((acc) => (
             <option key={acc.id} value={acc.id}>{accountName(acc)}</option>
@@ -366,8 +409,12 @@ export function AssetForm({
       </div>
 
       <div className="form-field">
-        <label>{t.fixedAssets.accumulatedDepreciation}</label>
-        <select value={depnAccumAccountId} onChange={(e) => setDepnAccumAccountId(e.target.value)}>
+        <label htmlFor={fid('accumAccount')}>{t.fixedAssets.accumulatedDepreciation}</label>
+        <select
+          id={fid('accumAccount')}
+          value={depnAccumAccountId}
+          onChange={(e) => setDepnAccumAccountId(e.target.value)}
+        >
           <option value="">{t.transaction.choosePlaceholder}</option>
           {assetAccounts.map((acc) => (
             <option key={acc.id} value={acc.id}>{accountName(acc)}</option>
@@ -399,25 +446,14 @@ export function AssetForm({
         </div>
       ) : null}
 
-      <button
-        onClick={handleSubmit}
-        disabled={
-          pending ||
-          !name.trim() ||
-          !cost ||
-          costDecimalsError ||
-          salvageDecimalsError ||
-          !assetAccountId ||
-          !depnExpenseAccountId ||
-          !depnAccumAccountId
-        }
-      >
+      {/* 新建时原来写的是 t.invoices.save——「保存发票」。 */}
+      <button type="submit" disabled={!canSubmit}>
         {pending
           ? t.common.loading
           : isEdit
             ? t.fixedAssets.saveChanges
-            : t.invoices.save}
+            : t.fixedAssets.create}
       </button>
-    </div>
+    </form>
   );
 }

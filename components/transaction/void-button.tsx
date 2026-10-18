@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Messages } from '@/lib/i18n';
 import { ModalDialog } from '@/components/shell/modal-dialog';
@@ -27,6 +27,16 @@ export function VoidButton({ orgSlug, transactionId, t }: Props) {
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const reasonId = useId();
+  const reasonRef = useRef<HTMLInputElement>(null);
+
+  // 与 TransactionForm 同一个道理：触屏上不自动聚焦，免得键盘盖住弹层底部的按钮。
+  useEffect(() => {
+    if (!voidDialog) return;
+    const input = reasonRef.current;
+    if (!input) return;
+    if (window.matchMedia('(pointer: fine)').matches) input.focus();
+    else if (document.activeElement === input) input.blur();
+  }, [voidDialog]);
 
   async function handleVoid() {
     if (!voidReason.trim()) return;
@@ -51,16 +61,15 @@ export function VoidButton({ orgSlug, transactionId, t }: Props) {
         </p>
       ) : null}
 
-      <div className="form-actions">
-        <button
-          type="button"
-          className="btn-danger"
-          disabled={pending}
-          onClick={() => setVoidDialog(true)}
-        >
-          {t.transaction.void}
-        </button>
-      </div>
+      {/* 一整行红字，和编辑页底部的作废同一个样子。 */}
+      <button
+        type="button"
+        className="row-button is-destructive tx-void-row"
+        disabled={pending}
+        onClick={() => setVoidDialog(true)}
+      >
+        {t.transaction.void}
+      </button>
 
       <ModalDialog
         open={voidDialog}
@@ -71,10 +80,10 @@ export function VoidButton({ orgSlug, transactionId, t }: Props) {
             不是标签，一开始打字它就消失了，读屏也未必念。 */}
         <label htmlFor={reasonId}>{t.transaction.voidReason}</label>
         <input
+          ref={reasonRef}
           id={reasonId}
           value={voidReason}
           onChange={(e) => setVoidReason(e.target.value)}
-          autoFocus
         />
         <div className="app-dialog-actions">
           <button type="button" onClick={() => setVoidDialog(false)}>

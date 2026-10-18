@@ -1,4 +1,5 @@
 import { BackLink } from '@/components/ui/back-link';
+import { Plus } from '@/components/ui/icons';
 import { InventoryList } from '@/components/settings/inventory-list';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -7,6 +8,10 @@ import { getUserLocale } from '@/server/repositories/organizations';
 import { getInventoryValuation, listInventoryItems } from '@/server/repositories/inventory';
 import { InventoryValuation } from '@/components/reports/inventory-valuation';
 import { listAllAccounts } from '@/server/repositories/accounts';
+
+function trimQuantity(quantity: string): string {
+  return quantity.includes('.') ? quantity.replace(/\.?0+$/, '') : quantity;
+}
 
 export default async function InventorySettingsPage({
   params,
@@ -30,7 +35,16 @@ export default async function InventorySettingsPage({
   return (
     <>
       <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
-      <h1>{t.inventory.title}</h1>
+      {/* 与分类、联系人同一个样子：页头的「新增」跳到物品列表下面的表单。 */}
+      <div className="page-header">
+        <h1>{t.inventory.title}</h1>
+        <div className="page-header-actions">
+          <a href="#add-item" className="add-button">
+            <Plus size={16} weight="bold" aria-hidden="true" />
+            {t.inventory.addItem}
+          </a>
+        </div>
+      </div>
       <InventoryList
         orgSlug={orgSlug}
         locale={locale}
@@ -52,7 +66,9 @@ export default async function InventorySettingsPage({
         <>
           <h2>{t.inventory.valuation}</h2>
           <InventoryValuation
-            valuation={valuation}
+            // 数量是 numeric(12,4) 的原样字符串，「500.0000」直接印在卡片上。
+            // 只去掉小数尾部的零，仍是合法的十进制串，组件怎么再格式化都行。
+            valuation={valuation.map((v) => ({ ...v, quantity: trimQuantity(v.quantity) }))}
             locale={locale}
             baseCurrency={context.baseCurrency}
           />

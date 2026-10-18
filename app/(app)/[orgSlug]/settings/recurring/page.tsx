@@ -48,7 +48,7 @@ export default async function RecurringSettingsPage({
   return (
     <>
       <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
-      <h1>{t.recurring.title}</h1>
+      {/* 标题与「新建」「立即生成」一起在 RecurringList 的页头里。 */}
       <RecurringList
         orgSlug={orgSlug}
         locale={locale}

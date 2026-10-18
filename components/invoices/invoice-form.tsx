@@ -1,16 +1,18 @@
 'use client';
 
-import { useState } from 'react';
+import { useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
-import { createInvoice, updateInvoice } from '@/server/actions/invoices';
+import { createInvoice, issueInvoice, updateInvoice } from '@/server/actions/invoices';
 import { addMonthsLocalISO, todayLocalISO } from '@/lib/date';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import type { InvoiceDetail } from '@/server/repositories/invoices';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
 import { MAX_INVOICE_REFERENCE_LENGTH } from '@/lib/invoice-options';
-import { X } from '@/components/ui/icons';
+import { Plus, X } from '@/components/ui/icons';
+import { trimQuantity } from '@/components/invoices/line-items';
+import { useHeaderIssue } from '@/components/invoices/header-issue';
 
 type Contact = {
   id: string;
@@ -38,6 +40,8 @@ type Props = {
    * 发票已经收讫。画一张填得动却必然保存失败的表单，等于让用户白填一遍。
    */
   readOnly?: boolean;
+  /** 已过到期日且没收齐（页面按公司时区判的）。只影响状态条下那句提示。 */
+  overdue?: boolean;
 };
 
 type LineItem = {
@@ -67,7 +71,7 @@ function itemsOf(invoice: InvoiceDetail): LineItem[] {
   }
   return invoice.items.map((item) => ({
     description: item.description,
-    quantity: item.quantity,
+    quantity: trimQuantity(item.quantity),
     unitPrice: formatMinorToDecimal(item.unitPriceMinor, exponent),
   }));
 }
@@ -80,6 +84,7 @@ export function InvoiceForm({
   baseCurrency,
   invoice = null,
   readOnly = false,
+  overdue = false,
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
@@ -120,10 +125,27 @@ export function InvoiceForm({
     setItems((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   }
 
+  const formRef = useRef<HTMLFormElement>(null);
+  // 详情页页头的「开具」：先过一遍与保存按钮相同的浏览器校验，再存、再开具。
+  const header = useHeaderIssue(() => {
+    if (pending || !formRef.current?.reportValidity()) return;
+    void save(true);
+  });
+
+  function setBusy(busy: boolean) {
+    setPending(busy);
+    header?.setPending(busy);
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    setPending(true);
+    await save(false);
+  }
+
+  async function save(thenIssue: boolean) {
+    setBusy(true);
     setError(null);
+    header?.setError(null);
 
     const payload = {
       contactId,
@@ -142,7 +164,14 @@ export function InvoiceForm({
 
     try {
       if (isEdit && invoice) {
-        await updateInvoice(orgSlug, invoice.id, payload);
+        // 只读（能开具、却没有 edit:any 的记账员）时表单改不动，没有可存的。
+        if (!readOnly) await updateInvoice(orgSlug, invoice.id, payload);
+        if (thenIssue) {
+          await issueInvoice(orgSlug, invoice.id);
+          // 留在这一页：开具之后，记录收款的入口就在这页的页头上。
+          router.refresh();
+          return;
+        }
       } else {
         await createInvoice(orgSlug, { ...payload, issue: issueNow });
       }
@@ -153,9 +182,11 @@ export function InvoiceForm({
       // 而那几个页面可能还在路由缓存里。
       router.refresh();
     } catch (err) {
-      setError((err as Error).message);
+      const message = (err as Error).message;
+      if (thenIssue && header) header.setError(message);
+      else setError(message);
     } finally {
-      setPending(false);
+      setBusy(false);
     }
   }
 
@@ -178,9 +209,11 @@ export function InvoiceForm({
           ? t.invoices.voidedNotice
           : status === 'paid'
             ? t.invoices.paidNotice
-            : isPosted
-              ? t.invoices.postedNotice
-              : t.invoices.draftNotice
+            : overdue
+              ? t.invoices.overdueNotice
+              : isPosted
+                ? t.invoices.postedNotice
+                : t.invoices.draftNotice
       }
     />
   ) : null;
@@ -195,7 +228,7 @@ export function InvoiceForm({
     <>
       {lifecycle}
 
-      <form onSubmit={handleSubmit} className="transaction-form">
+      <form ref={formRef} onSubmit={handleSubmit} className="transaction-form">
         {/* display: contents 让这一层不参与 .transaction-form 的排版，
             只负责把 disabled 传给里面每一个控件。 */}
         <fieldset disabled={readOnly} style={{ display: 'contents' }}>
@@ -253,15 +286,21 @@ export function InvoiceForm({
           ))}
         </select>
 
-        <label htmlFor="taxRate">{t.invoices.tax}</label>
-        <input
-          id="taxRate"
-          type="number"
-          min="0"
-          step="0.01"
-          value={taxRatePercent}
-          onChange={(e) => setTaxRatePercent(e.target.value)}
-        />
+        {/* 填的是百分比，不是税额：原来标签写「税额」，有人照着填 40
+            （想的是 RM 40 的税），存下来就成了 40% 的税率。 */}
+        <label htmlFor="taxRate">{t.invoices.taxRate}</label>
+        <div className="input-suffix">
+          <input
+            id="taxRate"
+            type="number"
+            inputMode="decimal"
+            min="0"
+            step="0.01"
+            value={taxRatePercent}
+            onChange={(e) => setTaxRatePercent(e.target.value)}
+          />
+          <span aria-hidden="true">%</span>
+        </div>
 
         <fieldset className="invoice-items">
           <legend>{t.invoices.items}</legend>
@@ -284,23 +323,32 @@ export function InvoiceForm({
                 onChange={(e) => updateItem(index, 'description', e.target.value)}
                 required
               />
-              <input
-                type="number"
-                min="0.0001"
-                step="0.0001"
-                placeholder={t.invoices.quantity} aria-label={t.invoices.quantity}
-                value={item.quantity}
-                onChange={(e) => updateItem(index, 'quantity', e.target.value)}
-              />
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                placeholder={t.invoices.unitPrice} aria-label={t.invoices.unitPrice}
-                value={item.unitPrice}
-                onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
-                required
-              />
+              {/* 数量、单价各包一层 label：手机上表头收起，标签露出来。 */}
+              <label className="item-field">
+                <span className="item-field__label">{t.invoices.quantity}</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0.0001"
+                  step="0.0001"
+                  placeholder={t.invoices.quantity} aria-label={t.invoices.quantity}
+                  value={item.quantity}
+                  onChange={(e) => updateItem(index, 'quantity', e.target.value)}
+                />
+              </label>
+              <label className="item-field">
+                <span className="item-field__label">{t.invoices.unitPrice}</span>
+                <input
+                  type="number"
+                  inputMode="decimal"
+                  min="0"
+                  step="0.01"
+                  placeholder={t.invoices.unitPrice} aria-label={t.invoices.unitPrice}
+                  value={item.unitPrice}
+                  onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
+                  required
+                />
+              </label>
               {items.length > 1 ? (
                 <button
                   type="button"
@@ -316,7 +364,8 @@ export function InvoiceForm({
             </div>
           ))}
 
-          <button type="button" onClick={addItem} className="btn-small">
+          <button type="button" onClick={addItem} className="add-button">
+            <Plus size={16} weight="bold" aria-hidden="true" />
             {t.invoices.addItem}
           </button>
         </fieldset>

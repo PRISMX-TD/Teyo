@@ -70,7 +70,7 @@ export default async function MorePage({
       ],
     },
     {
-      label: t.nav.settings,
+      label: t.nav.groupSettings,
       items: [
         // 分流页本身不设权限门槛——它只是分流，settings/page.tsx 再按角色筛一遍
         // 具体子页（同样的道理见该文件顶部的注释）。
@@ -112,7 +112,8 @@ export default async function MorePage({
         <section className="settings-group">
           <h2 className="coa-section-title">{t.nav.groupAccount}</h2>
           <div className="settings-index">
-            <Link href="/account">
+            {/* 带上 from：账号页的「返回」回到这一页，不是 '/'（那会跳去概览）。 */}
+            <Link href={`/account?from=${encodeURIComponent(`/${orgSlug}/more`)}`}>
               <span className="row-icon">
                 <NavIcon name="account" size={18} />
               </span>

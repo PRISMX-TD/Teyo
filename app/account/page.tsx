@@ -7,6 +7,7 @@ import { withTransaction } from '@/server/db/transaction';
 import { PasswordInput } from '@/components/auth/password-input';
 import { BackLink } from '@/components/ui/back-link';
 import { SignOut } from '@/components/ui/icons';
+import { safeNextPath } from '@/lib/safe-next-path';
 import { redirect } from 'next/navigation';
 
 /**
@@ -22,10 +23,29 @@ import { redirect } from 'next/navigation';
 type Saved = 'profile' | 'locale' | 'password';
 type Failed = 'profile' | 'password';
 
+/**
+ * ?from= 是「返回」要回去的地方（顶栏头像、更多页、侧栏都会带上）。
+ * 只认站内路径，且不能指回本页——否则「返回」原地打转。不合格就当没给，
+ * 退回 '/'。每次保存都 redirect 回本页，所以 from 要跟着带回来，不然
+ * 存过一次之后「返回」又变回 '/'。
+ */
+function returnPath(raw: unknown): string | undefined {
+  // ?from=a&from=b 会解析成数组，不认。
+  if (typeof raw !== 'string' || !raw) return undefined;
+  const safe = safeNextPath(raw);
+  if (safe === '/' || /^\/account(?:[/?#]|$)/.test(safe)) return undefined;
+  return safe;
+}
+
+function accountHref(status: string, from: string | undefined): string {
+  const back = returnPath(from);
+  return back ? `/account?${status}&from=${encodeURIComponent(back)}` : `/account?${status}`;
+}
+
 export default async function AccountPage({
   searchParams,
 }: {
-  searchParams: Promise<{ saved?: string; error?: string }>;
+  searchParams: Promise<{ saved?: string; error?: string; from?: string }>;
 }) {
   const userId = await requireUserId();
   const locale = (await getUserLocale(userId)) as 'en' | 'zh';
@@ -33,6 +53,7 @@ export default async function AccountPage({
   const query = await searchParams;
   const saved = query.saved as Saved | undefined;
   const failed = query.error as Failed | undefined;
+  const from = returnPath(query.from);
 
   const [me] = await withTransaction(
     userId,
@@ -45,7 +66,7 @@ export default async function AccountPage({
 
   return (
     <main className="account-page">
-      <BackLink href="/">{t.common.back}</BackLink>
+      <BackLink href={from ?? '/'}>{t.common.back}</BackLink>
       <h1>{t.account.title}</h1>
 
       <div className="account-hero">
@@ -73,9 +94,9 @@ export default async function AccountPage({
               });
             } catch {
               // updateProfile 只会因名字为空或过长而拒绝；抛出去就是整页错误。
-              redirect('/account?error=profile');
+              redirect(accountHref('error=profile', from));
             }
-            redirect('/account?saved=profile');
+            redirect(accountHref('saved=profile', from));
           }}
         >
           <label htmlFor="displayName">{t.account.displayName}</label>
@@ -120,7 +141,7 @@ export default async function AccountPage({
           action={async (formData: FormData) => {
             'use server';
             await updateLocale(String(formData.get('locale') ?? 'en'));
-            redirect('/account?saved=locale');
+            redirect(accountHref('saved=locale', from));
           }}
         >
           <div className="segmented" role="group" aria-labelledby="account-language" aria-describedby="locale-hint">
@@ -153,10 +174,10 @@ export default async function AccountPage({
             // 成功时 updatePassword 会 redirect 到 next；不传的话是 '/'，人被带离本页。
             const result = await updatePassword(
               String(formData.get('newPassword') ?? ''),
-              '/account?saved=password',
+              accountHref('saved=password', from),
             );
             // 只带标记不带原文，理由同邀请页：不让任何人拼链接让页面显示任意文字。
-            if (result?.error) redirect('/account?error=password');
+            if (result?.error) redirect(accountHref('error=password', from));
           }}
         >
           <label htmlFor="newPassword">{t.account.newPassword}</label>

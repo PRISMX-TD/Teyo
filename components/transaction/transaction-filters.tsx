@@ -66,7 +66,7 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
         aria-controls="transaction-filters"
         onClick={() => setOpenOnMobile((v) => !v)}
       >
-        {t.filters.apply}
+        {t.filters.title}
         {hasActiveFilter ? <span className="filters-dot" aria-hidden="true" /> : null}
         {hasActiveFilter ? <span className="visually-hidden">{t.filters.activeHint}</span> : null}
       </button>
@@ -76,12 +76,13 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
         className="filters"
         data-collapsed={openOnMobile ? undefined : 'true'}
       >
-      <div className="filter-field">
+      {/* filter-field--pair：起止日期、最小/最大金额在手机上两两并排（见 tx.css）。 */}
+      <div className="filter-field filter-field--pair">
         <label htmlFor="from">{t.filters.from}</label>
         <input id="from" name="from" type="date" defaultValue={params.get('from') ?? ''} />
       </div>
 
-      <div className="filter-field">
+      <div className="filter-field filter-field--pair">
         <label htmlFor="to">{t.filters.to}</label>
         <input id="to" name="to" type="date" defaultValue={params.get('to') ?? ''} />
       </div>
@@ -133,12 +134,12 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
         </select>
       </div>
 
-      <div className="filter-field">
+      <div className="filter-field filter-field--pair">
         <label htmlFor="minAmount">{t.filters.minAmount}</label>
         <input id="minAmount" name="minAmount" inputMode="decimal" defaultValue={params.get('minAmount') ?? ''} />
       </div>
 
-      <div className="filter-field">
+      <div className="filter-field filter-field--pair">
         <label htmlFor="maxAmount">{t.filters.maxAmount}</label>
         <input id="maxAmount" name="maxAmount" inputMode="decimal" defaultValue={params.get('maxAmount') ?? ''} />
       </div>
@@ -155,10 +156,11 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
           {t.filters.includeVoided}
         </label>
 
-        <button type="submit">{t.filters.apply}</button>
+        {/* 重置在左、筛选在右：主按钮落在拇指那一侧，桌面上也是主按钮靠右。 */}
         <button type="button" onClick={() => router.push(`/${orgSlug}/transactions`)}>
           {t.filters.reset}
         </button>
+        <button type="submit">{t.filters.apply}</button>
       </div>
       </form>
     </div>

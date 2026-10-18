@@ -32,10 +32,14 @@ export default async function LoginPage({
       submitLabel={t.auth.signIn}
       action={action}
       footer={
-        <p>
+        // 不用「 · 」连成一句：英文在 320px 下折行时圆点会吊在上一行末尾。
+        // 两条各成一块，放不下就整块换行；链接撑到 44px 高，好点。
+        <p className="auth-links">
           <Link href={next ? `/forgot-password?next=${encodeURIComponent(next)}` : '/forgot-password'}>{t.auth.forgotPassword}</Link>
-          {' · '}
-          <Link href={signupHref}>{t.auth.signUp}</Link>
+          <span>
+            {t.auth.noAccountPrompt}
+            <Link href={signupHref}>{t.auth.signUp}</Link>
+          </span>
         </p>
       }
     >

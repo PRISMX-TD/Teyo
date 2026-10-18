@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -62,18 +62,19 @@ function inventoryValueMinor(avgCostMinor: bigint, quantity: number): bigint {
 
 export function InventoryList({ orgSlug, locale, items: initialItems, accounts, baseCurrency }: Props) {
   const t = getMessages(locale);
+  const uid = useId();
   const [items, setItems] = useState(initialItems);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
 
   // Add form state
-  const [showAdd, setShowAdd] = useState(false);
   const [sku, setSku] = useState('');
   const [nameEn, setNameEn] = useState('');
   const [nameZh, setNameZh] = useState('');
   const [unit, setUnit] = useState('');
   const [costMethod, setCostMethod] = useState<'fifo' | 'average'>('average');
-  const [reorderLevel, setReorderLevel] = useState('0');
+  // 空着而不是预填「0」：带标签之后 0 只作 placeholder，提交时空串按 0 处理。
+  const [reorderLevel, setReorderLevel] = useState('');
   const [cogsAccountId, setCogsAccountId] = useState('');
   const [inventoryAccountId, setInventoryAccountId] = useState('');
 
@@ -101,10 +102,9 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
     setNameZh('');
     setUnit('');
     setCostMethod('average');
-    setReorderLevel('0');
+    setReorderLevel('');
     setCogsAccountId('');
     setInventoryAccountId('');
-    setShowAdd(false);
   }
 
   async function handleCreate() {
@@ -267,9 +267,11 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
   const inactiveItems = items.filter((i) => !i.isActive);
 
   return (
-    <div className="named-list">
+    // 不再借 .named-list：库存表自己就是一张卡，外面再包一张就是卡中卡，
+    // 「添加物品」按钮被关在外层卡片的角落里。
+    <div className="inventory-list">
       {activeItems.length > 0 ? (
-        <table className="transaction-table">
+        <table className="transaction-table doc-table">
           <caption className="visually-hidden">{t.inventory.title}</caption>
           <thead>
             <tr>
@@ -384,34 +386,40 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
 
               return (
                 <tr key={item.id}>
-                  <td>{item.sku}</td>
-                  <td>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</td>
-                  <td>{item.unit}</td>
-                  <td className="numeric">{item.currentQuantity}</td>
+                  <td data-label={t.inventory.sku}>{item.sku}</td>
+                  <td className="doc-title">
+                    {localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}
+                  </td>
+                  <td data-label={t.inventory.unit}>{item.unit}</td>
+                  <td className="numeric" data-label={t.inventory.quantity}>{item.currentQuantity}</td>
                   {/* 原来这两处硬写 'USD'。库存成本记的是本位币，一家
                       马来西亚公司的货值会被标成 US$——数字对、币种错，
                       而且零小数币种（JPY/KRW/VND）连数字都会差 100 倍。 */}
-                  <td className="numeric">
+                  <td className="numeric" data-label={t.inventory.avgCost}>
                     {formatMoney(item.currentAvgCostMinor, baseCurrency, locale)}
                   </td>
-                  <td className="numeric">{formatMoney(totalValueMinor, baseCurrency, locale)}</td>
-                  <td>
+                  <td className="numeric doc-amount">{formatMoney(totalValueMinor, baseCurrency, locale)}</td>
+                  <td className="doc-status">
                     {lowStock ? (
                       <span className="badge badge-danger">{t.inventory.lowStock}</span>
                     ) : (
                       <span className="badge badge-success">{t.settings.active}</span>
                     )}
                   </td>
-                  <td>{getAccountName(item.cogsAccountId)}</td>
-                  <td>{getAccountName(item.inventoryAccountId)}</td>
-                  <td>
-                    <button onClick={() => startEdit(item)}>{t.common.edit}</button>
-                    <button onClick={() => setTxnItem(item)}>
-                      {t.inventory.recordTransaction}
-                    </button>
-                    <button onClick={() => handleToggle(item.id, false)}>
-                      {t.settings.deactivate}
-                    </button>
+                  <td data-label={t.inventory.cogsAccount}>{getAccountName(item.cogsAccountId)}</td>
+                  <td data-label={t.inventory.inventoryAccount}>{getAccountName(item.inventoryAccountId)}</td>
+                  {/* 三个按钮收进 .doc-actions（与发票、账单列表一样）：原来是 td 里
+                      三个裸按钮，靠外边距隔开，手机上「隐藏」一个人掉到第二行。 */}
+                  <td className="doc-actions-cell">
+                    <span className="doc-actions">
+                      <button type="button" onClick={() => startEdit(item)}>{t.common.edit}</button>
+                      <button type="button" onClick={() => setTxnItem(item)}>
+                        {t.inventory.recordTransaction}
+                      </button>
+                      <button type="button" onClick={() => handleToggle(item.id, false)}>
+                        {t.settings.deactivate}
+                      </button>
+                    </span>
                   </td>
                 </tr>
               );
@@ -423,18 +431,21 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
       {inactiveItems.length > 0 ? (
         <div className="coa-section">
           <h2 className="coa-section-title">{t.settings.inactive}</h2>
-          {inactiveItems.map((item) => (
-            <div key={item.id} className="list-item inactive">
-              <div className="list-item-line">
-                <span>{item.sku}</span>
-                <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</span>
-                <span className="badge">{t.settings.inactive}</span>
-                <button onClick={() => handleToggle(item.id, true)}>
-                  {t.settings.reactivate}
-                </button>
+          <div className="coa-group">
+            {inactiveItems.map((item) => (
+              <div key={item.id} className="list-item inactive">
+                <div className="list-item-line">
+                  <span>{localizedName({ name_en: item.nameEn, name_zh: item.nameZh }, locale)}</span>
+                  <span className="badge">{item.sku}</span>
+                  <span className="row-actions">
+                    <button type="button" onClick={() => handleToggle(item.id, true)}>
+                      {t.settings.reactivate}
+                    </button>
+                  </span>
+                </div>
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       ) : null}
 
@@ -444,53 +455,77 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
 
       {error ? <p role="alert" className="form-error">{error}</p> : null}
 
-      {showAdd ? (
-        <div className="add-form">
-          <h3>{t.inventory.addItem}</h3>
-          <input
-            placeholder={`${t.inventory.sku}*`} aria-label={`${t.inventory.sku}*`}
-            value={sku}
-            onChange={(e) => setSku(e.target.value)}
-          />
-          <input
-            placeholder={`${t.settings.nameEn}*`} aria-label={`${t.settings.nameEn}*`}
-            value={nameEn}
-            onChange={(e) => setNameEn(e.target.value)}
-          />
-          <input
-            placeholder={`${t.settings.nameZh}*`} aria-label={`${t.settings.nameZh}*`}
-            value={nameZh}
-            onChange={(e) => setNameZh(e.target.value)}
-          />
-          <input
-            placeholder={`${t.inventory.unit}*`} aria-label={`${t.inventory.unit}*`}
-            value={unit}
-            onChange={(e) => setUnit(e.target.value)}
-          />
+      {/* 新增表单常驻在列表下面，入口在页头（#add-item），与分类、联系人一样。
+          每一栏都有看得见的标签：原来只有 placeholder，三个下拉只显示当前值，
+          再订购点那一栏只剩一个光秃秃的「0」。 */}
+      <form
+        id="add-item"
+        className="add-form"
+        noValidate
+        onSubmit={(e) => {
+          e.preventDefault();
+          void handleCreate();
+        }}
+      >
+        <h3>{t.inventory.addItem}</h3>
+        <div className="form-field">
+          <label htmlFor={`${uid}-sku`}>{t.inventory.sku}*</label>
+          <input id={`${uid}-sku`} aria-required="true" value={sku} onChange={(e) => setSku(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-en`}>{t.settings.nameEn}*</label>
+          <input id={`${uid}-en`} aria-required="true" value={nameEn} onChange={(e) => setNameEn(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-zh`}>{t.settings.nameZh}</label>
+          <input id={`${uid}-zh`} value={nameZh} onChange={(e) => setNameZh(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-unit`}>{t.inventory.unit}*</label>
+          <input id={`${uid}-unit`} aria-required="true" value={unit} onChange={(e) => setUnit(e.target.value)} />
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-method`}>{t.inventory.costMethod}</label>
           <select
+            id={`${uid}-method`}
             value={costMethod}
             onChange={(e) => setCostMethod(e.target.value as 'fifo' | 'average')}
           >
             <option value="fifo">{t.inventory.fifo}</option>
             <option value="average">{t.inventory.average}</option>
           </select>
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-reorder`}>{t.inventory.reorderLevel}</label>
           <input
+            id={`${uid}-reorder`}
             type="number"
             min="0"
-            placeholder={t.inventory.reorderLevel} aria-label={t.inventory.reorderLevel}
+            inputMode="decimal"
+            placeholder="0"
             value={reorderLevel}
             onChange={(e) => setReorderLevel(e.target.value)}
           />
-          <select value={cogsAccountId} onChange={(e) => setCogsAccountId(e.target.value)}>
-            <option value="">{t.inventory.cogsAccount}</option>
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-cogs`}>{t.inventory.cogsAccount}</label>
+          <select id={`${uid}-cogs`} value={cogsAccountId} onChange={(e) => setCogsAccountId(e.target.value)}>
+            <option value="">{t.inventory.noAccount}</option>
             {accounts.map((a) => (
               <option key={a.id} value={a.id}>
                 {a.code} {localizedName({ name_en: a.nameEn, name_zh: a.nameZh }, locale)}
               </option>
             ))}
           </select>
-          <select value={inventoryAccountId} onChange={(e) => setInventoryAccountId(e.target.value)}>
-            <option value="">{t.inventory.inventoryAccount}</option>
+        </div>
+        <div className="form-field">
+          <label htmlFor={`${uid}-inv`}>{t.inventory.inventoryAccount}</label>
+          <select
+            id={`${uid}-inv`}
+            value={inventoryAccountId}
+            onChange={(e) => setInventoryAccountId(e.target.value)}
+          >
+            <option value="">{t.inventory.noAccount}</option>
             {accounts
               .filter((a) => a.type === 'asset')
               .map((a) => (
@@ -499,16 +534,16 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                 </option>
               ))}
           </select>
-          <button onClick={handleCreate} disabled={pending || !sku.trim() || !nameEn.trim() || !unit.trim()}>
+        </div>
+        <div className="add-form-actions">
+          <button
+            type="submit"
+            disabled={pending || !sku.trim() || !nameEn.trim() || !unit.trim()}
+          >
             {t.inventory.addItem}
           </button>
-          <button onClick={resetAddForm}>{t.common.cancel}</button>
         </div>
-      ) : (
-        <button onClick={() => setShowAdd(true)} className="primary-button">
-          {t.inventory.addItem}
-        </button>
-      )}
+      </form>
 
       {/* 库存出入库对话框。原来是 <div role="dialog">：有对话框的语义，
           却没有对话框的任何行为——Tab 会跑到背后的库存表格里、Esc 不关、

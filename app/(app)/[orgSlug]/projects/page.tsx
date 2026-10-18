@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -44,6 +45,11 @@ export default async function ProjectsListPage({
 
   return (
     <>
+      {/* 手机上这一页是从「更多」推进来的，装成 PWA 后没有浏览器返回键。
+          桌面上侧栏一直在，不显示（见 app/globals.css「Phone layout」段的 .more-back）。 */}
+      <div className="more-back">
+        <BackLink href={`/${orgSlug}/more`}>{t.nav.more}</BackLink>
+      </div>
       <div className="page-header">
         <h1>{t.projects.title}</h1>
         {canManage ? (

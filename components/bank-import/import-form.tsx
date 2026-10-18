@@ -37,7 +37,11 @@ export function ImportForm({ orgSlug, locale, i18n, moneyAccounts }: Props) {
   const [dateFormat, setDateFormat] = useState<(typeof DATE_FORMATS)[number]>('');
   const [uploading, setUploading] = useState(false);
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  // 选中的文件名。原生文件框的「未选择任何文件」跟着浏览器语言走（英文界面
+  // 里冒出中文），所以框本身视觉隐藏，文件名由这里显示。
+  const [fileName, setFileName] = useState('');
   const fileRef = useRef<HTMLInputElement>(null);
+  const fileHintId = useId();
   const dateFormatId = useId();
   const dateFormatHintId = useId();
 
@@ -78,6 +82,7 @@ export function ImportForm({ orgSlug, locale, i18n, moneyAccounts }: Props) {
       });
 
       if (fileRef.current) fileRef.current.value = '';
+      setFileName('');
       setMoneyAccountId('');
     } catch (err) {
       setMessage({
@@ -108,16 +113,24 @@ export function ImportForm({ orgSlug, locale, i18n, moneyAccounts }: Props) {
         </select>
       </label>
 
-      <label>
-        {i18n.bankImport.selectFile}
-        <input
-          ref={fileRef}
-          type="file"
-          accept=".csv,.ofx,.qif,.qfx"
-        />
-      </label>
-
-      <small>{i18n.bankImport.fileFormat}</small>
+      {/* 与收据上传同一个胶囊按钮（attachment-upload-label）。原来外面一层
+          「选择文件」标签再套一个原生的「选择文件」按钮，同一句话说两遍。 */}
+      <div className="form-field import-file-field">
+        <label className="attachment-upload-label">
+          <input
+            ref={fileRef}
+            type="file"
+            accept=".csv,.ofx,.qif,.qfx"
+            aria-describedby={fileHintId}
+            onChange={(e) => setFileName(e.target.files?.[0]?.name ?? '')}
+          />
+          {`+ ${i18n.bankImport.selectFile}`}
+        </label>
+        {fileName ? <span className="import-file-name">{fileName}</span> : null}
+        <p id={fileHintId} className="field-hint">
+          {i18n.bankImport.fileFormat}
+        </p>
+      </div>
 
       {/* 这个下拉不在 <label> 里包着，因为它要配一段说明文字：
           aria-describedby 指过去，读屏在念完标签后会接着念说明，

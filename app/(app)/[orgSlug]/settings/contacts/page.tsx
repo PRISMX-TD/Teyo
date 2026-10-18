@@ -1,4 +1,5 @@
 import { BackLink } from '@/components/ui/back-link';
+import { Plus } from '@/components/ui/icons';
 import { ContactList } from '@/components/settings/contact-list';
 import { getMessages } from '@/lib/i18n';
 import { createContact, updateContactAction, toggleContactActive } from '@/server/actions/contacts';
@@ -37,7 +38,16 @@ export default async function ContactsSettingsPage({
   return (
     <>
       <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
-      <h1>{t.settings.contacts}</h1>
+      {/* 新增表单在所有联系人下面；页头给一个跳过去的入口。 */}
+      <div className="page-header">
+        <h1>{t.settings.contacts}</h1>
+        <div className="page-header-actions">
+          <a href="#add-contact" className="add-button">
+            <Plus size={16} weight="bold" aria-hidden="true" />
+            {t.settings.addContact}
+          </a>
+        </div>
+      </div>
       <ContactList
         orgSlug={orgSlug}
         items={items}

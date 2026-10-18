@@ -1,6 +1,6 @@
 'use client';
 
-import { useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
@@ -168,7 +168,19 @@ export function TransactionForm({
   // and only this; see handleSubmit's isJournalScenario branch.
   const [direction, setDirection] = useState<'in' | 'out' | null>(null);
   const voidReasonId = useId();
+  const voidReasonRef = useRef<HTMLInputElement>(null);
   const amountErrorId = useId();
+
+  // 作废原因框只在有鼠标的设备上自动聚焦。触屏上一聚焦键盘就弹出来，
+  // 底部弹层里的「作废 / 取消」被盖在键盘下面，得先收起键盘才点得到。
+  // showModal() 自己也会把焦点给第一个输入框，所以触屏上要主动移开。
+  useEffect(() => {
+    if (!voidDialog) return;
+    const input = voidReasonRef.current;
+    if (!input) return;
+    if (window.matchMedia('(pointer: fine)').matches) input.focus();
+    else if (document.activeElement === input) input.blur();
+  }, [voidDialog]);
 
   // 新建时就能挂上的收据。交易还没有 id，文件先留在浏览器里，保存成功之后
   // 再逐张上传——见 finishCreate。
@@ -430,6 +442,37 @@ export function TransactionForm({
     }
   }
 
+  // 资金账户这一问按已知的方向说：收入问钱进了哪个账户，支出问从哪个账户付。
+  // 只有「不确定」场景方向未知，才用两头都包的那句。
+  const moneyAccountLabel = isJournalScenario
+    ? t.transaction.chooseMoneyAccount
+    : kind === 'transfer'
+      ? t.transaction.destinationAccount
+      : kind === 'income'
+        ? t.transaction.moneyInAccount
+        : t.transaction.moneyOutAccount;
+  const moneyAccountField = (
+    <>
+      <label htmlFor="moneyAccountId">{moneyAccountLabel}</label>
+      <select
+        id="moneyAccountId"
+        name="moneyAccountId"
+        required
+        value={moneyAccountId}
+        onChange={(event) => setMoneyAccountId(event.target.value)}
+      >
+        <option value="" disabled>
+          {t.transaction.choosePlaceholder}
+        </option>
+        {moneyAccounts.map((account) => (
+          <option key={account.id} value={account.id}>
+            {localizedName(account, locale)}
+          </option>
+        ))}
+      </select>
+    </>
+  );
+
   async function handleVoid() {
     if (!initialData || !voidReason.trim()) return;
     setPending(true);
@@ -464,15 +507,17 @@ export function TransactionForm({
           类型只会让分类下拉换成另一池、保存时被服务端拒掉。真要换类型走下面
           那几个链接——换类型重录的页面把类型定死，这里同样不给选。 */}
       {isEdit && initialData ? (
+        // 两个链接之间不再夹「 · 」：手机上它们各自是 44px 高的点按目标，
+        // 一行放不下时整条链接换行，不会只把分隔点甩到下一行。
         <p className="change-kind">
-          {t.transaction.changeKindHint}{' '}
-          {KINDS.filter((option) => option !== initialData.kind).map((option, index) => (
-            <span key={option}>
-              {index > 0 ? ' · ' : null}
-              <Link href={`/${orgSlug}/transactions/new?replace=${initialData.id}&kind=${option}`}>
-                {interpolate(t.transaction.changeKindTo, { kind: kindLabels[option] })}
-              </Link>
-            </span>
+          <span>{t.transaction.changeKindHint}</span>
+          {KINDS.filter((option) => option !== initialData.kind).map((option) => (
+            <Link
+              key={option}
+              href={`/${orgSlug}/transactions/new?replace=${initialData.id}&kind=${option}`}
+            >
+              {interpolate(t.transaction.changeKindTo, { kind: kindLabels[option] })}
+            </Link>
           ))}
         </p>
       ) : null}
@@ -564,25 +609,8 @@ export function TransactionForm({
         </>
       ) : null}
 
-      <label htmlFor="moneyAccountId">
-        {kind === 'transfer' ? t.transaction.destinationAccount : t.transaction.chooseMoneyAccount}
-      </label>
-      <select
-        id="moneyAccountId"
-        name="moneyAccountId"
-        required
-        value={moneyAccountId}
-        onChange={(event) => setMoneyAccountId(event.target.value)}
-      >
-        <option value="" disabled>
-          {t.transaction.choosePlaceholder}
-        </option>
-        {moneyAccounts.map((account) => (
-          <option key={account.id} value={account.id}>
-            {localizedName(account, locale)}
-          </option>
-        ))}
-      </select>
+      {/* 转账的转入账户挪到下面「转出账户」之后渲染，见那里的注释。 */}
+      {kind !== 'transfer' ? moneyAccountField : null}
 
       {isJournalScenario ? (
         // not-sure: the only thing left to ask is which way the money moved.
@@ -621,12 +649,15 @@ export function TransactionForm({
         <>
           {/* counterAccountId is the transfer's source — templateFor credits
               it (see server/domain/posting-templates.ts, the one place that
-              decides posting direction). moneyAccountId above
+              decides posting direction). moneyAccountId below
               is the destination ("Transfer into"). Sharing the generic
               moneyAccount label here made both fields read as destinations
               top to bottom, and a reversed source/destination entry still
               balances and still leaves the dashboard's total unchanged, so
-              nothing on screen would look wrong. */}
+              nothing on screen would look wrong.
+              先问转出、再问转入：人想转账就是「从 A 到 B」。原来转入在上，
+              第一个下拉很容易顺手填成转出的那个户口，而填反了账照样是平的。
+              只改渲染顺序，字段名不变。 */}
           <label htmlFor="counterAccountId">{t.transaction.sourceAccount}</label>
           <select id="counterAccountId" name="counterAccountId" required defaultValue={initialData?.counterAccountId ?? ''}>
             <option value="" disabled>
@@ -638,6 +669,7 @@ export function TransactionForm({
               </option>
             ))}
           </select>
+          {moneyAccountField}
         </>
       ) : scenario && !scenario.needsCategory && presetCategoryId ? null : (
         // presetCategoryId 查不到（这家公司没有挂在「进货」科目上的分类）时
@@ -646,15 +678,24 @@ export function TransactionForm({
         <>
           {/* Describes the chips + fallback select as a pair, so it is not
               `for`-bound to either one specifically — the select below has
-              its own label immediately above it. */}
-          <label>{t.transaction.chooseCategory}</label>
-          <CategoryChips
-            categories={recentCategories}
-            selectedId={categoryId}
-            onSelect={setCategoryId}
-            locale={locale}
-          />
-          <label htmlFor="categoryId">{t.transaction.otherCategory}</label>
+              its own label immediately above it.
+              没有常用分类（新公司、或最近 90 天没记过这一类）时芯片行不渲染，
+              这时问题直接落在下拉上：不能留一句没有答案的问题，再跟一个
+              「其他分类」——没有「其他」可言。 */}
+          {recentCategories.length > 0 ? (
+            <>
+              <label>{t.transaction.chooseCategory}</label>
+              <CategoryChips
+                categories={recentCategories}
+                selectedId={categoryId}
+                onSelect={setCategoryId}
+                locale={locale}
+              />
+            </>
+          ) : null}
+          <label htmlFor="categoryId">
+            {recentCategories.length > 0 ? t.transaction.otherCategory : t.transaction.chooseCategory}
+          </label>
           <select
             id="categoryId"
             name="categoryId"
@@ -698,7 +739,17 @@ export function TransactionForm({
       )}
 
       <label htmlFor="description">{t.transaction.description}</label>
-      <input id="description" name="description" maxLength={500} defaultValue={initialData?.description ?? undefined} />
+      {/* 多行框：备注常常是一整串转账参考号或一句长说明，单行框里只看得到
+          开头十几个字。支持 field-sizing 的浏览器随内容长高（见 tx.css），
+          rows={2} 是不支持时的退路。 */}
+      <textarea
+        id="description"
+        name="description"
+        className="tx-note"
+        rows={2}
+        maxLength={500}
+        defaultValue={initialData?.description ?? undefined}
+      />
 
       {/*
         新建时就能把收据挂上：站在柜台前录一笔，顺手拍张照，不必存完再进
@@ -768,17 +819,6 @@ export function TransactionForm({
               确实都叫「保存」，所以删掉判断而不是补一个不同的文案。 */}
           {pending ? t.common.loading : t.transaction.save}
         </button>
-
-        {isEdit ? (
-          <button
-            type="button"
-            className="btn-danger"
-            disabled={pending}
-            onClick={() => setVoidDialog(true)}
-          >
-            {t.transaction.void}
-          </button>
-        ) : null}
       </div>
 
     </form>
@@ -794,10 +834,10 @@ export function TransactionForm({
     >
       <label htmlFor={voidReasonId}>{t.transaction.voidReason}</label>
       <input
+        ref={voidReasonRef}
         id={voidReasonId}
         value={voidReason}
         onChange={(e) => setVoidReason(e.target.value)}
-        autoFocus
       />
       <div className="app-dialog-actions">
         <button type="button" onClick={() => setVoidDialog(false)}>
@@ -821,6 +861,20 @@ export function TransactionForm({
         attachments={attachments}
         t={t}
       />
+    ) : null}
+
+    {/* 作废不再和「保存」并排：原来两个一样大的胶囊挨着，红色那个英文下
+        还更宽。挪到页面最底下、单独一整行红字（iOS 设置里危险操作的样子），
+        「保存」是卡片里唯一的主按钮。 */}
+    {isEdit ? (
+      <button
+        type="button"
+        className="row-button is-destructive tx-void-row"
+        disabled={pending}
+        onClick={() => setVoidDialog(true)}
+      >
+        {t.transaction.void}
+      </button>
     ) : null}
   </>);
 }

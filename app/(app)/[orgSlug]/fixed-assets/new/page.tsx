@@ -1,4 +1,5 @@
 import { redirect } from 'next/navigation';
+import { BackLink } from '@/components/ui/back-link';
 import { AssetForm } from '@/components/fixed-assets/asset-form';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
@@ -35,6 +36,8 @@ export default async function NewFixedAssetPage({
 
   return (
     <>
+      {/* 装成 PWA 后没有浏览器返回键，这一页原来是个死胡同。 */}
+      <BackLink href={`/${orgSlug}/fixed-assets`}>{t.fixedAssets.title}</BackLink>
       <h1>{t.fixedAssets.newTitle}</h1>
       <AssetForm
         orgSlug={orgSlug}

@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -9,6 +9,7 @@ import type { UserEntryKind } from '@/server/domain/ledger';
 import type { RecurringEditFields, RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 import { todayLocalISO } from '@/lib/date';
+import { Plus } from '@/components/ui/icons';
 
 type AccountOption = {
   id: string;
@@ -165,11 +166,29 @@ export function RecurringList({
    */
   const [formError, setFormError] = useState<string | null>(null);
 
+  const formRef = useRef<HTMLFormElement>(null);
+
   const closeForm = useCallback(() => {
     setShowForm(false);
     setEditingId(null);
     setForm(blankForm(baseCurrency));
   }, [baseCurrency]);
+
+  /** 页头的「新建」：正在编辑某条规则时换成一张空白的新建表单；已经开着新建就不清空。 */
+  const openNew = useCallback(() => {
+    if (showForm && editingId === null) return;
+    setEditingId(null);
+    setForm(blankForm(baseCurrency));
+    setShowForm(true);
+  }, [showForm, editingId, baseCurrency]);
+
+  // 表单在列表上面。手机上点下面某张卡的「编辑」，表单在屏幕外打开，看起来
+  // 像什么都没发生；表单顶部不在视野里时滚过去。
+  useEffect(() => {
+    if (!showForm) return;
+    const el = formRef.current;
+    if (el && el.getBoundingClientRect().top < 0) el.scrollIntoView({ block: 'start' });
+  }, [showForm, editingId]);
 
   /**
    * 打开这张表单去改一条已有的规则。
@@ -284,314 +303,334 @@ export function RecurringList({
   }, [entries, orgSlug, generateAction, t]);
 
   return (
-    <div className="recurring-list">
-      <div className="recurring-toolbar">
-        <button onClick={() => (showForm ? closeForm() : setShowForm(true))}>
-          {showForm ? t.common.cancel : t.recurring.newTitle}
-        </button>
-        <button
-          onClick={handleGenerate}
-          disabled={
-            generating ||
-            !entries.some((e) => isDue(e, todayLocalISO()))
-          }
-        >
-          {generating ? t.common.loading : t.recurring.runDue}
-        </button>
-      </div>
-
-      {formError ? (
-        <p role="alert" className="form-error">
-          {formError}
-        </p>
-      ) : null}
-
-      {runError ? (
-        <p role="alert" className="form-error">
-          {runError}
-        </p>
-      ) : null}
-
-      {runReport ? (
-        <div
-          role="status"
-          className={runReport.blocked.length > 0 ? 'form-error' : 'form-success'}
-        >
-          <p>
-            {/*
-              「没有到期的分录」和「没记上任何东西」是两回事。全部规则都被挡下时
-              前者是假话——下面的 generateBlocked 才是真正的原因，标题不该跟它打架。
-              只有真正无事可做时才说无事可做。
-            */}
-            {runReport.generated === 0 &&
-            runReport.blocked.length === 0 &&
-            runReport.deferred.length === 0
-              ? t.recurring.generateNone
-              : interpolate(t.recurring.generatedCount, { n: runReport.generated })}
-          </p>
-
-          {runReport.deferred.length > 0 ? (
-            <>
-              <p>{interpolate(t.recurring.generateDeferred, { n: runReport.deferred.length })}</p>
-              <ul>
-                {runReport.deferred.map((rule) => (
-                  <li key={rule.id}>
-                    {rule.description} &mdash;{' '}
-                    {interpolate(t.recurring.generateResumeFrom, { date: rule.resumeFrom })}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
-
-          {runReport.blocked.length > 0 ? (
-            <>
-              <p>{interpolate(t.recurring.generateBlocked, { n: runReport.blocked.length })}</p>
-              <ul>
-                {runReport.blocked.map((rule) => (
-                  <li key={rule.id}>
-                    {/*
-                      卡在哪一期要说出来：补记可能已经记好了前几期，停在第四期。
-                      用户要去处理的是那一天（补一条那天的汇率之类），不是整条规则。
-                      ISO 日期不需要翻译，所以这里不必再加一个文案键。
-                    */}
-                    {rule.description}
-                    {rule.occurredOn ? ` (${rule.occurredOn})` : ''} &mdash; {rule.reason}
-                  </li>
-                ))}
-              </ul>
-            </>
-          ) : null}
+    <>
+      {/* 页头在这里而不在 page.tsx：两个按钮要用这里的状态。「新建」与分类、
+          联系人页头的「新增」同一个样子（淡绿 + 号），原来是一颗灰按钮，
+          打开后自己变成「取消」。取消挪进了表单底部。 */}
+      <div className="page-header">
+        <h1>{t.recurring.title}</h1>
+        <div className="page-header-actions">
+          <button type="button" className="add-button" onClick={openNew}>
+            <Plus size={16} weight="bold" aria-hidden="true" />
+            {t.recurring.newTitle}
+          </button>
+          <button
+            type="button"
+            onClick={handleGenerate}
+            disabled={
+              generating ||
+              !entries.some((e) => isDue(e, todayLocalISO()))
+            }
+          >
+            {generating ? t.common.loading : t.recurring.runDue}
+          </button>
         </div>
-      ) : null}
+      </div>
+      <div className="recurring-list">
+        {formError ? (
+          <p role="alert" className="form-error">
+            {formError}
+          </p>
+        ) : null}
 
-      {showForm && (
-        <form
-          className="recurring-form"
-          onSubmit={(e) => {
-            e.preventDefault();
-            handleSubmit();
-          }}
-        >
-          <h3>{editingId ? t.recurring.editTitle : t.recurring.newTitle}</h3>
+        {runError ? (
+          <p role="alert" className="form-error">
+            {runError}
+          </p>
+        ) : null}
 
-          {/*
-            编辑时类型锁住。类型决定了这条规则将来生成的是收入还是支出分录，
-            而已经按旧类型生成过的那些分录不会跟着改。允许中途改类型，会得到
-            一条前半年记支出、后半年记收入的规则，报表上没有任何地方说得清
-            这件事。RecurringEditFields 里本来也没有 kind 这个字段。
-          */}
-          <label>
-            {t.transaction.kind}
-            <select
-              value={form.kind}
-              onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as UserEntryKind }))}
-              disabled={editingId !== null}
-            >
-              <option value="income">{t.transaction.income}</option>
-              <option value="expense">{t.transaction.expense}</option>
-              <option value="transfer">{t.transaction.transfer}</option>
-            </select>
-            {editingId ? <span className="hint">{t.recurring.kindLocked}</span> : null}
-          </label>
+        {runReport ? (
+          <div
+            role="status"
+            className={runReport.blocked.length > 0 ? 'form-error' : 'form-success'}
+          >
+            <p>
+              {/*
+                「没有到期的分录」和「没记上任何东西」是两回事。全部规则都被挡下时
+                前者是假话——下面的 generateBlocked 才是真正的原因，标题不该跟它打架。
+                只有真正无事可做时才说无事可做。
+              */}
+              {runReport.generated === 0 &&
+              runReport.blocked.length === 0 &&
+              runReport.deferred.length === 0
+                ? t.recurring.generateNone
+                : interpolate(t.recurring.generatedCount, { n: runReport.generated })}
+            </p>
 
-          <label>
-            {t.transaction.amount}
-            <input
-              type="text"
-              value={form.amount}
-              onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
-              placeholder="0.00"
-              required
-            />
-          </label>
+            {runReport.deferred.length > 0 ? (
+              <>
+                <p>{interpolate(t.recurring.generateDeferred, { n: runReport.deferred.length })}</p>
+                <ul>
+                  {runReport.deferred.map((rule) => (
+                    <li key={rule.id}>
+                      {rule.description} &mdash;{' '}
+                      {interpolate(t.recurring.generateResumeFrom, { date: rule.resumeFrom })}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
 
-          <label>
-            {t.transaction.currency}
-            <input
-              type="text"
-              value={form.currency}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))
-              }
-              maxLength={3}
-            />
-          </label>
+            {runReport.blocked.length > 0 ? (
+              <>
+                <p>{interpolate(t.recurring.generateBlocked, { n: runReport.blocked.length })}</p>
+                <ul>
+                  {runReport.blocked.map((rule) => (
+                    <li key={rule.id}>
+                      {/*
+                        卡在哪一期要说出来：补记可能已经记好了前几期，停在第四期。
+                        用户要去处理的是那一天（补一条那天的汇率之类），不是整条规则。
+                        ISO 日期不需要翻译，所以这里不必再加一个文案键。
+                      */}
+                      {rule.description}
+                      {rule.occurredOn ? ` (${rule.occurredOn})` : ''} &mdash; {rule.reason}
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : null}
+          </div>
+        ) : null}
 
-          <label>
-            {t.journal.debitAccount}
-            <select
-              value={form.debitAccountId}
-              onChange={(e) => setForm((f) => ({ ...f, debitAccountId: e.target.value }))}
-              required
-            >
-              <option value="">{t.journal.selectAccount}</option>
-              {allAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.code} {localizedName(toOption(a), locale)}
-                </option>
-              ))}
-            </select>
-          </label>
+        {showForm && (
+          <form
+            ref={formRef}
+            className="recurring-form"
+            onSubmit={(e) => {
+              e.preventDefault();
+              handleSubmit();
+            }}
+          >
+            <h3>{editingId ? t.recurring.editTitle : t.recurring.newTitle}</h3>
 
-          <label>
-            {t.journal.creditAccount}
-            <select
-              value={form.creditAccountId}
-              onChange={(e) => setForm((f) => ({ ...f, creditAccountId: e.target.value }))}
-              required
-            >
-              <option value="">{t.journal.selectAccount}</option>
-              {allAccounts.map((a) => (
-                <option key={a.id} value={a.id}>
-                  {a.code} {localizedName(toOption(a), locale)}
-                </option>
-              ))}
-            </select>
-          </label>
+            {/*
+              编辑时类型锁住。类型决定了这条规则将来生成的是收入还是支出分录，
+              而已经按旧类型生成过的那些分录不会跟着改。允许中途改类型，会得到
+              一条前半年记支出、后半年记收入的规则，报表上没有任何地方说得清
+              这件事。RecurringEditFields 里本来也没有 kind 这个字段。
+            */}
+            <label>
+              {t.transaction.kind}
+              <select
+                value={form.kind}
+                onChange={(e) => setForm((f) => ({ ...f, kind: e.target.value as UserEntryKind }))}
+                disabled={editingId !== null}
+              >
+                <option value="income">{t.transaction.income}</option>
+                <option value="expense">{t.transaction.expense}</option>
+                <option value="transfer">{t.transaction.transfer}</option>
+              </select>
+              {editingId ? <span className="hint">{t.recurring.kindLocked}</span> : null}
+            </label>
 
-          <label>
-            {t.transaction.category}
-            <select
-              value={form.categoryId}
-              onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
-            >
-              <option value="">{t.transaction.choosePlaceholder}</option>
-              {categories
-                .filter((c) =>
-                  form.kind === 'income'
-                    ? c.kind === 'income'
-                    : form.kind === 'expense'
-                      ? c.kind === 'expense'
-                      : true,
-                )
-                .map((c) => (
-                  <option key={c.id} value={c.id}>
-                    {localizedName(toOption(c), locale)}
+            <label>
+              {t.transaction.amount}
+              <input
+                type="text"
+                value={form.amount}
+                onChange={(e) => setForm((f) => ({ ...f, amount: e.target.value }))}
+                placeholder="0.00"
+                required
+              />
+            </label>
+
+            <label>
+              {t.transaction.currency}
+              <input
+                type="text"
+                value={form.currency}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, currency: e.target.value.toUpperCase() }))
+                }
+                maxLength={3}
+              />
+            </label>
+
+            <label>
+              {t.journal.debitAccount}
+              <select
+                value={form.debitAccountId}
+                onChange={(e) => setForm((f) => ({ ...f, debitAccountId: e.target.value }))}
+                required
+              >
+                <option value="">{t.journal.selectAccount}</option>
+                {allAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code} {localizedName(toOption(a), locale)}
                   </option>
                 ))}
-            </select>
-          </label>
+              </select>
+            </label>
 
-          <label>
-            {t.transaction.description}
-            <input
-              type="text"
-              value={form.description}
-              onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
-            />
-          </label>
+            <label>
+              {t.journal.creditAccount}
+              <select
+                value={form.creditAccountId}
+                onChange={(e) => setForm((f) => ({ ...f, creditAccountId: e.target.value }))}
+                required
+              >
+                <option value="">{t.journal.selectAccount}</option>
+                {allAccounts.map((a) => (
+                  <option key={a.id} value={a.id}>
+                    {a.code} {localizedName(toOption(a), locale)}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label>
-            {t.recurring.frequency}
-            <select
-              value={form.frequency}
-              onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value as RecurringFrequency }))}
-            >
-              {FREQUENCIES.map((freq) => (
-                <option key={freq.key} value={freq.key}>
-                  {t.recurring[freq.label as keyof typeof t.recurring] ?? freq.key}
-                </option>
-              ))}
-            </select>
-          </label>
+            <label>
+              {t.transaction.category}
+              <select
+                value={form.categoryId}
+                onChange={(e) => setForm((f) => ({ ...f, categoryId: e.target.value }))}
+              >
+                <option value="">{t.transaction.choosePlaceholder}</option>
+                {categories
+                  .filter((c) =>
+                    form.kind === 'income'
+                      ? c.kind === 'income'
+                      : form.kind === 'expense'
+                        ? c.kind === 'expense'
+                        : true,
+                  )
+                  .map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {localizedName(toOption(c), locale)}
+                    </option>
+                  ))}
+              </select>
+            </label>
 
-          <label>
-            {t.recurring.interval}
-            <input
-              type="number"
-              min={1}
-              value={form.interval}
-              onChange={(e) =>
-                setForm((f) => ({ ...f, interval: Math.max(1, Number(e.target.value)) }))
-              }
-            />
-          </label>
+            <label>
+              {t.transaction.description}
+              <input
+                type="text"
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+              />
+            </label>
 
-          <label>
-            {t.recurring.startDate}
-            <input
-              type="date"
-              value={form.startDate}
-              onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
-            />
-          </label>
+            <label>
+              {t.recurring.frequency}
+              <select
+                value={form.frequency}
+                onChange={(e) => setForm((f) => ({ ...f, frequency: e.target.value as RecurringFrequency }))}
+              >
+                {FREQUENCIES.map((freq) => (
+                  <option key={freq.key} value={freq.key}>
+                    {t.recurring[freq.label as keyof typeof t.recurring] ?? freq.key}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-          <label>
-            {t.recurring.endDate}
-            <input
-              type="date"
-              value={form.endDate}
-              onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
-            />
-          </label>
+            <label>
+              {t.recurring.interval}
+              <input
+                type="number"
+                min={1}
+                value={form.interval}
+                onChange={(e) =>
+                  setForm((f) => ({ ...f, interval: Math.max(1, Number(e.target.value)) }))
+                }
+              />
+            </label>
 
-          <button type="submit" disabled={submitting}>
-            {submitting ? t.common.loading : t.recurring.save}
-          </button>
-        </form>
-      )}
+            <label>
+              {t.recurring.startDate}
+              <input
+                type="date"
+                value={form.startDate}
+                onChange={(e) => setForm((f) => ({ ...f, startDate: e.target.value }))}
+              />
+            </label>
 
-      {entries.length === 0 ? (
-        // 原来借用 t.transaction.empty（「没有符合筛选的记录」），这一页没有筛选。
-        <p className="empty-state">{t.recurring.empty}</p>
-      ) : (
-        <table className="report-table">
-          <thead>
-            <tr>
-              <th>{t.transaction.kind}</th>
-              <th>{t.transaction.description}</th>
-              <th className="numeric">{t.transaction.amount}</th>
-              <th>{t.recurring.frequency}</th>
-              <th>{t.recurring.nextDue}</th>
-              <th>{t.settings.active}</th>
-              <th>{t.common.actions}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {entries.map((entry) => (
-              <tr key={entry.id}>
-                <td>{kindLabel(entry.kind)}</td>
-                <td>{entry.description}</td>
-                <td className="numeric mono">
-                  {(() => {
-                    // 原来这里是 BigInt(Math.round(parseFloat(amount) * 100))。
-                    // 两个毛病，和对账那一页当初一模一样：浮点，以及硬编码
-                    // ×100——一条 1,000,000 日元的规则会显示成 10,000 日元，
-                    // 因为 JPY 没有小数位（见 money.ts 的 ZERO_DECIMAL_CURRENCIES）。
-                    try {
-                      return formatMoney(
-                        parseDecimalToMinor(entry.amount, currencyExponent(entry.currency)),
-                        entry.currency,
-                        locale,
-                      );
-                    } catch {
-                      return entry.amount;
-                    }
-                  })()}
-                </td>
-                <td>
-                  {t.recurring[entry.frequency as keyof typeof t.recurring] ?? entry.frequency}
-                  {entry.interval > 1 ? ` x${entry.interval}` : ''}
-                </td>
-                <td>{entry.nextDueDate}</td>
-                <td>
-                  <button
-                    onClick={() => handleToggle(entry.id, !entry.isActive)}
-                  >
-                    {entry.isActive ? t.settings.active : t.settings.inactive}
-                  </button>
-                </td>
-                <td>
-                  <button type="button" onClick={() => startEdit(entry)}>
-                    {t.common.edit}
-                  </button>
-                </td>
+            <label>
+              {t.recurring.endDate}
+              <input
+                type="date"
+                value={form.endDate}
+                onChange={(e) => setForm((f) => ({ ...f, endDate: e.target.value }))}
+              />
+            </label>
+
+            <div className="add-form-actions">
+              <button type="submit" disabled={submitting}>
+                {submitting ? t.common.loading : t.recurring.save}
+              </button>
+              <button type="button" onClick={closeForm}>
+                {t.common.cancel}
+              </button>
+            </div>
+          </form>
+        )}
+
+        {entries.length === 0 ? (
+          // 原来借用 t.transaction.empty（「没有符合筛选的记录」），这一页没有筛选。
+          <p className="empty-state">{t.recurring.empty}</p>
+        ) : (
+          <table className="transaction-table doc-table">
+            <thead>
+              <tr>
+                <th>{t.transaction.kind}</th>
+                <th>{t.transaction.description}</th>
+                <th className="numeric">{t.transaction.amount}</th>
+                <th>{t.recurring.frequency}</th>
+                <th>{t.recurring.nextDue}</th>
+                <th>{t.recurring.status}</th>
+                <th>{t.common.actions}</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-    </div>
+            </thead>
+            <tbody>
+              {entries.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{kindLabel(entry.kind)}</td>
+                  <td className="doc-title">{entry.description}</td>
+                  <td className="numeric mono doc-amount">
+                    {(() => {
+                      // 原来这里是 BigInt(Math.round(parseFloat(amount) * 100))。
+                      // 两个毛病，和对账那一页当初一模一样：浮点，以及硬编码
+                      // ×100——一条 1,000,000 日元的规则会显示成 10,000 日元，
+                      // 因为 JPY 没有小数位（见 money.ts 的 ZERO_DECIMAL_CURRENCIES）。
+                      try {
+                        return formatMoney(
+                          parseDecimalToMinor(entry.amount, currencyExponent(entry.currency)),
+                          entry.currency,
+                          locale,
+                        );
+                      } catch {
+                        return entry.amount;
+                      }
+                    })()}
+                  </td>
+                  <td>
+                    {t.recurring[entry.frequency as keyof typeof t.recurring] ?? entry.frequency}
+                    {entry.interval > 1 ? ` x${entry.interval}` : ''}
+                  </td>
+                  <td data-label={t.recurring.nextDue}>{entry.nextDueDate}</td>
+                  {/* 状态是徽章，按钮上写动作。原来按钮上写的是当前状态（「启用」），
+                      一条启用中的规则点「启用」反而把它停掉了。 */}
+                  <td className="doc-status">
+                    <span className={`badge ${entry.isActive ? 'badge-success' : ''}`}>
+                      {entry.isActive ? t.recurring.statusActive : t.recurring.statusPaused}
+                    </span>
+                  </td>
+                  <td className="doc-actions-cell">
+                    <span className="doc-actions">
+                      <button type="button" onClick={() => handleToggle(entry.id, !entry.isActive)}>
+                        {entry.isActive ? t.recurring.pause : t.recurring.resume}
+                      </button>
+                      <button type="button" onClick={() => startEdit(entry)}>
+                        {t.common.edit}
+                      </button>
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </div>
+    </>
   );
 }

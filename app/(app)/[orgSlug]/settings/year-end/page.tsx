@@ -3,7 +3,10 @@ import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getYearEndOverview } from '@/server/actions/year-end';
-import { YEAR_END_POSTING_AVAILABLE } from '@/server/services/year-end-close';
+import {
+  YEAR_END_NOTHING_TO_CLOSE,
+  YEAR_END_POSTING_AVAILABLE,
+} from '@/server/services/year-end-close';
 import { YearEndPanel } from '@/components/settings/year-end-panel';
 
 /**
@@ -38,6 +41,11 @@ export default async function YearEndPage({
         baseCurrency={context.baseCurrency}
         overview={{
           ...overview,
+          // 服务端给的是一个代码，在这里换成用户的语言；其余原因原样显示。
+          previewError:
+            overview.previewError === YEAR_END_NOTHING_TO_CLOSE
+              ? t.yearEnd.nothingToClose
+              : overview.previewError,
           // ClosingPlan 里的金额是 bigint。Server Component 传给 Client
           // Component 的 props 要过 React 的序列化，而 bigint 在那里是
           // 不可序列化的——整页会在渲染时抛「BigInt value can't be

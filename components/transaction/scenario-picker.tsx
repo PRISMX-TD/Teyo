@@ -1,4 +1,6 @@
 import Link from 'next/link';
+import { BackLink } from '@/components/ui/back-link';
+import { CaretRight } from '@/components/ui/icons';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { SCENARIOS, type ScenarioId } from '@/server/domain/scenario';
@@ -10,7 +12,11 @@ type Props = {
 
 // server/domain/scenario.ts 只携带稳定的 id，文案键名在这里一一对应，
 // 少一条或拼错都会在编译期报错（t.scenario 是按 en.ts 结构收窄的类型）。
-const TITLE_KEY: Record<ScenarioId, 'moneyIn' | 'moneyOut' | 'buyStock' | 'moveMoney' | 'notSure'> = {
+// 导出给新建页：场景表单的标题就是这张卡片的标题。
+export const SCENARIO_TITLE_KEY: Record<
+  ScenarioId,
+  'moneyIn' | 'moneyOut' | 'buyStock' | 'moveMoney' | 'notSure'
+> = {
   'money-in': 'moneyIn',
   'money-out': 'moneyOut',
   'buy-stock': 'buyStock',
@@ -42,6 +48,7 @@ export function ScenarioPicker({ orgSlug, locale }: Props) {
 
   return (
     <>
+      <BackLink href={`/${orgSlug}/transactions`}>{t.transaction.listTitle}</BackLink>
       <h1>{t.scenario.title}</h1>
       <div className="scenario-grid">
         {SCENARIOS.map((scenario) => (
@@ -52,8 +59,11 @@ export function ScenarioPicker({ orgSlug, locale }: Props) {
               scenario.id === 'not-sure' ? 'scenario-card scenario-secondary' : 'scenario-card'
             }
           >
-            <strong>{t.scenario[TITLE_KEY[scenario.id]]}</strong>
+            <strong>{t.scenario[SCENARIO_TITLE_KEY[scenario.id]]}</strong>
             <span>{t.scenario[HINT_KEY[scenario.id]]}</span>
+            {/* 手机上卡片排成一列，右侧的箭头说明「点进去」（iOS 列表行的样子）；
+                桌面上多列网格不需要它，见 tx.css。 */}
+            <CaretRight className="scenario-card__chevron" size={18} weight="bold" aria-hidden="true" />
           </Link>
         ))}
       </div>

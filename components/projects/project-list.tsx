@@ -1,14 +1,16 @@
 'use client';
 
-import { useState } from 'react';
+import { useId, useState } from 'react';
 import Link from 'next/link';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
 import type { ProjectRow } from '@/server/repositories/projects';
-import { updateProjectAction, setProjectStatusAction } from '@/server/actions/projects';
+import { updateProjectAction } from '@/server/actions/projects';
 import { ProjectProfitability } from '@/components/projects/project-profitability';
+import { ProjectStatusActions } from '@/components/projects/project-status-actions';
+import { CaretDown } from '@/components/ui/icons';
 
 type ProjectProfit = {
   totalIncome: bigint;
@@ -36,6 +38,7 @@ export function ProjectList({
   canManage,
 }: Props) {
   const t = getMessages(locale);
+  const uid = useId();
   const exponent = currencyExponent(baseCurrency);
   const [projects, setProjects] = useState(initialProjects);
   const [error, setError] = useState<string | null>(null);
@@ -54,12 +57,6 @@ export function ProjectList({
     active: t.projects.statusActive,
     completed: t.projects.statusCompleted,
     cancelled: t.projects.statusCancelled,
-  };
-
-  const NEXT_STATUS: Record<string, string[]> = {
-    active: ['completed', 'cancelled'],
-    completed: ['active'],
-    cancelled: ['active'],
   };
 
   function startEdit(item: ProjectRow) {
@@ -116,21 +113,8 @@ export function ProjectList({
     }
   }
 
-  async function handleStatusChange(id: string, newStatus: string) {
-    setPending(true);
-    setError(null);
-    try {
-      await setProjectStatusAction(orgSlug, id, newStatus as 'active' | 'completed' | 'cancelled');
-      setProjects((prev) =>
-        prev.map((p) =>
-          p.id === id ? { ...p, status: newStatus as ProjectRow['status'] } : p,
-        ),
-      );
-    } catch (e) {
-      setError((e as Error).message);
-    } finally {
-      setPending(false);
-    }
+  function handleStatusChanged(id: string, newStatus: ProjectRow['status']) {
+    setProjects((prev) => prev.map((p) => (p.id === id ? { ...p, status: newStatus } : p)));
   }
 
   if (projects.length === 0) {
@@ -140,124 +124,170 @@ export function ProjectList({
   return (
     <>
       {error ? <p role="alert" className="form-error">{error}</p> : null}
-      {projects.map((project) => {
-        const profit = profitabilityMap[project.id];
+      {/* .named-list：行原来没有卡片，直接是灰底上的几条分隔线，文字还比
+          标题多缩进 16px。兄弟页「固定资产」是白卡片。 */}
+      <div className="named-list">
+        {projects.map((project) => {
+          const profit = profitabilityMap[project.id];
+          const isOpen = expanded === project.id;
+          const detailId = `${uid}-detail-${project.id}`;
 
-        if (editing === project.id) {
-          return (
-            <div key={project.id} className="list-item">
-              <div className="inline-edit">
-                <input
-                  value={editName}
-                  onChange={(e) => setEditName(e.target.value)}
-                  placeholder={t.projects.name}
-                />
-                <input
-                  value={editDescription}
-                  onChange={(e) => setEditDescription(e.target.value)}
-                  placeholder={t.projects.description}
-                />
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={editBudget}
-                  onChange={(e) => setEditBudget(e.target.value)}
-                  placeholder={t.projects.budget}
-                />
-                <div className="inline-edit-row">
-                  <input
-                    type="date"
-                    value={editStartDate}
-                    onChange={(e) => setEditStartDate(e.target.value)}
-                  />
-                  <input
-                    type="date"
-                    value={editEndDate}
-                    onChange={(e) => setEditEndDate(e.target.value)}
-                  />
-                </div>
-                <div>
-                  <button onClick={() => handleUpdate(project.id)} disabled={pending}>
-                    {t.settings.save}
-                  </button>
-                  <button onClick={() => setEditing(null)}>{t.common.cancel}</button>
-                </div>
+          if (editing === project.id) {
+            const f = (key: string) => `${uid}-${project.id}-${key}`;
+            return (
+              <div key={project.id} className="list-item">
+                {/* 原来是一排只有 placeholder 的输入框：一填进内容，就看不出
+                    哪一栏是名称、哪一栏是描述，两个日期框更是谁也认不出。 */}
+                <form
+                  className="row-form"
+                  noValidate
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    void handleUpdate(project.id);
+                  }}
+                >
+                  <div className="form-field">
+                    <label htmlFor={f('name')}>{t.projects.name}</label>
+                    <input id={f('name')} value={editName} onChange={(e) => setEditName(e.target.value)} />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor={f('description')}>{t.projects.description}</label>
+                    <input
+                      id={f('description')}
+                      value={editDescription}
+                      onChange={(e) => setEditDescription(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor={f('budget')}>
+                      {t.projects.budget} ({baseCurrency})
+                    </label>
+                    <input
+                      id={f('budget')}
+                      type="text"
+                      inputMode="decimal"
+                      value={editBudget}
+                      onChange={(e) => setEditBudget(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor={f('start')}>{t.projects.startDate}</label>
+                    <input
+                      id={f('start')}
+                      type="date"
+                      value={editStartDate}
+                      onChange={(e) => setEditStartDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label htmlFor={f('end')}>{t.projects.endDate}</label>
+                    <input
+                      id={f('end')}
+                      type="date"
+                      value={editEndDate}
+                      onChange={(e) => setEditEndDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="add-form-actions">
+                    <button type="submit" disabled={pending || !editName.trim()}>
+                      {t.settings.save}
+                    </button>
+                    <button type="button" onClick={() => setEditing(null)}>
+                      {t.common.cancel}
+                    </button>
+                  </div>
+                </form>
               </div>
-            </div>
-          );
-        }
+            );
+          }
 
-        return (
-          <div key={project.id} className="list-item">
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 'var(--space-2)', padding: 'var(--space-3) var(--space-4)' }}>
-              {/* 第一层：名称 + 联系人 + 状态 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                <span className="contact-name" style={{ flex: '1 1 auto', minWidth: 0 }}>
-                  <Link href={`/${orgSlug}/projects/${project.id}`}>{project.name}</Link>
-                </span>
-                {project.contactName ? <span style={{ fontSize: 'var(--text-xs)', color: 'var(--text-secondary)' }}>{project.contactName}</span> : null}
-                <span className={`badge ${project.status === 'active' ? 'badge-success' : project.status === 'completed' ? 'badge-info' : 'badge'}`}>
+          // 预算、起止日期并成一行小字。原来是一串灰胶囊，结束日期常常
+          // 单独掉到第三行，只剩一个「→ 2026-10-31」。
+          const dates =
+            project.startDate || project.endDate
+              ? `${project.startDate ?? ''} – ${project.endDate ?? ''}`.trim()
+              : null;
+
+          return (
+            <div key={project.id} className="list-item record-row">
+              <div className="record-row-head">
+                {/* 名字的链接撑满整张卡（.record-row-link）：原来能点的只有
+                    那一行 19px 高的名字。 */}
+                <Link href={`/${orgSlug}/projects/${project.id}`} className="record-row-link">
+                  {project.name}
+                </Link>
+                <span
+                  className={`badge ${
+                    project.status === 'active'
+                      ? 'badge-success'
+                      : project.status === 'completed'
+                        ? 'badge-info'
+                        : 'badge-voided'
+                  }`}
+                >
                   {statusLabel[project.status] ?? project.status}
                 </span>
               </div>
-              {/* 第二层：项目信息 badge */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap' }}>
-                {project.budgetMinor ? (
-                  <span className="badge badge-info">{t.projects.budget}: {formatMoney(project.budgetMinor, baseCurrency, locale)}</span>
-                ) : null}
-                {project.startDate ? <span className="badge badge-info">{project.startDate}</span> : null}
-                {project.endDate ? <span className="badge badge-info">→ {project.endDate}</span> : null}
-              </div>
-              {/* 第三层：操作按钮组 */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-2)', flexWrap: 'wrap', marginTop: 'var(--space-1)' }}>
+              {/* 客户名常常很长，自成一行；预算与起止日期并在下一行。 */}
+              {project.contactName ? (
+                <p className="record-row-meta">
+                  <span>{project.contactName}</span>
+                </p>
+              ) : null}
+              {project.budgetMinor || dates ? (
+                <p className="record-row-meta">
+                  {project.budgetMinor ? (
+                    <span>
+                      {t.projects.budget} {formatMoney(project.budgetMinor, baseCurrency, locale)}
+                    </span>
+                  ) : null}
+                  {dates ? <span>{dates}</span> : null}
+                </p>
+              ) : null}
+              <div className="doc-actions record-row-actions">
                 {canManage ? (
-                  <button onClick={() => startEdit(project)} className="btn-small">{t.common.edit}</button>
-                ) : null}
-                {/* 展开盈利分析。原来这颗按钮的全部内容就是一个 '+' 或 '−'，
-                    没有 aria-label、没有 aria-expanded——读屏器念出来是
-                    「加号，按钮」，既不知道它是干什么的，也不知道现在是开是关。
-                    符号留着（视觉上够用），语义交给 aria。 */}
-                <button
-                  onClick={() => setExpanded(expanded === project.id ? null : project.id)}
-                  className="btn-small"
-                  aria-expanded={expanded === project.id}
-                  aria-controls={`project-detail-${project.id}`}
-                  aria-label={`${t.projects.profitability}: ${project.name}`}
-                >
-                  <span aria-hidden="true">{expanded === project.id ? '−' : '+'}</span>
-                </button>
-                {(canManage ? (NEXT_STATUS[project.status] ?? []) : []).map((ns) => (
-                  <button
-                    key={ns}
-                    onClick={() => handleStatusChange(project.id, ns)}
-                    disabled={pending}
-                    className="btn-small"
-                  >
-                    {statusLabel[ns] ?? ns}
+                  <button type="button" onClick={() => startEdit(project)} className="btn-small">
+                    {t.common.edit}
                   </button>
-                ))}
+                ) : null}
+                {/* 展开盈利分析。原来这颗按钮上只有一个「+」，看着像「新增」，
+                    宽 33px。现在写明是什么，箭头表示展开 / 收起。 */}
+                {profit ? (
+                  <button
+                    type="button"
+                    onClick={() => setExpanded(isOpen ? null : project.id)}
+                    className="btn-small disclosure-button"
+                    aria-expanded={isOpen}
+                    aria-controls={detailId}
+                  >
+                    {t.projects.profitability}
+                    <CaretDown size={12} weight="bold" aria-hidden="true" />
+                  </button>
+                ) : null}
+                {canManage ? (
+                  <ProjectStatusActions
+                    orgSlug={orgSlug}
+                    projectId={project.id}
+                    projectName={project.name}
+                    status={project.status}
+                    locale={locale}
+                    onChanged={(next) => handleStatusChanged(project.id, next)}
+                  />
+                ) : null}
               </div>
+
+              {isOpen && profit ? (
+                <div id={detailId} className="record-row-extra">
+                  <ProjectProfitability profitability={profit} locale={locale} baseCurrency={baseCurrency} />
+                  {/* 项目描述原来是写死的 style={{ color: '#666' }}：它既不跟主题走，
+                      在暗底（#0b0a09）上又只有 3.1:1，不到 WCAG AA 的 4.5。 */}
+                  {project.description ? <p className="field-hint">{project.description}</p> : null}
+                </div>
+              ) : null}
             </div>
-
-            {expanded === project.id && profit ? (
-              <div id={`project-detail-${project.id}`} style={{ marginTop: 'var(--space-3)' }}>
-                <ProjectProfitability
-                  profitability={profit}
-                  locale={locale}
-                  baseCurrency={baseCurrency}
-                />
-              </div>
-            ) : null}
-
-            {/* 项目描述原来是写死的 style={{ color: '#666' }}：它既不跟主题走，
-                在暗底（#0b0a09）上又只有 3.1:1，不到 WCAG AA 的 4.5。 */}
-            {expanded === project.id && project.description ? (
-              <p className="field-hint">{project.description}</p>
-            ) : null}
-          </div>
-        );
-      })}
+          );
+        })}
+      </div>
     </>
   );
 }

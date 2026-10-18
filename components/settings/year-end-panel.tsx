@@ -98,7 +98,10 @@ export function YearEndPanel({
     try {
       await closeFiscalYear(orgSlug, { periodStart: targetYear.start });
     } catch (err) {
-      setError((err as Error).message);
+      // 'nothing_to_close' 是 server/services/year-end-close.ts 的
+      // YEAR_END_NOTHING_TO_CLOSE（客户端组件不能 import 那个服务端模块）。
+      const message = (err as Error).message;
+      setError(message === 'nothing_to_close' ? t.yearEnd.nothingToClose : message);
     } finally {
       setPending(false);
     }
@@ -146,7 +149,7 @@ export function YearEndPanel({
           </dd>
         </dl>
         <p className="field-hint">
-          <Link href={`/${orgSlug}/settings/general`}>{t.yearEnd.changeFiscalYear}</Link>
+          <Link href={`/${orgSlug}/settings/general#fiscalYearStartMonth`}>{t.yearEnd.changeFiscalYear}</Link>
         </p>
       </section>
 
@@ -169,7 +172,8 @@ export function YearEndPanel({
           {/* 封账建议而不是自动封账：见文件末尾那段注释。 */}
           <p className="field-hint">{t.yearEnd.lockSuggestion}</p>
           <p className="field-hint">
-            <Link href={`/${orgSlug}/settings/general`}>{t.yearEnd.goToLock}</Link>
+            {/* 封账在公司资料页的最底下，直接跳到那一节。 */}
+            <Link href={`/${orgSlug}/settings/general#lock`}>{t.yearEnd.goToLock}</Link>
           </p>
         </section>
       ) : null}
@@ -180,46 +184,48 @@ export function YearEndPanel({
           <p className="field-hint">
             {interpolate(t.yearEnd.previewHint, { date: targetYear.end })}
           </p>
-          <table className="report-table ye-preview">
-            <thead>
-              <tr>
-                <th>{t.reports.account}</th>
-                <th className="numeric">{t.reports.debit}</th>
-                <th className="numeric">{t.reports.credit}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {preview.lines.map((line) => (
-                <tr
-                  key={`${line.accountId}-${line.direction}`}
-                  className={line.accountType === 'equity' ? 'ye-line-retained' : undefined}
-                >
-                  <td>{localizedName({ name_en: line.nameEn, name_zh: line.nameZh }, locale)}</td>
-                  <td className="numeric mono">
-                    {line.direction === 'debit'
-                      ? formatMoney(BigInt(line.amountMinor), baseCurrency, locale)
-                      : ''}
-                  </td>
-                  <td className="numeric mono">
-                    {line.direction === 'credit'
-                      ? formatMoney(BigInt(line.amountMinor), baseCurrency, locale)
-                      : ''}
-                  </td>
+          <div className="table-scroll">
+            <table className="report-table ye-preview">
+              <thead>
+                <tr>
+                  <th>{t.reports.account}</th>
+                  <th className="numeric">{t.reports.debit}</th>
+                  <th className="numeric">{t.reports.credit}</th>
                 </tr>
-              ))}
-            </tbody>
-            <tfoot>
-              <tr>
-                <th>{t.reports.total}</th>
-                <th className="numeric mono">
-                  {formatMoney(sumSide(preview.lines, 'debit'), baseCurrency, locale)}
-                </th>
-                <th className="numeric mono">
-                  {formatMoney(sumSide(preview.lines, 'credit'), baseCurrency, locale)}
-                </th>
-              </tr>
-            </tfoot>
-          </table>
+              </thead>
+              <tbody>
+                {preview.lines.map((line) => (
+                  <tr
+                    key={`${line.accountId}-${line.direction}`}
+                    className={line.accountType === 'equity' ? 'ye-line-retained' : undefined}
+                  >
+                    <td>{localizedName({ name_en: line.nameEn, name_zh: line.nameZh }, locale)}</td>
+                    <td className="numeric mono">
+                      {line.direction === 'debit'
+                        ? formatMoney(BigInt(line.amountMinor), baseCurrency, locale)
+                        : ''}
+                    </td>
+                    <td className="numeric mono">
+                      {line.direction === 'credit'
+                        ? formatMoney(BigInt(line.amountMinor), baseCurrency, locale)
+                        : ''}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+              <tfoot>
+                <tr>
+                  <th>{t.reports.total}</th>
+                  <th className="numeric mono">
+                    {formatMoney(sumSide(preview.lines, 'debit'), baseCurrency, locale)}
+                  </th>
+                  <th className="numeric mono">
+                    {formatMoney(sumSide(preview.lines, 'credit'), baseCurrency, locale)}
+                  </th>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
 
           {!yearEnded ? (
             <p className="ye-blocked">
@@ -260,52 +266,54 @@ export function YearEndPanel({
         {overview.history.length === 0 ? (
           <p className="empty-state">{t.yearEnd.historyEmpty}</p>
         ) : (
-          <table className="report-table">
-            <thead>
-              <tr>
-                <th>{t.yearEnd.period}</th>
-                <th className="numeric">{t.yearEnd.netIncome}</th>
-                <th>{t.yearEnd.closedBy}</th>
-                <th>{t.yearEnd.entry}</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {overview.history.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    {row.periodStart} &ndash; {row.periodEnd}
-                  </td>
-                  <td className="numeric mono">
-                    {formatMoney(BigInt(row.netIncomeMinor), baseCurrency, locale)}
-                  </td>
-                  <td>{row.closedByName ?? '—'}</td>
-                  <td>
-                    {row.transactionId ? (
-                      <Link href={`/${orgSlug}/transactions/${row.transactionId}`}>
-                        {t.yearEnd.viewEntry}
-                      </Link>
-                    ) : (
-                      '—'
-                    )}
-                    {row.transactionVoided ? (
-                      <span className="badge badge-voided">{t.yearEnd.entryVoided}</span>
-                    ) : null}
-                  </td>
-                  <td>
-                    <button
-                      type="button"
-                      className="btn-danger"
-                      disabled={pending}
-                      onClick={() => void runUndo(row)}
-                    >
-                      {t.yearEnd.undoButton}
-                    </button>
-                  </td>
+          <div className="table-scroll">
+            <table className="report-table">
+              <thead>
+                <tr>
+                  <th>{t.yearEnd.period}</th>
+                  <th className="numeric">{t.yearEnd.netIncome}</th>
+                  <th>{t.yearEnd.closedBy}</th>
+                  <th>{t.yearEnd.entry}</th>
+                  <th />
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {overview.history.map((row) => (
+                  <tr key={row.id}>
+                    <td>
+                      {row.periodStart} &ndash; {row.periodEnd}
+                    </td>
+                    <td className="numeric mono">
+                      {formatMoney(BigInt(row.netIncomeMinor), baseCurrency, locale)}
+                    </td>
+                    <td>{row.closedByName ?? '—'}</td>
+                    <td>
+                      {row.transactionId ? (
+                        <Link href={`/${orgSlug}/transactions/${row.transactionId}`}>
+                          {t.yearEnd.viewEntry}
+                        </Link>
+                      ) : (
+                        '—'
+                      )}
+                      {row.transactionVoided ? (
+                        <span className="badge badge-voided">{t.yearEnd.entryVoided}</span>
+                      ) : null}
+                    </td>
+                    <td>
+                      <button
+                        type="button"
+                        className="btn-danger"
+                        disabled={pending}
+                        onClick={() => void runUndo(row)}
+                      >
+                        {t.yearEnd.undoButton}
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
       </section>
     </div>

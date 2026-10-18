@@ -43,6 +43,8 @@ export function DocumentLifecycle({
   voidedLabel,
   notice,
 }: Props) {
+  // 当前这一步之前的都算走过了：打勾、连线染色。作废时整条线不适用，不打勾。
+  const currentIndex = voided ? -1 : steps.findIndex((step) => step.value === current);
   return (
     <div className="doc-lifecycle">
       <p className="doc-lifecycle__caption" id="doc-lifecycle-caption">
@@ -58,13 +60,14 @@ export function DocumentLifecycle({
         aria-labelledby="doc-lifecycle-caption"
         data-voided={voided || undefined}
       >
-        {steps.map((step) => {
+        {steps.map((step, index) => {
           const isCurrent = !voided && step.value === current;
           return (
             <li
               key={step.value}
               className="doc-lifecycle__step"
               aria-current={isCurrent ? 'step' : undefined}
+              data-done={index < currentIndex || undefined}
             >
               {step.label}
             </li>

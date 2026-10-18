@@ -1,4 +1,5 @@
 import { BackLink } from '@/components/ui/back-link';
+import { Plus } from '@/components/ui/icons';
 import { CoAList } from '@/components/settings/coa-list';
 import { getMessages } from '@/lib/i18n';
 import { createAccount, renameAccount, setAccountActive } from '@/server/actions/accounts';
@@ -34,7 +35,16 @@ export default async function AccountsSettingsPage({
   return (
     <>
       <BackLink href={`/${orgSlug}/settings`}>{t.nav.settings}</BackLink>
-      <h1>{t.settings.accounts}</h1>
+      {/* 新增表单在几十个科目的最下面；页头给一个跳过去的入口。 */}
+      <div className="page-header">
+        <h1>{t.settings.accounts}</h1>
+        <div className="page-header-actions">
+          <a href="#add-account" className="add-button">
+            <Plus size={16} weight="bold" aria-hidden="true" />
+            {t.settings.addAccount}
+          </a>
+        </div>
+      </div>
       <CoAList
         orgSlug={orgSlug}
         items={items}

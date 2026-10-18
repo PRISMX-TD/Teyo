@@ -1,9 +1,16 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { CreditNoteForm } from '@/components/credit-notes/credit-note-form';
+import {
+  CreditNoteApplyButton,
+  CreditNoteVoidButton,
+} from '@/components/credit-notes/credit-note-actions';
+import { HeaderIssueButton, HeaderIssueProvider } from '@/components/invoices/header-issue';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
-import { getMessages, interpolate } from '@/lib/i18n';
-import { formatMoney } from '@/lib/format';
+import { trimQuantity } from '@/components/invoices/line-items';
+import { BackLink } from '@/components/ui/back-link';
+import { getMessages } from '@/lib/i18n';
+import { formatMoney, formatQuantity } from '@/lib/format';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
@@ -91,15 +98,35 @@ export default async function CreditNoteDetailPage({
     return t.creditNotes.draftNotice;
   })();
 
+  // 下一步（发出 / 应用）与作废：与列表卡片同一套条件，都要 transaction:create。
+  const hasNextStep = creditNote.status === 'draft' || creditNote.status === 'issued';
+  const mayVoid = mayEdit && creditNote.status !== 'voided';
+
   return (
-    <>
-      <div className="page-header">
-        <h1>{interpolate(t.creditNotes.editTitle, { number: creditNote.cnNumber })}</h1>
-        <div className="page-header-actions">
-          <Link href={`/${orgSlug}/credit-notes`} className="text-button">
-            {t.creditNotes.backToList}
-          </Link>
+    <HeaderIssueProvider>
+      <BackLink href={`/${orgSlug}/credit-notes`}>{t.creditNotes.title}</BackLink>
+      <div className="page-header doc-header">
+        <div>
+          {/* 不叫「编辑…」：除了有权限的草稿，这一页都是只读的。 */}
+          <h1>
+            {t.creditNotes.detailTitle} <span className="doc-no">{creditNote.cnNumber}</span>
+          </h1>
+          <p className="page-subtitle">{creditNote.contactName}</p>
         </div>
+        {mayEdit && hasNextStep ? (
+          <div className="page-header-actions">
+            {/* 草稿的「发出」交给下面的表单先存再发出：直接发出会丢掉没存的改动。 */}
+            {isDraft ? (
+              <HeaderIssueButton label={t.creditNotes.issue} loadingLabel={t.common.loading} />
+            ) : (
+              <CreditNoteApplyButton
+                orgSlug={orgSlug}
+                locale={locale}
+                creditNoteId={creditNote.id}
+              />
+            )}
+          </div>
+        ) : null}
       </div>
 
       <DocumentLifecycle
@@ -138,7 +165,8 @@ export default async function CreditNoteDetailPage({
             notes: creditNote.notes,
             items: creditNote.items.map((item) => ({
               description: item.description,
-              quantity: item.quantity,
+              // numeric(12,4) 原样是 '1.0000'，回填前去掉尾巴的零。
+              quantity: trimQuantity(item.quantity),
               // 单价按**单据自己的币种**的小数位还原，不是本位币的：一张
               // JPY 的单据在马币公司里按两位还原会差两个数量级。
               unitPrice: formatMinorToDecimal(item.unitPriceMinor, exponent),
@@ -147,76 +175,96 @@ export default async function CreditNoteDetailPage({
           }}
         />
       ) : (
-        <article className="record-detail">
-          <dl>
-            <dt>{t.creditNotes.number}</dt>
-            <dd className="mono">{creditNote.cnNumber}</dd>
-            <dt>{t.invoices.customer}</dt>
-            <dd>{creditNote.contactName}</dd>
-            <dt>{t.creditNotes.invoice}</dt>
-            <dd>
-              {creditNote.invoiceId ? (
-                <Link href={`/${orgSlug}/invoices/${creditNote.invoiceId}`}>
-                  {creditNote.invoiceNumber ?? t.common.viewDetails}
-                </Link>
-              ) : (
-                t.creditNotes.standalone
-              )}
-            </dd>
-            <dt>{t.transaction.date}</dt>
-            <dd className="mono">{creditNote.issueDate}</dd>
-            <dt>{t.creditNotes.subtotal}</dt>
-            <dd className="mono amount">
-              {formatMoney(totals.netMinor, creditNote.currency, locale)}
-            </dd>
-            <dt>{t.creditNotes.tax}</dt>
-            <dd className="mono amount">
-              {formatMoney(totals.taxMinor, creditNote.currency, locale)}
-            </dd>
-            <dt>{t.creditNotes.total}</dt>
-            <dd className="mono amount">
-              {formatMoney(totals.totalMinor, creditNote.currency, locale)}
-            </dd>
-            {/* 本位币金额单列一行，币种用 context.baseCurrency：
-                base_amount_minor 装的是本位币，套单据自己的币种去格式化
-                正是列表页修过的那个缺陷。 */}
-            <dt>{t.creditNotes.baseTotal}</dt>
-            <dd className="mono amount">
-              {formatMoney(creditNote.baseAmountMinor, context.baseCurrency, locale)}
-            </dd>
-            <dt>{t.creditNotes.reason}</dt>
-            <dd>{creditNote.reason || '—'}</dd>
-            <dt>{t.invoices.notes}</dt>
-            <dd>{creditNote.notes || '—'}</dd>
-          </dl>
+        <>
+          {/* 短值一张 value-1 卡片（标签在左、值在右），只有合计是大号数字。
+              单号已经在标题里，客户在副标题里，不再各占一行。 */}
+          <article className="record-detail record-detail--inline doc-summary">
+            <dl>
+              <dt>{t.creditNotes.invoice}</dt>
+              <dd>
+                {creditNote.invoiceId ? (
+                  <Link href={`/${orgSlug}/invoices/${creditNote.invoiceId}`}>
+                    {creditNote.invoiceNumber ?? t.common.viewDetails}
+                  </Link>
+                ) : (
+                  t.creditNotes.standalone
+                )}
+              </dd>
+              <dt>{t.transaction.date}</dt>
+              <dd className="mono">{creditNote.issueDate}</dd>
+              <dt>{t.creditNotes.subtotal}</dt>
+              <dd className="mono">{formatMoney(totals.netMinor, creditNote.currency, locale)}</dd>
+              <dt>{t.creditNotes.tax}</dt>
+              <dd className="mono">{formatMoney(totals.taxMinor, creditNote.currency, locale)}</dd>
+              <dt>{t.creditNotes.total}</dt>
+              <dd className="mono amount">
+                {formatMoney(totals.totalMinor, creditNote.currency, locale)}
+              </dd>
+              {/* 本位币金额单列一行，币种用 context.baseCurrency：
+                  base_amount_minor 装的是本位币，套单据自己的币种去格式化
+                  正是列表页修过的那个缺陷。单据本身就是本位币时它与合计
+                  一模一样，不画。 */}
+              {creditNote.currency !== context.baseCurrency ? (
+                <>
+                  <dt>{t.creditNotes.baseTotal}</dt>
+                  <dd className="mono">
+                    {formatMoney(creditNote.baseAmountMinor, context.baseCurrency, locale)}
+                  </dd>
+                </>
+              ) : null}
+            </dl>
+          </article>
+
+          {/* 原因、备注可能是一整段话：留在普通卡片里，手机上标签压在值上面。 */}
+          {creditNote.reason || creditNote.notes ? (
+            <article className="record-detail doc-summary">
+              <dl>
+                <dt>{t.creditNotes.reason}</dt>
+                <dd>{creditNote.reason || '—'}</dd>
+                <dt>{t.invoices.notes}</dt>
+                <dd>{creditNote.notes || '—'}</dd>
+              </dl>
+            </article>
+          ) : null}
 
           <h2>{t.invoices.items}</h2>
-          <table className="report-table">
-            <thead>
-              <tr>
-                <th>{t.invoices.description}</th>
-                <th className="numeric">{t.invoices.quantity}</th>
-                <th className="numeric">{t.invoices.unitPrice}</th>
-                <th className="numeric">{t.invoices.amount}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {creditNote.items.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.description}</td>
-                  <td className="numeric mono">{item.quantity}</td>
-                  <td className="numeric mono">
-                    {formatMoney(item.unitPriceMinor, creditNote.currency, locale)}
-                  </td>
-                  <td className="numeric mono">
-                    {formatMoney(item.amountMinor, creditNote.currency, locale)}
-                  </td>
+          <div className="table-scroll">
+            <table className="report-table doc-items-table">
+              <thead>
+                <tr>
+                  <th>{t.invoices.description}</th>
+                  <th className="numeric">{t.invoices.quantity}</th>
+                  <th className="numeric">{t.invoices.unitPrice}</th>
+                  <th className="numeric">{t.invoices.amount}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
-        </article>
+              </thead>
+              <tbody>
+                {creditNote.items.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.description}</td>
+                    <td className="numeric mono">{formatQuantity(item.quantity)}</td>
+                    <td className="numeric mono">
+                      {formatMoney(item.unitPriceMinor, creditNote.currency, locale)}
+                    </td>
+                    <td className="numeric mono">
+                      {formatMoney(item.amountMinor, creditNote.currency, locale)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
-    </>
+
+      {mayVoid ? (
+        <CreditNoteVoidButton
+          orgSlug={orgSlug}
+          locale={locale}
+          creditNoteId={creditNote.id}
+          cnNumber={creditNote.cnNumber}
+        />
+      ) : null}
+    </HeaderIssueProvider>
   );
 }

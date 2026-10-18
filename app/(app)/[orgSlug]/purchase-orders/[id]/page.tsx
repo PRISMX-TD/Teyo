@@ -1,8 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { PoForm } from '@/components/purchase-orders/po-form';
+import { PoStatusActions } from '@/components/purchase-orders/po-status-actions';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
-import { getMessages, interpolate } from '@/lib/i18n';
+import { BackLink } from '@/components/ui/back-link';
+import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
@@ -15,6 +17,26 @@ import { findActiveBillForPurchaseOrder } from '@/server/repositories/bills';
 import { formatScaledQuantity } from '@/server/repositories/inventory';
 import { listTaxRates } from '@/server/repositories/tax';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
+
+/**
+ * 定标数量还原出来的字符串固定四位小数（6.0000）。只读显示时去掉尾零：
+ * 「6」「2.5」才是人写下的数量。
+ */
+function trimQuantity(value: string): string {
+  return value.includes('.') ? value.replace(/0+$/, '').replace(/\.$/, '') : value;
+}
+
+/** 把「编辑采购订单 {number}」拆开，单号单独包一层，不在连字符处折行。 */
+function titleWithNumber(template: string, number: string) {
+  const [before, after = ''] = template.split('{number}');
+  return (
+    <>
+      {before}
+      <span className="doc-no">{number}</span>
+      {after}
+    </>
+  );
+}
 
 /**
  * 一张采购订单的详情/编辑页。
@@ -82,32 +104,29 @@ export default async function PurchaseOrderDetailPage({
     : !isDraft
       ? t.purchaseOrders.lockedNotice
       : mayEdit
-        ? t.purchaseOrders.draftNotice
+        ? t.purchaseOrders.draftEditableNotice
         : t.common.noEditPermission;
 
   return (
     <>
+      <BackLink href={`/${orgSlug}/purchase-orders`}>{t.purchaseOrders.title}</BackLink>
       <div className="page-header">
-        <h1>{interpolate(t.purchaseOrders.editTitle, { number: po.poNumber })}</h1>
-        <div className="page-header-actions">
-          {activeBill ? (
-            <Link href={`/${orgSlug}/bills/${activeBill.id}`} className="text-button">
-              {interpolate(t.purchaseOrders.billedAs, {
-                number: activeBill.billNumber ?? '—',
-              })}
-            </Link>
-          ) : null}
-          {mayConvert ? (
-            // 跳去一张按这张采购单预填的新账单表单，而不是一键生成：账单的
-            // 到期日、实际金额要照供应商开来的那张填。见 CreateBillInput.purchaseOrderId。
+        {/* 只有能改的草稿才叫「编辑」；发出去之后这一页是查看，不是编辑。 */}
+        <h1>
+          {titleWithNumber(
+            isDraft && mayEdit ? t.purchaseOrders.editTitle : t.purchaseOrders.viewTitle,
+            po.poNumber,
+          )}
+        </h1>
+        {mayConvert ? (
+          <div className="page-header-actions">
+            {/* 跳去一张按这张采购单预填的新账单表单，而不是一键生成：账单的
+                到期日、实际金额要照供应商开来的那张填。见 CreateBillInput.purchaseOrderId。 */}
             <Link href={`/${orgSlug}/bills/new?fromPo=${po.id}`} className="primary-button">
               {t.purchaseOrders.convertToBill}
             </Link>
-          ) : null}
-          <Link href={`/${orgSlug}/purchase-orders`} className="text-button">
-            {t.purchaseOrders.backToList}
-          </Link>
-        </div>
+          </div>
+        ) : null}
       </div>
 
       <DocumentLifecycle
@@ -150,7 +169,7 @@ export default async function PurchaseOrderDetailPage({
             notes: po.notes,
             items: po.items.map((item) => ({
               description: item.description,
-              quantity: formatScaledQuantity(item.quantityScaled),
+              quantity: trimQuantity(formatScaledQuantity(item.quantityScaled)),
               unitPrice: formatMinorToDecimal(item.unitPriceMinor, exponent),
               taxRateId: item.taxRateId ?? '',
             })),
@@ -173,42 +192,73 @@ export default async function PurchaseOrderDetailPage({
             <dd className="mono amount">{formatMoney(documentTotalMinor, po.currency, locale)}</dd>
             {/* base_total_minor 是**本位币**（列名里的 base 就是这个意思，
                 见 server/actions/purchase-orders.ts 的 totalsFor）。用单据
-                自己的币种去格式化它，正是列表页上还留着的那个缺陷。 */}
-            <dt>{t.purchaseOrders.baseTotal}</dt>
-            <dd className="mono amount">
-              {formatMoney(po.baseTotalMinor, context.baseCurrency, locale)}
-            </dd>
+                自己的币种去格式化它，正是列表页上还留着的那个缺陷。
+                本位币单据两行是同一个数，只留合计；外币单据才折算，且用常规字号，
+                合计仍是唯一的大数字。 */}
+            {po.currency !== context.baseCurrency ? (
+              <>
+                <dt>{t.purchaseOrders.baseTotal}</dt>
+                <dd className="mono">{formatMoney(po.baseTotalMinor, context.baseCurrency, locale)}</dd>
+              </>
+            ) : null}
+            {/* 转出来的那张账单。原来是页头动作区里的一个文字链接，和主按钮挤在一行。 */}
+            {activeBill ? (
+              <>
+                <dt>{t.purchaseOrders.linkedBill}</dt>
+                <dd>
+                  <Link href={`/${orgSlug}/bills/${activeBill.id}`} className="mono">
+                    {activeBill.billNumber ?? '—'}
+                  </Link>
+                </dd>
+              </>
+            ) : null}
             <dt>{t.purchaseOrders.notes}</dt>
             <dd>{po.notes || '—'}</dd>
           </dl>
 
           <h2>{t.purchaseOrders.items}</h2>
-          <table className="report-table">
-            <thead>
-              <tr>
-                <th>{t.purchaseOrders.description}</th>
-                <th className="numeric">{t.purchaseOrders.quantity}</th>
-                <th className="numeric">{t.purchaseOrders.unitPrice}</th>
-                <th className="numeric">{t.purchaseOrders.amount}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {po.items.map((item) => (
-                <tr key={item.id}>
-                  <td>{item.description}</td>
-                  <td className="numeric mono">{formatScaledQuantity(item.quantityScaled)}</td>
-                  <td className="numeric mono">
-                    {formatMoney(item.unitPriceMinor, po.currency, locale)}
-                  </td>
-                  <td className="numeric mono">
-                    {formatMoney(item.amountMinor, po.currency, locale)}
-                  </td>
+          {/* po-items-table：手机上每行折成「描述 / 数量 × 单价 … 金额」两行，
+              不再让金额列滑到卡片外面。 */}
+          <div className="table-scroll">
+            <table className="report-table po-items-table">
+              <thead>
+                <tr>
+                  <th>{t.purchaseOrders.description}</th>
+                  <th className="numeric">{t.purchaseOrders.quantity}</th>
+                  <th className="numeric">{t.purchaseOrders.unitPrice}</th>
+                  <th className="numeric">{t.purchaseOrders.amount}</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {po.items.map((item) => (
+                  <tr key={item.id}>
+                    <td>{item.description}</td>
+                    <td className="numeric mono">
+                      {trimQuantity(formatScaledQuantity(item.quantityScaled))}
+                    </td>
+                    <td className="numeric mono">
+                      {formatMoney(item.unitPriceMinor, po.currency, locale)}
+                    </td>
+                    <td className="numeric mono">
+                      {formatMoney(item.amountMinor, po.currency, locale)}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </article>
       )}
+
+      {/* 状态流转与列表上同一组按钮；放在页面最后，像 iOS 详情页底部的操作行。 */}
+      {mayEdit ? (
+        <PoStatusActions
+          orgSlug={orgSlug}
+          locale={locale}
+          po={{ id: po.id, poNumber: po.poNumber, status: po.status }}
+          variant="rows"
+        />
+      ) : null}
     </>
   );
 }

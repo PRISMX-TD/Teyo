@@ -165,7 +165,8 @@ export function PaymentList({
         />
       ) : null}
 
-      <div className="filters">
+      {/* 不在 .filters-disclosure 里（流水页那一套折叠条），自己补上整圆角与下边距。 */}
+      <div className="filters payments-filters">
         <label>
           {i18n.payments.type}
           <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value as typeof typeFilter)}>
@@ -175,8 +176,9 @@ export function PaymentList({
           </select>
         </label>
 
+        {/* 收款的对象是客户、付款的对象是供应商，这一栏两者都列，不能只叫「客户」。 */}
         <label>
-          {i18n.invoices.customer}
+          {i18n.payments.contact}
           <select value={contactFilter} onChange={(e) => setContactFilter(e.target.value)}>
             <option value="all">{i18n.payments.all}</option>
             {contacts.map((c) => (
@@ -186,12 +188,12 @@ export function PaymentList({
         </label>
       </div>
 
-      <table className="transaction-table">
+      <table className="transaction-table doc-table">
         <caption className="visually-hidden">{i18n.payments.title}</caption>
         <thead>
           <tr>
             <th scope="col">{i18n.transaction.date}</th>
-            <th scope="col">{i18n.invoices.customer}</th>
+            <th scope="col">{i18n.payments.contact}</th>
             <th scope="col">{i18n.transaction.kind}</th>
             <th scope="col" className="numeric">{i18n.transaction.amount}</th>
             <th scope="col">{i18n.payments.method}</th>
@@ -207,13 +209,13 @@ export function PaymentList({
           {filtered.map((p) => (
             <tr key={p.id} className={p.voidedAt ? 'row-voided' : undefined}>
               <td>{p.paymentDate}</td>
-              <td>{p.contactName ?? '-'}</td>
+              <td className="doc-title">{p.contactName ?? '-'}</td>
               <td>
                 <span className={p.type === 'received' ? 'badge badge-success' : 'badge badge-danger'}>
                   {p.type === 'received' ? i18n.payments.received : i18n.payments.made}
                 </span>
               </td>
-              <td className="numeric">
+              <td className="numeric doc-amount">
                 {formatMoney(p.amountMinor, p.currency)}
               </td>
               <td>{methodLabels[p.method] ?? p.method}</td>
@@ -223,15 +225,18 @@ export function PaymentList({
                   locale,
                 ) || '-'}
               </td>
-              <td>{p.reference ?? '-'}</td>
-              <td>
+              <td data-label={i18n.payments.reference} className={p.reference ? undefined : 'doc-blank'}>
+                {p.reference ?? '-'}
+              </td>
+              {/* 没作废的每一笔都是「已付款」，手机卡片上不再单占一行重复它（doc-blank）。 */}
+              <td className={p.voidedAt ? 'doc-status' : 'doc-status doc-blank'}>
                 {p.voidedAt ? (
                   <span className="badge badge-voided">{i18n.payments.voided}</span>
                 ) : (
                   <span className="badge badge-success">{i18n.invoices.statusPaid}</span>
                 )}
               </td>
-              <td>
+              <td className="doc-actions-cell">
                 {canWrite && !p.voidedAt ? (
                   <button
                     type="button"

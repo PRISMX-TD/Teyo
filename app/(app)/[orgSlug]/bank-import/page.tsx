@@ -1,3 +1,4 @@
+import { BackLink } from '@/components/ui/back-link';
 import { ImportForm } from '@/components/bank-import/import-form';
 import { ImportedList } from '@/components/bank-import/imported-list';
 import { getMessages } from '@/lib/i18n';
@@ -60,6 +61,11 @@ export default async function BankImportPage({
 
   return (
     <>
+      {/* 手机上这一页是从「更多」推进来的，装成 PWA 后没有浏览器返回键。
+          桌面上侧栏一直在，不需要它（见 tx.css 的 .bank-import-back）。 */}
+      <div className="bank-import-back">
+        <BackLink href={`/${orgSlug}/more`}>{i18n.nav.more}</BackLink>
+      </div>
       <div className="page-header">
         <h1>{i18n.bankImport.title}</h1>
       </div>

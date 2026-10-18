@@ -49,6 +49,9 @@ import { markVoided } from '@/server/repositories/transactions';
  * 实现，页面层不再各自拼字符串。
  */
 
+/** 这个财年没有任何损益发生额、无需结转。界面据此显示本地化文案。 */
+export const YEAR_END_NOTHING_TO_CLOSE = 'nothing_to_close';
+
 export class YearEndCloseError extends Error {
   constructor(message: string) {
     super(message);
@@ -251,10 +254,11 @@ export async function buildClosingPlan(
 
   const netIncomeMinor = -signedTotal;
 
+  // 抛的是一个代码而不是一句英文：年结页把 previewError 原样显示出来，
+  // 中文界面上原来就冒出这一整句英文。页面按 YEAR_END_NOTHING_TO_CLOSE 换成
+  // 对应语言的文案。
   if (lines.length === 0) {
-    throw new YearEndCloseError(
-      'There is no income or expense in this financial year, so there is nothing to close.',
-    );
+    throw new YearEndCloseError(YEAR_END_NOTHING_TO_CLOSE);
   }
 
   // 净利润为零时不出这一行：金额为零的分录行过不了 amount_minor > 0 的

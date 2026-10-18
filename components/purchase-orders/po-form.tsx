@@ -8,7 +8,7 @@ import { createPurchaseOrder, updatePurchaseOrderAction } from '@/server/actions
 import { todayLocalISO } from '@/lib/date';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { RateField } from '@/components/transaction/rate-field';
-import { X } from '@/components/ui/icons';
+import { Plus, X } from '@/components/ui/icons';
 
 type Vendor = {
   id: string;
@@ -256,55 +256,69 @@ export function PoForm({
         {/* 列名。此前每一行只靠 placeholder 说明这一栏是什么——一开始
             打字它就消失，第二行往后用户只能靠列宽去猜哪个是数量哪个是
             单价。表头写一次，所有行共用。aria-hidden：每个输入框自己
-            已经带了 aria-label，读屏器不必再听一遍列名。 */}
-        <div className="invoice-item-head" aria-hidden="true">
+            已经有标签，读屏器不必再听一遍列名。--tax：采购订单每行多一个
+            税率下拉，桌面上多给它一列。 */}
+        <div className="invoice-item-head invoice-item-head--tax" aria-hidden="true">
           <span>{t.purchaseOrders.description}</span>
           <span>{t.purchaseOrders.quantity}</span>
           <span>{t.purchaseOrders.unitPrice}</span>
+          <span>{t.purchaseOrders.tax}</span>
         </div>
 
         {items.map((item, index) => (
-          <div key={index} className="invoice-item-row">
+          <div key={index} className="invoice-item-row invoice-item-row--tax">
             <input
               placeholder={t.purchaseOrders.description} aria-label={t.purchaseOrders.description}
               value={item.description}
               onChange={(e) => updateItem(index, 'description', e.target.value)}
               required
             />
-            <input
-              type="number"
-              min="0.0001"
-              step="0.0001"
-              placeholder={t.purchaseOrders.quantity} aria-label={t.purchaseOrders.quantity}
-              value={item.quantity}
-              onChange={(e) => updateItem(index, 'quantity', e.target.value)}
-            />
-            <input
-              type="number"
-              min="0"
-              step="0.01"
-              placeholder={t.purchaseOrders.unitPrice} aria-label={t.purchaseOrders.unitPrice}
-              value={item.unitPrice}
-              onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
-              required
-            />
+            {/* 数量、单价、税率各包一层 .item-field：桌面上表头说明是哪一列，
+                标签只给读屏器；手机上表头收起，标签露在输入框上方。 */}
+            <label className="item-field">
+              <span className="item-field__label">{t.purchaseOrders.quantity}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0.0001"
+                step="0.0001"
+                placeholder={t.purchaseOrders.quantity}
+                value={item.quantity}
+                onChange={(e) => updateItem(index, 'quantity', e.target.value)}
+              />
+            </label>
+            <label className="item-field">
+              <span className="item-field__label">{t.purchaseOrders.unitPrice}</span>
+              <input
+                type="number"
+                inputMode="decimal"
+                min="0"
+                step="0.01"
+                placeholder={t.purchaseOrders.unitPrice}
+                value={item.unitPrice}
+                onChange={(e) => updateItem(index, 'unitPrice', e.target.value)}
+                required
+              />
+            </label>
             {/* 税率从 tax_rates 表里选，选出来的是一个 uuid。
                 原来这里是写死的 ['0','6','10','12'] 加一句
                 `taxRateId: taxRate > 0 ? undefined : undefined`——两条分支
                 都是 undefined，也就是无论选什么都不传。这个下拉框此前
                 纯属装饰：用户选了 6%，采购单上一个字节都没变。 */}
-            <select
-              value={item.taxRateId}
-              onChange={(e) => updateItem(index, 'taxRateId', e.target.value)}
-              aria-label={`${t.purchaseOrders.tax} ${index + 1}`}
-            >
-              <option value="">{t.purchaseOrders.noTax}</option>
-              {taxRates.map((rate) => (
-                <option key={rate.id} value={rate.id}>
-                  {rate.name} ({bpsToPercent(rate.rateBps)}%)
-                </option>
-              ))}
-            </select>
+            <label className="item-field">
+              <span className="item-field__label">{t.purchaseOrders.tax}</span>
+              <select
+                value={item.taxRateId}
+                onChange={(e) => updateItem(index, 'taxRateId', e.target.value)}
+              >
+                <option value="">{t.purchaseOrders.noTax}</option>
+                {taxRates.map((rate) => (
+                  <option key={rate.id} value={rate.id}>
+                    {rate.name} ({bpsToPercent(rate.rateBps)}%)
+                  </option>
+                ))}
+              </select>
+            </label>
             {items.length > 1 ? (
               <button
                 type="button"
@@ -318,7 +332,8 @@ export function PoForm({
           </div>
         ))}
 
-        <button type="button" onClick={addItem} className="btn-small">
+        <button type="button" onClick={addItem} className="add-button">
+          <Plus size={16} weight="bold" aria-hidden="true" />
           {t.purchaseOrders.addItem}
         </button>
       </fieldset>

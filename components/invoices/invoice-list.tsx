@@ -19,6 +19,8 @@ type Props = {
   canIssue: boolean;
   /** 能否编辑、作废（transaction:edit:any，owner/admin）。 */
   canEdit: boolean;
+  /** 公司时区的今天（YYYY-MM-DD），判逾期用。服务端给，免得水合时两边不一致。 */
+  today: string;
 };
 
 /**
@@ -46,7 +48,15 @@ const STATUS_CLASS: Record<string, string> = {
 /** 还能改、还能作废的状态。voided 与 paid 之外的都算「在途」。 */
 const OPEN_STATUSES = new Set(['draft', 'sent', 'partially_paid', 'overdue']);
 
-export function InvoiceList({ orgSlug, rows, locale, emptyLabel, canIssue, canEdit }: Props) {
+export function InvoiceList({
+  orgSlug,
+  rows,
+  locale,
+  emptyLabel,
+  canIssue,
+  canEdit,
+  today,
+}: Props) {
   const t = getMessages(locale);
   const router = useRouter();
 
@@ -112,7 +122,7 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel, canIssue, canEd
         </p>
       ) : null}
 
-      <table className="transaction-table">
+      <table className="transaction-table doc-table">
         <caption className="visually-hidden">{t.invoices.title}</caption>
         <thead>
           <tr>
@@ -132,27 +142,33 @@ export function InvoiceList({ orgSlug, rows, locale, emptyLabel, canIssue, canEd
             // 「两个类型没有重叠」而报错。放宽成 string 是如实描述运行时。
             const status: string = row.status;
             const isVoided = status === 'voided' || row.voidedAt !== null;
+            // 逾期从不落库：已发送或部分收款、过了到期日的，徽章上就说「逾期」，
+            // 与账单列表、发票详情页同一个口径。开具、编辑仍按原状态判。
+            const shown =
+              !isVoided && (status === 'sent' || status === 'partially_paid') && row.dueDate < today
+                ? 'overdue'
+                : status;
             const busy = pendingId === row.id;
 
             return (
               <tr key={row.id} className={isVoided ? 'row-voided' : undefined}>
-                <td>
+                <td className="doc-number">
                   <Link href={`/${orgSlug}/invoices/${row.id}`}>{row.invoiceNumber}</Link>
                 </td>
-                <td>{row.contactName}</td>
-                <td>{row.issueDate}</td>
-                <td>{row.dueDate}</td>
-                <td>
-                  <span className={STATUS_CLASS[status] ?? 'badge'}>
-                    {statusLabel[status] ?? status}
+                <td className="doc-title">{row.contactName}</td>
+                <td data-label={t.invoices.issueDate}>{row.issueDate}</td>
+                <td data-label={t.invoices.dueDate}>{row.dueDate}</td>
+                <td className="doc-status">
+                  <span className={STATUS_CLASS[shown] ?? 'badge'}>
+                    {statusLabel[shown] ?? shown}
                   </span>
                 </td>
                 {/* money-in 而不是 money-out：发票是**应收**，这笔钱是往
                     公司里进的。account/bill/po 三张表标 money-out 是对的，
                     发票跟着抄过来就错了——旧配色里红绿都很艳，四张表看上去
                     差不多，所以一直没人发现整页发票金额都是红的。 */}
-                <td className="numeric money-in">{formatMoney(row.totalMinor, row.currency)}</td>
-                <td>
+                <td className="numeric money-in doc-amount">{formatMoney(row.totalMinor, row.currency)}</td>
+                <td className="doc-actions-cell">
                   <span className="doc-actions">
                     {/* 开具只在草稿上出现。issueInvoice 对其余状态一律抛错，
                         把按钮画出来再让服务端拒绝，等于请用户去点一个坏按钮。 */}

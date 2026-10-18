@@ -48,8 +48,11 @@ export function SignupForm({
       submitLabel={t.auth.signUp}
       action={action}
       footer={
-        <p>
-          <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
+        <p className="auth-links">
+          <span>
+            {t.auth.haveAccountPrompt}
+            <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
+          </span>
         </p>
       }
     >

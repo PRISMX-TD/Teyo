@@ -100,7 +100,7 @@ export function CreditNoteList({
       </p>
     ) : null}
 
-    <table className="transaction-table">
+    <table className="transaction-table doc-table">
       <caption className="visually-hidden">{i18n.creditNotes.title}</caption>
       <thead>
         <tr>
@@ -121,11 +121,11 @@ export function CreditNoteList({
                 两半，必须同时到位：本仓库出过「列表链过去但路由不存在」的
                 404（见 invoice-list 与 po-list 上的注释），一个通向 404 的
                 链接比没有链接更糟——它承诺了一个不存在的地方。 */}
-            <td>
+            <td className="doc-number">
               <Link href={`/${orgSlug}/credit-notes/${cn.id}`}>{cn.cnNumber}</Link>
             </td>
-            <td>{cn.contactName}</td>
-            <td>
+            <td className="doc-title">{cn.contactName}</td>
+            <td data-label={i18n.creditNotes.invoice}>
               {cn.invoiceId ? (
                 <Link href={`/${orgSlug}/invoices/${cn.invoiceId}`}>
                   {cn.invoiceNumber ?? i18n.common.viewDetails}
@@ -142,15 +142,15 @@ export function CreditNoteList({
               于是一张 1,000 美元、汇率 4.7 的贷项通知单在马币公司的列表上会
               显示成「US$4,700.00」——币种错，而且零小数币种连数字都会差 100 倍。
             */}
-            <td className="numeric">
+            <td className="numeric doc-amount">
               {formatMoney(cn.baseAmountMinor, baseCurrency, locale)}
             </td>
-            <td>
+            <td className="doc-status">
               <span className={STATUS_CLASS[cn.status] ?? 'badge'}>
                 {statusLabel[cn.status] ?? cn.status}
               </span>
             </td>
-            <td>
+            <td className="doc-actions-cell">
               {canWrite && cn.status !== 'voided' ? (
                 <span className="action-group">
                   {cn.status === 'draft' ? (
@@ -184,7 +184,7 @@ export function CreditNoteList({
                       setVoidTarget(cn);
                     }}
                   >
-                    {i18n.transaction.void}
+                    {i18n.invoices.void}
                   </button>
                 </span>
               ) : null}
