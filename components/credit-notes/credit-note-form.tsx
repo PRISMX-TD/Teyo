@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale, Messages } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
@@ -134,18 +134,24 @@ export function CreditNoteForm({
     }
   }
 
+  // 发出成功后的 router.refresh() 要等新页面到了才算完：在那之前页头仍是
+  // 「发出」，再点一下只会换来一句「已发出」的报错。页头按钮的忙碌状态把
+  // 刷新也算上。
+  const [refreshing, startRefresh] = useTransition();
+
   const formRef = useRef<HTMLFormElement>(null);
   // 详情页页头的「发出」：先过一遍与保存按钮相同的浏览器校验，再存、再发出。
   const header = useHeaderIssue(() => {
     const form = formRef.current;
-    if (pending || !form?.reportValidity()) return;
+    if (pending || refreshing || !form?.reportValidity()) return;
     void save(form, true);
   });
 
-  function setBusy(busy: boolean) {
-    setPending(busy);
-    header?.setPending(busy);
-  }
+  const setHeaderPending = header?.setPending;
+  useEffect(() => {
+    setHeaderPending?.(pending || refreshing);
+  }, [setHeaderPending, pending, refreshing]);
+  useEffect(() => () => setHeaderPending?.(false), [setHeaderPending]);
 
   async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -153,7 +159,7 @@ export function CreditNoteForm({
   }
 
   async function save(form: HTMLFormElement, thenIssue: boolean) {
-    setBusy(true);
+    setPending(true);
     setError(null);
     header?.setError(null);
 
@@ -191,7 +197,7 @@ export function CreditNoteForm({
         if (thenIssue) {
           await issueCreditNote(orgSlug, creditNote.id);
           // 留在这一页：发出之后它换成只读视图，页头的下一步变成「应用」。
-          router.refresh();
+          startRefresh(() => router.refresh());
           return;
         }
       } else {
@@ -213,7 +219,7 @@ export function CreditNoteForm({
       if (thenIssue && header) header.setError(message);
       else setError(message);
     } finally {
-      setBusy(false);
+      setPending(false);
     }
   }
 
@@ -400,7 +406,7 @@ export function CreditNoteForm({
       ) : null}
 
       <div className="form-actions">
-        <button type="submit" disabled={pending}>
+        <button type="submit" disabled={pending || refreshing}>
           {pending
             ? t.common.loading
             : isEdit

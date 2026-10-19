@@ -1,6 +1,6 @@
 'use client';
 
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
@@ -125,17 +125,23 @@ export function InvoiceForm({
     setItems((prev) => (prev.length > 1 ? prev.filter((_, i) => i !== index) : prev));
   }
 
+  // 开具成功后的 router.refresh() 要等新页面到了才算完：在那之前页头仍是
+  // 「开具」，再点一下会把刚开出的发票重存一遍（updateInvoice 接受已过账的
+  // 发票，会重新过账）然后才报「已开具」。页头按钮的忙碌状态把刷新也算上。
+  const [refreshing, startRefresh] = useTransition();
+
   const formRef = useRef<HTMLFormElement>(null);
   // 详情页页头的「开具」：先过一遍与保存按钮相同的浏览器校验，再存、再开具。
   const header = useHeaderIssue(() => {
-    if (pending || !formRef.current?.reportValidity()) return;
+    if (pending || refreshing || !formRef.current?.reportValidity()) return;
     void save(true);
   });
 
-  function setBusy(busy: boolean) {
-    setPending(busy);
-    header?.setPending(busy);
-  }
+  const setHeaderPending = header?.setPending;
+  useEffect(() => {
+    setHeaderPending?.(pending || refreshing);
+  }, [setHeaderPending, pending, refreshing]);
+  useEffect(() => () => setHeaderPending?.(false), [setHeaderPending]);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -143,7 +149,7 @@ export function InvoiceForm({
   }
 
   async function save(thenIssue: boolean) {
-    setBusy(true);
+    setPending(true);
     setError(null);
     header?.setError(null);
 
@@ -169,7 +175,7 @@ export function InvoiceForm({
         if (thenIssue) {
           await issueInvoice(orgSlug, invoice.id);
           // 留在这一页：开具之后，记录收款的入口就在这页的页头上。
-          router.refresh();
+          startRefresh(() => router.refresh());
           return;
         }
       } else {
@@ -186,7 +192,7 @@ export function InvoiceForm({
       if (thenIssue && header) header.setError(message);
       else setError(message);
     } finally {
-      setBusy(false);
+      setPending(false);
     }
   }
 
@@ -404,7 +410,7 @@ export function InvoiceForm({
 
         {readOnly ? null : (
           <div className="form-actions">
-            <button type="submit" disabled={pending}>
+            <button type="submit" disabled={pending || refreshing}>
               {pending ? t.common.loading : isEdit ? t.invoices.saveChanges : t.invoices.save}
             </button>
           </div>

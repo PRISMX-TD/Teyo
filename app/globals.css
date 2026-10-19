@@ -3700,7 +3700,18 @@ button.payment-quick-pick-more:hover:not(:disabled) { color: var(--accent); back
     box-shadow: var(--shadow-raised);
   }
   .reconcile-actions > .reconcile-submit { flex: 1 1 auto; }
-
+}
+/* 打字时标签栏收起（见「打字时收起底部标签栏」），这一条就不必再让出 80px：
+   不然它悬在半空，下面露出一条正在滚过的表格行，键盘弹起后本来就不高的
+   视口又被白占掉一截。选择器与收起标签栏那条一致。 */
+@media screen and (max-width: 767px) and (pointer: coarse) {
+  .app-shell:has(:is(
+    input:not([type]), input[type='text'], input[type='search'], input[type='email'],
+    input[type='tel'], input[type='url'], input[type='password'], input[type='number'],
+    textarea, [contenteditable='true']
+  ):focus) .reconcile-actions { bottom: calc(var(--space-3) + env(safe-area-inset-bottom)); }
+}
+@media screen and (max-width: 767px) {
   /* 钉住的第一列（总账的日期、对账的勾选框 + 日期）占走了宽度，说明那一列
      只剩几十像素，一条备注折成六行。表格本来就横向滑动，给它一个下限。 */
   .table-scroll > table.gl-table > tbody > tr > td:nth-child(2),
