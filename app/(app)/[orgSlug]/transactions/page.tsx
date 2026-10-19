@@ -2,7 +2,7 @@ import { TransactionFilters } from '@/components/transactions/transaction-filter
 import { TransactionTable } from '@/components/transactions/transaction-table';
 import Link from 'next/link';
 import { getMessages, interpolate } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
 import { listCategories } from '@/server/repositories/categories';
@@ -28,7 +28,7 @@ export default async function TransactionsListPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

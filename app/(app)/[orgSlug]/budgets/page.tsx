@@ -1,6 +1,6 @@
 import { BudgetView } from '@/components/budgets/budget-view';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
+import { requirePermission, todayInOrg, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getBudgetVsActual } from '@/server/repositories/budgets';
@@ -12,7 +12,7 @@ export default async function BudgetsPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'account:manage');
+  const context = await requirePagePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

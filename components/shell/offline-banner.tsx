@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import {
@@ -11,6 +11,19 @@ import {
   retryFailedTransaction,
   type QueuedTransaction,
 } from '@/lib/offline-queue';
+
+/** 队列在 banner 之外被改动（录入表单离线存了一笔）时广播的事件名。 */
+const QUEUE_CHANGED_EVENT = 'teyo:offline-queue-changed';
+
+/**
+ * 通知 banner 重新读一次队列。banner 挂在 root layout 上、客户端导航不会
+ * 重新挂载它——不广播的话，离线时录下的那一笔要等到网络恢复才出现在
+ * 「N 笔待同步」里，用户看到的是一个对不上的数。
+ */
+export function notifyOfflineQueueChanged() {
+  if (typeof window === 'undefined') return;
+  window.dispatchEvent(new Event(QUEUE_CHANGED_EVENT));
+}
 
 /**
  * 离线状态与待同步队列的提示条。挂在 root layout 上，所以每个页面都有它。
@@ -30,10 +43,20 @@ export function OfflineBanner({ locale, signedIn }: { locale: Locale; signedIn: 
   // 用户需要看到他当初录的是哪一笔（金额、日期、备注）才谈得上补录，
   // 一个「N 条失败」的数字等于让他凭记忆重来。
   const [failed, setFailed] = useState<QueuedTransaction[]>([]);
+  // 正在处理（重试/丢弃）的那一条，防连点：丢弃是唯一会真删数据的操作。
+  const [busyUuid, setBusyUuid] = useState<string | null>(null);
+  // 当前这次挂载的补发函数。「重试」要立即补发一次，而不是把记录放回队列后
+  // 干等下一个 online 事件——root layout 不会因导航重挂，在线时那个事件
+  // 可能整个会话都不会来。
+  const flushRef = useRef<(() => Promise<void>) | null>(null);
 
   const refresh = useCallback(async () => {
-    setPendingCount((await listQueuedTransactions()).length);
-    setFailed(await listFailedTransactions());
+    try {
+      setPendingCount((await listQueuedTransactions()).length);
+      setFailed(await listFailedTransactions());
+    } catch {
+      // IndexedDB 不可用（隐私窗口）时没有队列可言，banner 保持不显示。
+    }
   }, []);
 
   useEffect(() => {
@@ -69,6 +92,9 @@ export function OfflineBanner({ locale, signedIn }: { locale: Locale; signedIn: 
         // IndexedDB 里，从那里读才是唯一的真相。计数器与实际记录会因为
         // 用户的重试/丢弃而对不上，而对不上的那一方一定是计数器。
         await refresh();
+      } catch {
+        // IndexedDB 不可用或动态 import 失败（离线时 chunk 没缓存）：下次
+        // online 事件再试，这里不能变成一个未处理的 rejection。
       } finally {
         flushing = false;
       }
@@ -77,6 +103,12 @@ export function OfflineBanner({ locale, signedIn }: { locale: Locale; signedIn: 
     function handleOffline() {
       setOffline(true);
     }
+
+    function handleQueueChanged() {
+      void refresh();
+    }
+
+    flushRef.current = handleOnline;
 
     setOffline(!navigator.onLine);
     void refresh();
@@ -89,20 +121,36 @@ export function OfflineBanner({ locale, signedIn }: { locale: Locale; signedIn: 
 
     window.addEventListener('online', handleOnline);
     window.addEventListener('offline', handleOffline);
+    window.addEventListener(QUEUE_CHANGED_EVENT, handleQueueChanged);
     return () => {
+      flushRef.current = null;
       window.removeEventListener('online', handleOnline);
       window.removeEventListener('offline', handleOffline);
+      window.removeEventListener(QUEUE_CHANGED_EVENT, handleQueueChanged);
     };
   }, [signedIn, refresh]);
 
   async function onRetry(clientUuid: string) {
-    await retryFailedTransaction(clientUuid);
-    await refresh();
+    if (busyUuid) return;
+    setBusyUuid(clientUuid);
+    try {
+      await retryFailedTransaction(clientUuid);
+      await refresh();
+      if (navigator.onLine) await flushRef.current?.();
+    } finally {
+      setBusyUuid(null);
+    }
   }
 
   async function onDiscard(clientUuid: string) {
-    await discardFailedTransaction(clientUuid);
-    await refresh();
+    if (busyUuid) return;
+    setBusyUuid(clientUuid);
+    try {
+      await discardFailedTransaction(clientUuid);
+      await refresh();
+    } finally {
+      setBusyUuid(null);
+    }
   }
 
   if (!offline && pendingCount === 0 && failed.length === 0) return null;
@@ -143,6 +191,7 @@ export function OfflineBanner({ locale, signedIn }: { locale: Locale; signedIn: 
                   <button
                     type="button"
                     className="text-button"
+                    disabled={busyUuid !== null}
                     onClick={() => void onRetry(item.clientUuid)}
                   >
                     {t.common.retry}
@@ -150,6 +199,7 @@ export function OfflineBanner({ locale, signedIn }: { locale: Locale; signedIn: 
                   <button
                     type="button"
                     className="text-button"
+                    disabled={busyUuid !== null}
                     onClick={() => void onDiscard(item.clientUuid)}
                   >
                     {t.common.discard}

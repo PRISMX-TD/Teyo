@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useRefreshAfter } from '@/components/ui/use-refresh-after';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -58,7 +58,8 @@ export function InvoiceList({
   today,
 }: Props) {
   const t = getMessages(locale);
-  const router = useRouter();
+  // 刷新完成前按钮保持禁用，见 use-refresh-after.ts。
+  const { refresh, isRefreshing } = useRefreshAfter();
 
   // 正在处理的那一行。用 id 而不是布尔：只该禁用被点的那一行的按钮，
   // 把整张表锁住会让用户以为页面挂了。
@@ -87,7 +88,7 @@ export function InvoiceList({
       await issueInvoice(orgSlug, id);
       // 服务端 revalidatePath 之后还要 refresh：那个调用刷的是服务端缓存，
       // 当前这个已经渲染好的客户端组件不会自己重新取数。
-      router.refresh();
+      refresh(id);
     } catch (e) {
       // 原来这一类 catch 在别处写的是 `catch { /* ignore */ }`——过账失败
       // （期间封账、科目没配、权限不足）会表现为「点了没反应」。必须说出来。
@@ -105,7 +106,7 @@ export function InvoiceList({
     try {
       await voidInvoice(orgSlug, target.id, reason);
       setVoidTarget(null);
-      router.refresh();
+      refresh(target.id);
     } catch (e) {
       // 错误留在对话框里，对话框不关：关掉的话用户刚打的理由就没了。
       setVoidError((e as Error).message);
@@ -148,7 +149,7 @@ export function InvoiceList({
               !isVoided && (status === 'sent' || status === 'partially_paid') && row.dueDate < today
                 ? 'overdue'
                 : status;
-            const busy = pendingId === row.id;
+            const busy = pendingId === row.id || isRefreshing(row.id);
 
             return (
               <tr key={row.id} className={isVoided ? 'row-voided' : undefined}>

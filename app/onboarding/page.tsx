@@ -30,7 +30,15 @@ export default async function OnboardingPage({
     redirect(`/${existingOrgs[0].slug}`);
   }
 
-  const locale = (await getUserLocale(userId)) as 'en' | 'zh';
+  // 没有公司不等于该去建公司：可能有一封邀请在等他（链接弄丢了，或者登录
+  // 绕过了邀请页），也可能他唯一的公司把他暂停了。两种都要说清楚。
+  // 语言与这两条查询互不依赖，一起发。
+  const [localeRaw, invitations, suspended] = await Promise.all([
+    getUserLocale(userId),
+    listMyPendingInvitations(),
+    listMySuspendedCompanies(),
+  ]);
+  const locale = localeRaw as 'en' | 'zh';
   const t = getMessages(locale);
   const roleLabels: Record<string, string> = {
     owner: t.members.roleOwner,
@@ -41,12 +49,6 @@ export default async function OnboardingPage({
   const nameRejected = query.error === 'name';
   const joinFailed = query.error === 'join';
   const noAccess = query.notice === 'no_access';
-  // 没有公司不等于该去建公司：可能有一封邀请在等他（链接弄丢了，或者登录
-  // 绕过了邀请页），也可能他唯一的公司把他暂停了。两种都要说清楚。
-  const [invitations, suspended] = await Promise.all([
-    listMyPendingInvitations(),
-    listMySuspendedCompanies(),
-  ]);
 
   return (
     <main className="onboarding-page">

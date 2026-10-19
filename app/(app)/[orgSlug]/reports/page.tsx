@@ -1,6 +1,6 @@
 import { ReportsView } from '@/components/reports/reports-view';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
+import { todayInOrg, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getFiscalYearStartMonth, getUserLocale } from '@/server/repositories/organizations';
 import { fiscalYearFor } from '@/server/services/year-end-close';
@@ -20,7 +20,7 @@ export default async function ReportsPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
@@ -43,19 +43,21 @@ export default async function ReportsPage({
       const fiscalYear = fiscalYearFor(today, startMonth);
       const yearStart = fiscalYear.start;
 
-      const [trial, pl, ar, ap, contactList, unclosedEarnings] = await Promise.all([
+      // 现金流量表不依赖其他结果，与这一批一起发；只有资产负债表要等
+      // unclosedEarnings。
+      const [trial, pl, ar, ap, contactList, unclosedEarnings, cf] = await Promise.all([
         getTrialBalance(tx, context.organizationId, today),
         getProfitLoss(tx, context.organizationId, yearStart, today),
         getArAging(tx, context.organizationId, today),
         getApAging(tx, context.organizationId, today),
         listContacts(tx, context.organizationId),
         getUnclosedEarnings(tx, context.organizationId, today),
+        getCashFlow(tx, context.organizationId, yearStart, today),
       ]);
       // 「本年利润」那一行用全部未结转损益，而不是 pl.netIncome：上一财年
       // 还没做年结时，去年的利润既不在留存收益里、也不在本财年损益里，
       // 资产负债表会恰好少一整年利润。见 getUnclosedEarnings。
       const bs = await getBalanceSheet(tx, context.organizationId, today, unclosedEarnings);
-      const cf = await getCashFlow(tx, context.organizationId, yearStart, today);
       return {
         trialBalance: trial,
         profitLoss: pl,

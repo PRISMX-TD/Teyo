@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
+import { todayInOrg, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listBills } from '@/server/repositories/bills';
@@ -16,7 +16,7 @@ export default async function BillsListPage({
   const { orgSlug } = await params;
   // ?saved=1 是账单表单存完之后带过来的回执。理由见 invoices/page.tsx 同一处。
   const { saved } = await searchParams;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

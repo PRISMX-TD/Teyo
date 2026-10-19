@@ -6,6 +6,7 @@ import type { Locale, Messages } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { createPayment } from '@/server/actions/payments';
 import { todayLocalISO } from '@/lib/date';
+import { useLocalToday } from '@/components/ui/use-local-today';
 import { formatMoney } from '@/lib/format';
 import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
 import { RateField } from '@/components/transactions/rate-field';
@@ -158,7 +159,8 @@ export function PaymentForm({
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
-  const today = todayLocalISO();
+  // 默认日期等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  const today = useLocalToday();
 
   const quickPicks = useMemo(
     () => quickPicksOf(outstandingInvoices, outstandingBills),
@@ -183,7 +185,8 @@ export function PaymentForm({
 
   const [paymentType, setPaymentType] = useState<'received' | 'made'>(initial.type);
   const [contactId, setContactId] = useState(initial.contactId);
-  const [date, setDate] = useState(today);
+  const [dateInput, setDate] = useState<string | null>(null);
+  const date = dateInput ?? today;
   const [amount, setAmount] = useState('');
   const [currency, setCurrency] = useState(initial.currency);
   const [method, setMethod] = useState<PaymentMethod>('bank_transfer');
@@ -502,7 +505,9 @@ export function PaymentForm({
           <ul>
             {visiblePicks.map((doc) => {
               const picked = isPicked(draft, doc);
-              const overdue = doc.dueDate < today;
+              // 逾期标记不等水合：服务端首屏就要画出来。只有到期日恰好落在
+              // 服务器与设备日期不同的那一天才可能不一致，代价远小于首屏闪一下。
+              const overdue = doc.dueDate < (today || todayLocalISO());
               return (
                 <li key={doc.id}>
                   <button

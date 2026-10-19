@@ -58,18 +58,25 @@ export function BudgetView({
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // 连着点两次「应用」（或保存后的刷新与「应用」交错）时，先发的请求可能
+  // 后回来，把旧期间的预算连同旧的 loaded 一起写回——之后的保存就落到了
+  // 用户没在看的那个月。只认最后一次请求的结果。
+  const latestFetch = useRef(0);
+
   const fetchData = useCallback(
     async (y: number, m: number) => {
+      const seq = ++latestFetch.current;
       setLoading(true);
       setError(null);
       try {
         const data = await loadData(y, m);
+        if (seq !== latestFetch.current) return;
         setRows(data);
         setLoaded({ year: y, month: m });
       } catch {
-        setError(t.errors.unexpected);
+        if (seq === latestFetch.current) setError(t.errors.unexpected);
       } finally {
-        setLoading(false);
+        if (seq === latestFetch.current) setLoading(false);
       }
     },
     [loadData, t],

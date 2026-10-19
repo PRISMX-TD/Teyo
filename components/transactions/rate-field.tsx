@@ -52,6 +52,14 @@ export function RateField({
     initialRate !== undefined && initialRate !== '' && !!currency && !!occurredOn,
   );
   const initialPair = useRef({ currency, occurredOn });
+  // 每次发起查询 +1。查询结果回来时序号对不上（期间又换了币种/日期），或者
+  // 用户已经改成手动输入，就丢掉这次结果——否则慢的那个请求后到，会把旧币种
+  // 的汇率填进新币种的框里，或者覆盖用户正在打的手工汇率。
+  const requestSeq = useRef(0);
+  function switchToManual() {
+    requestSeq.current += 1;
+    setSource('manual');
+  }
 
   // 币种或日期一变就重新拉汇率。这个 effect 只在 currency/occurredOn/orgSlug
   // 变化时触发，所以每次触发都意味着：无论之前是自动填入还是用户手动改过，
@@ -74,10 +82,19 @@ export function RateField({
 
     setSource('auto');
     setRate('');
+    const seq = ++requestSeq.current;
 
     startTransition(async () => {
-      const result = await lookupRate(orgSlug, currency, occurredOn);
-      if (result.rate) {
+      let result: Awaited<ReturnType<typeof lookupRate>>;
+      try {
+        result = await lookupRate(orgSlug, currency, occurredOn);
+      } catch {
+        // 查不到（离线、服务端出错）就当没有汇率，让用户手填；不能让异常
+        // 从 transition 里抛到 error boundary，把整张表单换成错误页。
+        result = { rate: null, source: 'unavailable' };
+      }
+      if (seq !== requestSeq.current) return;
+      if (result?.rate) {
         setRate(trimRate(result.rate));
         setSource('auto');
       } else {
@@ -135,7 +152,7 @@ export function RateField({
           <output id="exchangeRate" className="rate-field__value">
             {rate || '…'}
           </output>
-          <button type="button" className="btn-small" onClick={() => setSource('manual')}>
+          <button type="button" className="btn-small" onClick={switchToManual}>
             {t.transaction.useOtherRate}
           </button>
         </div>
@@ -148,7 +165,7 @@ export function RateField({
           required
           onChange={(event) => {
             setRate(event.target.value);
-            setSource('manual');
+            switchToManual();
           }}
         />
       )}

@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -13,7 +13,7 @@ export default async function CreditNotesListPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

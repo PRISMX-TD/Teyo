@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useRefreshAfter } from '@/components/ui/use-refresh-after';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { applyCreditNote, voidCreditNote } from '@/server/actions/credit-notes';
@@ -24,7 +24,7 @@ export function CreditNoteApplyButton({
   creditNoteId: string;
 }) {
   const t = getMessages(locale);
-  const router = useRouter();
+  const { refresh, refreshing } = useRefreshAfter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -33,7 +33,7 @@ export function CreditNoteApplyButton({
     setError(null);
     try {
       await applyCreditNote(orgSlug, creditNoteId);
-      router.refresh();
+      refresh();
     } catch (e) {
       // 这张单在别处刚被作废之类，服务端会拒绝：必须说出来，不能「点了没反应」。
       setError((e as Error).message);
@@ -44,8 +44,8 @@ export function CreditNoteApplyButton({
 
   return (
     <>
-      <button type="button" className="primary-button" disabled={pending} onClick={handleApply}>
-        {pending ? t.common.loading : t.creditNotes.apply}
+      <button type="button" className="primary-button" disabled={pending || refreshing} onClick={handleApply}>
+        {pending || refreshing ? t.common.loading : t.creditNotes.apply}
       </button>
       {error ? (
         <p role="alert" className="form-error">
@@ -69,7 +69,7 @@ export function CreditNoteVoidButton({
   cnNumber: string;
 }) {
   const t = getMessages(locale);
-  const router = useRouter();
+  const { refresh, refreshing } = useRefreshAfter();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -80,7 +80,7 @@ export function CreditNoteVoidButton({
     try {
       await voidCreditNote(orgSlug, creditNoteId, reason);
       setOpen(false);
-      router.refresh();
+      refresh();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -93,7 +93,7 @@ export function CreditNoteVoidButton({
       <button
         type="button"
         className="row-button is-destructive"
-        disabled={pending}
+        disabled={pending || refreshing}
         onClick={() => {
           setError(null);
           setOpen(true);

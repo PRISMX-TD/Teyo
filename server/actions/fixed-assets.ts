@@ -2,6 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { isoDate } from '@/lib/schemas';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
@@ -526,6 +527,9 @@ export async function postDepreciationAction(
   period: string,
 ): Promise<{ transactionId: string }> {
   const context = await requirePermission(orgSlug, 'account:manage');
+  // 与处置、撤销处置同一道：两个参数都来自网络，非 uuid / 非日期的串原来
+  // 一路交给 Postgres，用户读到的是 22P02 或 date/time 的裸报错。
+  z.object({ assetId: z.string().uuid(), period: isoDate }).parse({ assetId, period });
 
   const result = await withTransaction(context.userId, async (tx) => {
     const pending = await loadDepreciationPosting(tx, context.organizationId, assetId, period);

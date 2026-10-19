@@ -32,6 +32,34 @@ function requireName(name: string | undefined): string {
   return trimmed;
 }
 
+/**
+ * 各栏位的长度上限。contacts 的这几列都是不限长的 text，表单上也没有
+ * maxLength——直接调 Action 就能塞进一份几 MB 的「备注」，之后每一张发票、
+ * 每一个下拉框都要把它整段读出来。上限按「印在单据上还像话」来定。
+ */
+const CONTACT_FIELD_LIMITS = {
+  name: 200,
+  email: 254,
+  phone: 60,
+  address: 500,
+  taxId: 60,
+  paymentTerms: 200,
+  notes: 2000,
+} as const;
+
+function assertFieldLengths(input: Partial<Record<keyof typeof CONTACT_FIELD_LIMITS, unknown>>): void {
+  for (const [field, max] of Object.entries(CONTACT_FIELD_LIMITS)) {
+    const value = input[field as keyof typeof CONTACT_FIELD_LIMITS];
+    if (value === undefined || value === null) continue;
+    if (typeof value !== 'string') {
+      throw new AuthError('forbidden', `The contact ${field} must be text.`);
+    }
+    if (value.trim().length > max) {
+      throw new AuthError('forbidden', `Keep the contact ${field} to ${max} characters or fewer.`);
+    }
+  }
+}
+
 function requireType(type: string): 'customer' | 'vendor' | 'both' {
   if (!CONTACT_TYPES.has(type)) {
     throw new AuthError('forbidden', `Unknown contact type: ${type}`);
@@ -55,6 +83,7 @@ export async function createContact(
   const context = await requirePermission(orgSlug, 'account:manage');
   const type = requireType(input.type);
   const name = requireName(input.name);
+  assertFieldLengths(input);
   const result = await withTransaction(context.userId, async (tx) => {
     const { id } = await insertContact(tx, {
       organizationId: context.organizationId,
@@ -99,6 +128,7 @@ export async function updateContactAction(
   }>,
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'account:manage');
+  assertFieldLengths(input);
   const fields = {
     ...input,
     ...(input.name !== undefined ? { name: requireName(input.name) } : {}),

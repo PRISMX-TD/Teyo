@@ -24,10 +24,14 @@ export default async function InvitePage({
   // 否则新用户会被一路带到 /onboarding 去建公司。
   if (!userId) redirect(`/login?next=${encodeURIComponent(invitePath)}`);
 
-  const locale = (await getUserLocale(userId)) as 'en' | 'zh';
+  // 语言与邀请预览互不依赖，一起查。
+  const [localeRaw, preview] = await Promise.all([
+    getUserLocale(userId),
+    getInvitationPreview(token),
+  ]);
+  const locale = localeRaw as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const preview = await getInvitationPreview(token);
   const org = preview.organizationName;
   // 角色要按界面语言显示：原来直接插入 'bookkeeper' 这样的库内值，中文页面上也是英文。
   const roleLabels: Record<string, string> = {

@@ -688,11 +688,14 @@ export async function getCustomerStatement(
           / nullif(p.amount_minor, 0)::numeric
         ))::bigint as base_amount
       from payments p
-      left join (
-        select payment_id, sum(amount_minor) as applied_minor
-        from payment_items
-        group by payment_id
-      ) ap on ap.payment_id = p.id
+      -- lateral：只聚合这一张收款单自己的明细。原来的写法是对整张
+      -- payment_items（所有公司）先 group by 再连接，Postgres 不会把连接条件
+      -- 下推进带聚合的子查询，每打开一张对账单都要扫全表。
+      left join lateral (
+        select sum(pi2.amount_minor) as applied_minor
+        from payment_items pi2
+        where pi2.payment_id = p.id
+      ) ap on true
       where p.organization_id = ${organizationId}
         and p.contact_id = ${contactId}
         and p.type = 'received'
@@ -803,11 +806,14 @@ export async function getVendorStatement(
           / nullif(p.amount_minor, 0)::numeric
         ))::bigint as base_amount
       from payments p
-      left join (
-        select payment_id, sum(amount_minor) as applied_minor
-        from payment_items
-        group by payment_id
-      ) ap on ap.payment_id = p.id
+      -- lateral：只聚合这一张收款单自己的明细。原来的写法是对整张
+      -- payment_items（所有公司）先 group by 再连接，Postgres 不会把连接条件
+      -- 下推进带聚合的子查询，每打开一张对账单都要扫全表。
+      left join lateral (
+        select sum(pi2.amount_minor) as applied_minor
+        from payment_items pi2
+        where pi2.payment_id = p.id
+      ) ap on true
       where p.organization_id = ${organizationId}
         and p.contact_id = ${contactId}
         and p.type = 'made'

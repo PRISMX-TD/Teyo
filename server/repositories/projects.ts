@@ -1,5 +1,6 @@
 import type { Tx } from '@/server/db/transaction';
 import { toIsoDate } from '@/lib/format';
+import { isUuid } from '@/lib/uuid';
 
 export type ProjectRow = {
   id: string;
@@ -35,6 +36,8 @@ export async function getProject(
   organizationId: string,
   id: string,
 ): Promise<ProjectRow | null> {
+  // 不是 uuid 的串直接当作找不到，不交给 Postgres 去抛 22P02。
+  if (!isUuid(id)) return null;
   const rows = await tx`
     select p.id, p.organization_id, p.name, p.description, p.contact_id,
            p.status, p.budget_minor, p.start_date, p.end_date,

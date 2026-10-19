@@ -75,42 +75,36 @@ export async function findRate(
 
   // rate_date <= onDate 是硬性要求：拿晚于交易日的汇率折算，
   // 等于用后来的市场价改写已入账的历史金额。
-  const direct = await tx`
-    select rate
+  //
+  // 正反两个方向一次查、统一按 rate_date 取最新的一条。原来先查正方向、
+  // 查到任何一条就返回，于是窗口里一条 6 天前的正方向汇率会压过当天的
+  // 反方向汇率（只存了 MYR->SGD 时，SGD->MYR 取倒数）。同一天两边都有时
+  // 才优先正方向——它不经过取倒数的舍入。
+  // 反方向 rate <= 0 的行无法取倒数，直接不参与。
+  const rows = await tx`
+    select rate, (base_currency = ${base}) as is_direct
     from exchange_rates
-    where base_currency = ${base}
-      and quote_currency = ${quote}
+    where (
+        (base_currency = ${base} and quote_currency = ${quote})
+        or (base_currency = ${quote} and quote_currency = ${base} and rate > 0)
+      )
       and rate_date <= ${onDate}::date
       and rate_date >= ${onDate}::date - make_interval(days => ${LOOKBACK_DAYS})
-    order by rate_date desc
+    order by rate_date desc, (base_currency = ${base}) desc
     limit 1
   `;
 
-  const directRow = direct.at(0);
-  if (directRow) {
-    return { scaledRate: decimalStringToScaled(String(directRow.rate)), source: 'auto' };
+  const row = rows.at(0);
+  if (!row) return null;
+
+  const stored = decimalStringToScaled(String(row.rate));
+  if (row.is_direct) {
+    return { scaledRate: stored, source: 'auto' };
   }
-
-  // 反方向取倒数：只存了 MYR->SGD 时，SGD->MYR 也应可用。
-  const inverse = await tx`
-    select rate
-    from exchange_rates
-    where base_currency = ${quote}
-      and quote_currency = ${base}
-      and rate_date <= ${onDate}::date
-      and rate_date >= ${onDate}::date - make_interval(days => ${LOOKBACK_DAYS})
-    order by rate_date desc
-    limit 1
-  `;
-
-  const inverseRow = inverse.at(0);
-  if (inverseRow) {
-    const stored = decimalStringToScaled(String(inverseRow.rate));
-    if (stored > 0n) {
-      // RATE_SCALE^2 / stored，四舍五入到最后一位。
-      const numerator = RATE_SCALE * RATE_SCALE;
-      return { scaledRate: (numerator * 2n + stored) / (stored * 2n), source: 'auto' };
-    }
+  if (stored > 0n) {
+    // 反方向取倒数：RATE_SCALE^2 / stored，四舍五入到最后一位。
+    const numerator = RATE_SCALE * RATE_SCALE;
+    return { scaledRate: (numerator * 2n + stored) / (stored * 2n), source: 'auto' };
   }
 
   return null;

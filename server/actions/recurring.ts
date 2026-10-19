@@ -1,7 +1,13 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { parseOrThrow, recurringEditSchema } from '@/lib/schemas';
+import { z } from 'zod';
+import {
+  isoDate,
+  parseOrThrow,
+  recurringEditSchema,
+  recurringFrequencySchema,
+} from '@/lib/schemas';
 import { AuthError, requirePermission, todayInOrg, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { currencyExponent, MoneyError, parseDecimalToMinor } from '@/server/domain/money';
@@ -41,6 +47,27 @@ function assertValidInterval(interval: number): void {
 }
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * createRecurring 里那几个原样进库的字段。
+ *
+ * editRecurring 早就有 recurringEditSchema，新建这一头却一个都不验：kind、
+ * frequency 是数据库枚举，传错了用户读到的是一句 invalid input value for
+ * enum；起止日期是 '2026-02-30' 也照收，要到 Postgres 才被拒；结束日早于
+ * 开始日的规则存得进去，却一期都生成不出来，而界面上它看起来一切正常。
+ */
+const createRecurringSchema = z
+  .object({
+    kind: z.enum(['income', 'expense', 'transfer', 'journal']),
+    description: z.string().trim().max(500).optional(),
+    frequency: recurringFrequencySchema,
+    startDate: isoDate,
+    endDate: isoDate.optional(),
+  })
+  .refine((value) => value.endDate === undefined || value.endDate >= value.startDate, {
+    message: 'The end date must be on or after the start date.',
+    path: ['endDate'],
+  });
 
 /**
  * 规则上的科目与分类必须属于本公司，借贷两边不能是同一个科目。
@@ -115,6 +142,18 @@ export async function createRecurring(
   // 入口」，与这里守的「这个表单」不是同一件事。
   const amount = normaliseRecurringAmount(input.amount, input.currency);
   assertValidInterval(input.interval);
+  parseOrThrow(
+    createRecurringSchema,
+    {
+      kind: input.kind,
+      description: input.description,
+      frequency: input.frequency,
+      startDate: input.startDate,
+      // 空串就是没填结束日，与下面写库时的 `|| null` 同义。
+      endDate: input.endDate || undefined,
+    },
+    (m) => new LedgerError(m),
+  );
 
   const result = await withTransaction(context.userId, async (tx) => {
     await assertRuleReferences(tx, context.organizationId, {
@@ -245,6 +284,17 @@ export async function editRecurring(
       // 只在 null/'' 两种下才退回 kind——两处对「没填」的理解必须一样。
       description: parsed.description === undefined ? undefined : parsed.description || null,
     });
+
+    // 新建、启停都留了审计，唯独编辑没有——而编辑恰恰是能改金额、科目与
+    // 频率的那一个，日后「这条房租怎么从 1200 变成 12000」只能从这里查。
+    await recordAudit(tx, {
+      organizationId: context.organizationId,
+      actorUserId: context.userId,
+      action: 'recurring.updated',
+      entityType: 'recurring_transaction',
+      entityId: id,
+      after: parsed,
+    });
   });
 
   revalidatePath(`/${orgSlug}/settings/recurring`);
@@ -257,8 +307,13 @@ export async function toggleRecurring(
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'transaction:edit:any');
 
+  // 与 editRecurring 同一道：不是 uuid 的 id 交给 Postgres 是 22P02。
+  if (!UUID_PATTERN.test(id)) {
+    throw new LedgerError('That recurring entry was not found in this company.');
+  }
+
   await withTransaction(context.userId, async (tx) => {
-    await setRecurringActive(tx, context.organizationId, id, active);
+    await setRecurringActive(tx, context.organizationId, id, active === true);
 
     await recordAudit(tx, {
       organizationId: context.organizationId,

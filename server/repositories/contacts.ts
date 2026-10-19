@@ -1,4 +1,5 @@
 import type { Tx } from '@/server/db/transaction';
+import { isUuid } from '@/lib/uuid';
 
 export type ContactRow = {
   id: string;
@@ -23,6 +24,8 @@ export async function listContacts(tx: Tx, organizationId: string): Promise<Cont
 }
 
 export async function getContact(tx: Tx, organizationId: string, id: string): Promise<ContactRow | null> {
+  // 不是 uuid 的串直接当作找不到，不交给 Postgres 去抛 22P02。
+  if (!isUuid(id)) return null;
   const rows = await tx`
     select id, organization_id, type, name, email, phone, address, tax_id, payment_terms, notes, is_active
     from contacts where id = ${id} and organization_id = ${organizationId}

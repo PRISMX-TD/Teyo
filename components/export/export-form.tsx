@@ -4,7 +4,7 @@ import { useState } from 'react';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { exportReport } from '@/server/actions/export';
-import { todayLocalISO } from '@/lib/date';
+import { useLocalToday } from '@/components/ui/use-local-today';
 
 type Props = { orgSlug: string; locale: Locale };
 
@@ -12,6 +12,14 @@ export function ExportForm({ orgSlug, locale }: Props) {
   const t = getMessages(locale);
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
+
+  // onSubmit 而不是 <form action>：action 跑完后 React 会把字段重置回默认值，
+  // 「超过行数上限，请缩短期间」的同时用户选的期间也被清掉了。
+  function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+    void handleSubmit(new FormData(event.currentTarget));
+  }
 
   async function handleSubmit(formData: FormData) {
     setPending(true);
@@ -44,11 +52,13 @@ export function ExportForm({ orgSlug, locale }: Props) {
     }
   }
 
-  const today = todayLocalISO();
-  const monthStart = `${today.slice(0, 7)}-01`;
+  // 默认区间等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  // 非受控的 defaultValue 在用户没动过时会跟着新值走。
+  const today = useLocalToday();
+  const monthStart = today ? `${today.slice(0, 7)}-01` : '';
 
   return (
-    <form action={handleSubmit} className="export-form">
+    <form onSubmit={onSubmit} className="export-form">
       <fieldset>
         <legend>{t.exportPage.kindLegend}</legend>
         {/* 名称和说明包成一列：label 是 flex，裸文字和说明原来是并排的两栏，

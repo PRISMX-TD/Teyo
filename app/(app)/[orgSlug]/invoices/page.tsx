@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
+import { todayInOrg, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -19,7 +19,7 @@ export default async function InvoicesListPage({
   // 表单存完就 router.push 走了，在它上面渲染一句「已保存」用户根本来不及看见。
   // 这与登录页 ?checkEmail=1 是同一套做法。
   const { saved } = await searchParams;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

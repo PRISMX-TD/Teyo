@@ -36,6 +36,24 @@ export function MembersPanel({ members, invitations, currentUserId, locale, acti
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
   /**
+   * 正在处理的那一行（成员 membershipId 或邀请 id）。暂停/转让/撤销原来没有
+   * 任何在途状态：连点两下，第二次请求拿着还没刷新的旧状态再发一遍——撤销
+   * 第二次报「找不到」，转让所有权则是在确认框之后又跑一遍。
+   */
+  const [busyId, setBusyId] = useState<string | null>(null);
+
+  async function runRowAction(id: string, action: () => Promise<MemberActionResult<unknown>>) {
+    if (busyId) return;
+    setBusyId(id);
+    setError(null);
+    try {
+      const result = await action();
+      if (!result.ok) setError(result.error);
+    } finally {
+      setBusyId(null);
+    }
+  }
+  /**
    * 刚生成的那条邀请链接。
    *
    * 这一段存在的理由：inviteMember 返回 { token }，而这个组件原来把返回值
@@ -155,24 +173,27 @@ export function MembersPanel({ members, invitations, currentUserId, locale, acti
                   <span className="field-hint" id={`role-hint-${m.membershipId}`}>
                     {roleHints[picked[m.membershipId] ?? m.role] ?? ''}
                   </span>
-                  <button onClick={async () => {
-                    setError(null);
-                    const result = await actions.setStatus(
-                      m.membershipId,
-                      m.status === 'active' ? 'suspended' : 'active',
-                    );
-                    if (!result.ok) setError(result.error);
-                  }}>
+                  <button
+                    type="button"
+                    disabled={busyId !== null}
+                    onClick={() =>
+                      runRowAction(m.membershipId, () =>
+                        actions.setStatus(m.membershipId, m.status === 'active' ? 'suspended' : 'active'),
+                      )
+                    }
+                  >
                     {m.status === 'active' ? t.members.suspend : t.members.reactivate}
                   </button>
 
                   {isOwner && m.status === 'active' ? (
-                    <button onClick={async () => {
-                      if (!confirm(t.members.transferConfirm)) return;
-                      setError(null);
-                      const result = await actions.transfer(m.membershipId);
-                      if (!result.ok) setError(result.error);
-                    }}>
+                    <button
+                      type="button"
+                      disabled={busyId !== null}
+                      onClick={() => {
+                        if (!confirm(t.members.transferConfirm)) return;
+                        void runRowAction(m.membershipId, () => actions.transfer(m.membershipId));
+                      }}
+                    >
                       {t.members.transferOwnership}
                     </button>
                   ) : null}
@@ -293,11 +314,11 @@ export function MembersPanel({ members, invitations, currentUserId, locale, acti
                     每行标一次，两份列表读起来才是同一套词汇。 */}
                 <span className={statusClasses.invited}>{t.members.statusInvited}</span>
                 {canManage && (isOwner || inv.role !== 'admin') ? (
-                  <button onClick={async () => {
-                    setError(null);
-                    const result = await actions.revoke(inv.id);
-                    if (!result.ok) setError(result.error);
-                  }}>
+                  <button
+                    type="button"
+                    disabled={busyId !== null}
+                    onClick={() => runRowAction(inv.id, () => actions.revoke(inv.id))}
+                  >
                     {t.members.revoke}
                   </button>
                 ) : null}

@@ -492,6 +492,45 @@ describe('getGeneralLedger - bounded reads', () => {
     expect(full.closingBalance).toBe(trueClosingBalance);
   });
 
+  it('carries the running balance across pages (offset > 0)', async () => {
+    // 钉住：递进余额原来在 JS 里从 openingBalance 起步、只累加本页的行，
+    // 于是第二页第一行的余额漏掉了第一页所有发生额。现在它来自 limit/offset
+    // 之前算好的窗口累计，必须与不分页时同一行的余额逐分相等。
+    const glAssetId = await createScratchAccount('gl-page-asset', 'asset');
+    const glCounterId = await createScratchAccount('gl-page-counter', 'expense');
+
+    // 期初一笔（在区间之前），区间内四笔。
+    await insertBalancedTransaction({
+      occurredOn: '2031-02-01',
+      amountMinor: 500n,
+      debitAccountId: glAssetId,
+      creditAccountId: glCounterId,
+    });
+    const amounts = [1000n, 2000n, 3000n, 4000n];
+    for (let i = 0; i < amounts.length; i++) {
+      await insertBalancedTransaction({
+        occurredOn: `2031-03-0${i + 1}`,
+        amountMinor: amounts[i],
+        debitAccountId: glAssetId,
+        creditAccountId: glCounterId,
+      });
+    }
+
+    const [full, page2] = await withTransaction(userId, async (tx) => [
+      await getGeneralLedger(tx, orgId, glAssetId, '2031-03-01', '2031-03-31'),
+      await getGeneralLedger(tx, orgId, glAssetId, '2031-03-01', '2031-03-31', {
+        limit: 2,
+        offset: 2,
+      }),
+    ]);
+
+    expect(full.openingBalance).toBe(500n);
+    expect(full.lines.map((l) => l.balanceMinor)).toEqual([1500n, 3500n, 6500n, 10500n]);
+    // 旧实现这里会是 [3500n, 7500n]（500 + 3000、再 + 4000）。
+    expect(page2.lines.map((l) => l.balanceMinor)).toEqual([6500n, 10500n]);
+    expect(page2.closingBalance).toBe(10500n);
+  });
+
   it('rejects a limit above the page maximum', async () => {
     await expect(
       withTransaction(userId, (tx) =>

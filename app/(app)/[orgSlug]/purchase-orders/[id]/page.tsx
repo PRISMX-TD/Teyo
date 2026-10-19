@@ -1,12 +1,13 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
 import { PoForm } from '@/components/purchase-orders/po-form';
 import { PoStatusActions } from '@/components/purchase-orders/po-status-actions';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { currencyExponent, formatMinorToDecimal, sumMinor } from '@/server/domain/money';
@@ -56,7 +57,9 @@ export default async function PurchaseOrderDetailPage({
   params: Promise<{ orgSlug: string; id: string }>;
 }) {
   const { orgSlug, id } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  // 不是 uuid 的 id 进 SQL 是类型错误、整页 500；与「查不到」一样给 404。
+  if (!isUuid(id)) notFound();
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 

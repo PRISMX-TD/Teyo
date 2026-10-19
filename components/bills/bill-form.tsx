@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { createBill, updateBill } from '@/server/actions/bills';
-import { addMonthsLocalISO, todayLocalISO } from '@/lib/date';
+import { addMonthsLocalISO } from '@/lib/date';
+import { localDateFromISO, useLocalToday } from '@/components/ui/use-local-today';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import type { BillDetail } from '@/server/repositories/bills';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
@@ -113,8 +114,12 @@ export function BillForm({
   const [contactId, setContactId] = useState(
     bill?.contactId ?? source?.contactId ?? contacts[0]?.id ?? '',
   );
-  const [issueDate, setIssueDate] = useState(bill?.issueDate ?? todayLocalISO());
-  const [dueDate, setDueDate] = useState(bill?.dueDate ?? addMonthsLocalISO(1));
+  // 默认日期等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  const today = useLocalToday();
+  const [issueDateInput, setIssueDate] = useState<string | null>(bill?.issueDate ?? null);
+  const [dueDateInput, setDueDate] = useState<string | null>(bill?.dueDate ?? null);
+  const issueDate = issueDateInput ?? today;
+  const dueDate = dueDateInput ?? (today ? addMonthsLocalISO(1, localDateFromISO(today)) : '');
   const [currency, setCurrency] = useState(bill?.currency ?? source?.currency ?? baseCurrency);
   const [notes, setNotes] = useState(bill?.notes ?? '');
   const [items, setItems] = useState<LineItem[]>(

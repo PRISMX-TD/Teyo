@@ -1,6 +1,6 @@
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getYearEndOverview } from '@/server/actions/year-end';
 import {
@@ -10,7 +10,7 @@ import {
 import { YearEndPanel } from '@/components/settings/year-end-panel';
 
 /**
- * 年结页。owner only——requirePermission('period:lock') 与 0024 迁移里
+ * 年结页。owner only——requirePagePermission('period:lock') 与 0024 迁移里
  * fiscal_year_closings 的 insert/delete 策略对齐（那两条策略只认 owner）。
  * 权限选它而不是新增一个 Action 的理由见 server/actions/year-end.ts 顶部。
  *
@@ -24,7 +24,7 @@ export default async function YearEndPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'period:lock');
+  const context = await requirePagePermission(orgSlug, 'period:lock');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

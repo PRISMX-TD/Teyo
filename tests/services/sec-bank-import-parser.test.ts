@@ -44,6 +44,9 @@ describe('parseStatementAmountToMinor', () => {
     expect(parseStatementAmountToMinor('RM -1,200.50', 2)).toBe(-120050n);
     expect(parseStatementAmountToMinor('RM123.45 DR', 2)).toBe(-12345n);
     expect(parseStatementAmountToMinor('RM123.45 CR', 2)).toBe(12345n);
+    // 标记紧贴数字（没有空格）时没有单词边界，上一版把 DR 当装饰剥掉，读成正数。
+    expect(parseStatementAmountToMinor('1,234.56DR', 2)).toBe(-123456n);
+    expect(parseStatementAmountToMinor('1,234.56CR', 2)).toBe(123456n);
   });
 
   it('decides between a decimal comma and a thousands comma without guessing', () => {
@@ -192,6 +195,21 @@ describe('parseCsvBuffer - amounts', () => {
     );
     expect(rows[0].date).toBe('2026-04-03');
     expect(rows[0].amountMinor).toBe(-120000n);
+  });
+
+  it('does not mistake a "Debit Amount" column for the single amount column', () => {
+    // /amount/ 原来会先命中「Debit Amount」：每笔支出读成进账，贷方整列被丢掉。
+    const rows = parseCsvBuffer(
+      buf(
+        [
+          'Date,Description,Debit Amount,Credit Amount,Balance',
+          '2026-04-03,Rent,1200.00,,800.00',
+          '2026-04-04,Sales,,500.00,1300.00',
+        ].join('\n'),
+      ),
+      myr,
+    );
+    expect(rows.map((r) => r.amountMinor)).toEqual([-120000n, 50000n]);
   });
 
   it('refuses a file with no amount column at all', () => {

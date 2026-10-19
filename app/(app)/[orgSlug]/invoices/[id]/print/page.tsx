@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { BackLink } from '@/components/ui/back-link';
 import { notFound } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
 import { PrintButton } from '@/components/invoices/print-button';
 import { InvoiceDocument } from '@/components/invoices/invoice-document';
 import { getMessages, type Locale } from '@/lib/i18n';
 import { INVOICE_LOCALES, INVOICE_LOCALE_NAMES, isInvoiceLocale } from '@/lib/invoice-options';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getInvoicePdfData } from '@/server/repositories/invoice-pdf';
@@ -44,8 +45,10 @@ export default async function InvoicePrintPage({
   searchParams: Promise<Record<string, string | string[] | undefined>>;
 }) {
   const { orgSlug, id } = await params;
+  // 不是 uuid 的 id 进 SQL 是类型错误、整页 500；与「查不到」一样给 404。
+  if (!isUuid(id)) notFound();
   const raw = await searchParams;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as Locale;
   const t = getMessages(locale);
 
@@ -57,8 +60,12 @@ export default async function InvoicePrintPage({
   // 两者都只该得到 404。
   if (!data) notFound();
 
-  const logoUrl = await getLogoSignedUrl(data.organization.logoPath);
-  const paymentImageUrls = (await getPaymentImageUrls(data.organization.paymentImagePaths))
+  // 两组签名 URL 各是一次对象存储往返，互不依赖，一起发。
+  const [logoUrl, paymentImages] = await Promise.all([
+    getLogoSignedUrl(data.organization.logoPath),
+    getPaymentImageUrls(data.organization.paymentImagePaths),
+  ]);
+  const paymentImageUrls = paymentImages
     .map((image) => image.url)
     .filter((url): url is string => url !== null);
 

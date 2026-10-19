@@ -496,22 +496,47 @@ export async function getCashFlow(
   // 一整年的折旧，那一截会原样掉进下面的 unclassified 残差行，变成一个
   // 谁也解释不了的数字。其余被读的 code（应收、应付、存货、税、股本…）
   // 年结分录根本不碰，这一句对它们是恒等的。 ---
-  async function netFlow(code: string): Promise<bigint> {
-    const r = await tx`
-      select
-        coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
-                          else -l.base_amount_minor end), 0) as net
-      from journal_lines l
-      join transactions t on t.id = l.transaction_id
-      join accounts a on a.id = l.account_id
-      where l.organization_id = ${organizationId}
-        and a.code = ${code}
-        and t.voided_at is null
-        and t.kind <> 'closing'
-        and t.occurred_on >= ${from}::date
-        and t.occurred_on <= ${to}::date
-    `;
-    return BigInt(r[0].net as string);
+  //
+  // 下面要读的十几个 code 一次查完、按 code 分组，而不是每个 code 各跑一遍
+  // 同样的 journal_lines × transactions 连接（原来是 14 次串行往返）。
+  // 口径与原来逐个查询完全相同；没有分录的 code 取 0。 ---
+  const FLOW_CODES = [
+    'depreciation',
+    'amortization',
+    'accounts-receivable',
+    'accounts-payable',
+    'inventory',
+    'deferred-revenue',
+    'prepaid-expenses',
+    'tax-payable',
+    'tax-receivable',
+    'customer-deposits',
+    'supplier-deposits',
+    'capital',
+    'loans',
+    'owners-draw',
+  ] as const;
+  const flowRows = await tx`
+    select
+      a.code,
+      coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                        else -l.base_amount_minor end), 0) as net
+    from journal_lines l
+    join transactions t on t.id = l.transaction_id
+    join accounts a on a.id = l.account_id
+    where l.organization_id = ${organizationId}
+      and a.code = any(${[...FLOW_CODES]}::text[])
+      and t.voided_at is null
+      and t.kind <> 'closing'
+      and t.occurred_on >= ${from}::date
+      and t.occurred_on <= ${to}::date
+    group by a.code
+  `;
+  const flowByCode = new Map<string, bigint>(
+    flowRows.map((r) => [r.code as string, BigInt(r.net as string)]),
+  );
+  function netFlow(code: (typeof FLOW_CODES)[number]): bigint {
+    return flowByCode.get(code) ?? 0n;
   }
 
   // --- 辅助：资金账户（is_money_account = true）截至某日的余额之和。
@@ -523,31 +548,27 @@ export async function getCashFlow(
   // 资产负债表包含全部未作废分录。真要有一笔年结分录碰了资金账户（今天
   // buildClosingPlan 只碰损益科目与留存收益，所以不会），把它藏起来只会让
   // 两张报表对同一个银行账户给出两个余额。 ---
-  async function moneyBalanceAsOf(asOf: string, inclusive: boolean): Promise<bigint> {
-    const r = inclusive
-      ? await tx`
-          select coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
-                                   else -l.base_amount_minor end), 0) as net
-          from journal_lines l
-          join transactions t on t.id = l.transaction_id
-          join accounts a on a.id = l.account_id
-          where l.organization_id = ${organizationId}
-            and a.is_money_account
-            and t.voided_at is null
-            and t.occurred_on <= ${asOf}::date
-        `
-      : await tx`
-          select coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
-                                   else -l.base_amount_minor end), 0) as net
-          from journal_lines l
-          join transactions t on t.id = l.transaction_id
-          join accounts a on a.id = l.account_id
-          where l.organization_id = ${organizationId}
-            and a.is_money_account
-            and t.voided_at is null
-            and t.occurred_on < ${asOf}::date
-        `;
-    return BigInt(r[0].net as string);
+  //
+  // 期初（严格小于 from）与期末（小于等于 to）在同一次扫描里用 filter 分别
+  // 聚合，省掉一次对资金科目全部历史分录的重复扫描。 ---
+  async function moneyBalances(): Promise<{ opening: bigint; closing: bigint }> {
+    const [r] = await tx`
+      select
+        coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                          else -l.base_amount_minor end)
+                   filter (where t.occurred_on < ${from}::date), 0) as opening,
+        coalesce(sum(case when l.direction = 'debit' then l.base_amount_minor
+                          else -l.base_amount_minor end)
+                   filter (where t.occurred_on <= ${to}::date), 0) as closing
+      from journal_lines l
+      join transactions t on t.id = l.transaction_id
+      join accounts a on a.id = l.account_id
+      where l.organization_id = ${organizationId}
+        and a.is_money_account
+        and t.voided_at is null
+        and t.occurred_on <= greatest(${from}::date, ${to}::date)
+    `;
+    return { opening: BigInt(r.opening as string), closing: BigInt(r.closing as string) };
   }
 
   // --- 辅助：按 cash_flow_category 聚合的期间发生额，逐科目返回。 ---
@@ -584,22 +605,22 @@ export async function getCashFlow(
   const netIncome = pl.netIncome;
 
   // 加回非现金费用
-  const depreciation = await netFlow('depreciation');
-  const amortization = await netFlow('amortization');
+  const depreciation = netFlow('depreciation');
+  const amortization = netFlow('amortization');
 
   // 营运资金变动
   // AR 增加 = 现金减少（借贷记在资产端，ar 的 net = debit-credit，资产增加意味着 net>0，所以 cash 影响是 -netFlow）
-  const arChange = -(await netFlow('accounts-receivable'));
+  const arChange = -netFlow('accounts-receivable');
   // AP 是贷方余额科目：netFlow 是"借方减贷方"，AP 增加时 netFlow 为负，
   // 而 AP 增加（欠着还没付）对现金的影响是正——取反。
-  const apChange = -(await netFlow('accounts-payable'));
+  const apChange = -netFlow('accounts-payable');
   // Inventory 增加 = 现金减少（借买存货）
-  const invChange = -(await netFlow('inventory'));
+  const invChange = -netFlow('inventory');
 
   // 递延收入同为贷方余额科目，符号规则与 AP 相同，取反。
-  const deferredRevChange = -(await netFlow('deferred-revenue'));
+  const deferredRevChange = -netFlow('deferred-revenue');
   // 预付费用变动
-  const prepaidChange = -(await netFlow('prepaid-expenses'));
+  const prepaidChange = -netFlow('prepaid-expenses');
 
   // 税款两侧。种子科目里 tax-payable 与（0021 补的）tax-receivable 都打了
   // cashFlowCategory = 'operating' 的标签，但**没有任何查询项读它们**：
@@ -613,15 +634,15 @@ export async function getCashFlow(
   //   现金留在手上，取反后为正；
   // - tax-receivable 是资产（进项税，可以抵扣/退回的），与 AR 同侧：
   //   多付出去的钱还没收回来，取反后为负。
-  const taxPayableChange = -(await netFlow('tax-payable'));
-  const taxReceivableChange = -(await netFlow('tax-receivable'));
+  const taxPayableChange = -netFlow('tax-payable');
+  const taxReceivableChange = -netFlow('tax-receivable');
 
   // 预收/预付账款（server/services/prepayment.ts 过账用）与上面的税科目是
   // 同一种情况：种子里打了 'operating' 标签，却没有任何一项读它们，收到的
   // 订金、付出去的订金整笔落进 unclassified 残差行。符号规则同样按科目类型：
   // customer-deposits 是负债（与 AP 同侧），supplier-deposits 是资产（与 AR 同侧）。
-  const customerDepositsChange = -(await netFlow('customer-deposits'));
-  const supplierDepositsChange = -(await netFlow('supplier-deposits'));
+  const customerDepositsChange = -netFlow('customer-deposits');
+  const supplierDepositsChange = -netFlow('supplier-deposits');
 
   const operatingTotal = netIncome
     + depreciation
@@ -667,11 +688,11 @@ export async function getCashFlow(
   // --- 融资活动：保留三行显式构造，因为符号规则彼此不同，逐条明写比
   // 按分类聚合更不容易出错。 ---
   // capital/loans 都是贷方余额科目，同 AP：netFlow 借正贷负，取反。
-  const capital = -(await netFlow('capital'));
-  const loans = -(await netFlow('loans'));
+  const capital = -netFlow('capital');
+  const loans = -netFlow('loans');
   // owners-draw 是借方余额科目（所有者提取）：netFlow 增加时为正，
   // 而提取会减少现金，取反——与之前一致，未改动。
-  const ownersDraw = -(await netFlow('owners-draw'));
+  const ownersDraw = -netFlow('owners-draw');
 
   const financingTotal = capital + loans + ownersDraw;
 
@@ -687,8 +708,7 @@ export async function getCashFlow(
   // 期初现金：严格小于 from，与期间流量（>= from）互补，避免边界当天
   // 被两边重复计入。期末现金：小于等于 to，与期间流量（<= to）对齐。
   // 按 is_money_account 聚合，不再按 'cash'/'bank' 字面量编码。
-  const openingCash = await moneyBalanceAsOf(from, false);
-  const closingCash = await moneyBalanceAsOf(to, true);
+  const { opening: openingCash, closing: closingCash } = await moneyBalances();
 
   // 三段分类没能解释的现金变动——见函数顶部注释。按定义补足残差，
   // 使 openingCash + netChange === closingCash 恒成立，不平永远不会
@@ -795,6 +815,13 @@ export async function getGeneralLedger(
   }
 
   // 期间分录
+  //
+  // running_net 是「从期间第一行到本行（含）」的借减贷累计，用窗口函数在
+  // limit/offset **之前**算好。原来的递进余额在 JS 里从 openingBalance 起步、
+  // 只累加本页的行——offset > 0 时第二页的每一行余额都漏掉了前面所有页的
+  // 发生额。窗口的排序与结果排序逐字相同，并带上 l.id 作最后的决胜键：
+  // 同一笔交易在同一科目上有两行（一借一贷）时，没有它的话两行的先后在
+  // 分页之间不确定，同一行可能在两页都出现、或者两页都不出现。
   const lineRows = await tx`
     select
       t.occurred_on,
@@ -802,7 +829,11 @@ export async function getGeneralLedger(
       t.kind,
       t.voided_at,
       l.direction,
-      l.base_amount_minor
+      l.base_amount_minor,
+      sum(case when l.direction = 'debit' then l.base_amount_minor
+               else -l.base_amount_minor end)
+        over (order by t.occurred_on, t.created_at, t.id, l.id
+              rows between unbounded preceding and current row) as running_net
     from journal_lines l
     join transactions t on t.id = l.transaction_id
     where l.account_id = ${accountId}
@@ -810,7 +841,7 @@ export async function getGeneralLedger(
       and t.voided_at is null
       and t.occurred_on >= ${from}::date
       and t.occurred_on <= ${to}::date
-    order by t.occurred_on, t.created_at, t.id
+    order by t.occurred_on, t.created_at, t.id, l.id
     limit ${limit}
     offset ${offset}
   `;
@@ -839,7 +870,7 @@ export async function getGeneralLedger(
   const closingBalance = openingBalance + periodNet;
 
   const lines: LedgerLine[] = [];
-  let runningBalance = openingBalance;
+  const debitNormal = acctType === 'asset' || acctType === 'expense';
 
   for (const r of lineRows) {
     const isDebit = r.direction === 'debit';
@@ -847,11 +878,9 @@ export async function getGeneralLedger(
     const debitMinor = isDebit ? amt : 0n;
     const creditMinor = isDebit ? 0n : amt;
 
-    if (acctType === 'asset' || acctType === 'expense') {
-      runningBalance = runningBalance + debitMinor - creditMinor;
-    } else {
-      runningBalance = runningBalance + creditMinor - debitMinor;
-    }
+    // 期初 + 期间内截至本行的累计（不受分页影响），按科目正常余额方向取号。
+    const runningNet = BigInt(r.running_net as string);
+    const runningBalance = openingBalance + (debitNormal ? runningNet : -runningNet);
 
     lines.push({
       // postgres.js 把 date 列解析成 Date 对象而不是字符串——旧代码在这个分支

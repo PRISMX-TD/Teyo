@@ -19,8 +19,11 @@ const PUBLIC_PATHS = [
 export async function middleware(request: NextRequest) {
   const { pathname } = request.nextUrl;
 
+  // 按整段匹配，不按字符串前缀：公司 slug 由公司名生成，「Login Trading」
+  // 就是 /login-trading，裸 startsWith 会把整家公司当成公开页、跳过会话刷新。
   const isPublic =
-    PUBLIC_PATHS.some((p) => pathname.startsWith(p)) || pathname.startsWith('/invite/');
+    PUBLIC_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`)) ||
+    pathname.startsWith('/invite/');
   // 登录/注册页虽然公开，但要知道「是不是已经登录了」：已登录的人该直接去 next。
   // 之前它们和其余公开页一起在这里提前返回，下面那条已登录跳转分支永远走不到。
   const isAuthEntry = pathname === '/login' || pathname === '/signup';
@@ -80,7 +83,16 @@ export const config = {
   //
   // api 也必须排除：路由处理器自带鉴权（cron 用 CRON_SECRET 校验 Bearer），
   // 走这里的会话重定向会让 Vercel Cron 拿到 307 而不是执行任务。
+  //
+  // 每一项都锚定到整段路径（(?:/|$) 或 $）。原来写的是裸前缀 api|icon|…，
+  // 于是 slug 以这些字开头的公司（「API Solutions」→ /api-solutions、
+  // /icon-trading）整个绕过了 middleware：会话不在这里刷新，Server Component
+  // 里又写不了 cookie，access token 过期后那家公司的用户会被随机登出。
+  //
+  // 带扩展名的静态文件（robots.txt、字体、source map、public/ 下的脚本）同样
+  // 排除：middleware 每跑一次就是一趟 Supabase Auth 的 getUser() 网络往返，
+  // 静态文件既不需要会话，也不该因为会话过期被 307 到 /login。
   matcher: [
-    '/((?!api|_next/static|_next/image|favicon.ico|manifest.webmanifest|sw.js|swe-worker-.*|icon|apple-icon|.*\\.(?:png|jpg|jpeg|svg|webp|ico)$).*)',
+    '/((?!api(?:/|$)|_next/static|_next/image|favicon\\.ico$|manifest\\.webmanifest$|sw\\.js$|swe-worker-.*|icon(?:/|$)|apple-icon(?:/|$)|.*\\.(?:png|jpg|jpeg|gif|svg|webp|ico|txt|xml|js|css|map|woff2?)$).*)',
   ],
 };

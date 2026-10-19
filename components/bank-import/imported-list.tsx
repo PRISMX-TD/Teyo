@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -168,19 +168,48 @@ export function ImportedList({
     ignored: i18n.bankImport.ignored,
   };
 
-  const handleSearch = async (query: string) => {
+  // 搜索原来每敲一个字就打一次服务端，且后发先至的结果会被先发后至的旧
+  // 结果覆盖（打「rent」最后显示的可能是「re」的结果）。现在停手 250ms 再查，
+  // 并且只认最后一次查询的结果。
+  const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchSeq = useRef(0);
+  useEffect(
+    () => () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    },
+    [],
+  );
+
+  const handleSearch = (query: string) => {
     setSearchQuery(query);
-    if (query.length < 2) {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    const seq = ++searchSeq.current;
+    if (query.trim().length < 2) {
       setSearchResults([]);
+      setSearching(false);
       return;
     }
     setSearching(true);
-    try {
-      const results = await searchTxns(query);
-      setSearchResults(results);
-    } finally {
-      setSearching(false);
-    }
+    searchTimer.current = setTimeout(async () => {
+      try {
+        const results = await searchTxns(query);
+        if (seq === searchSeq.current) setSearchResults(results);
+      } catch {
+        if (seq === searchSeq.current) setSearchResults([]);
+      } finally {
+        if (seq === searchSeq.current) setSearching(false);
+      }
+    }, 250);
+  };
+
+  /** 收起匹配搜索框；换到另一行时也先清空，免得看到上一行的搜索结果。 */
+  const closeSearch = () => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchSeq.current += 1;
+    setMatchDropdown(null);
+    setSearchQuery('');
+    setSearchResults([]);
+    setSearching(false);
   };
 
   const runAction = async (id: string, action: () => Promise<void>) => {
@@ -198,9 +227,7 @@ export function ImportedList({
   const handleMatch = (importedId: string, txnId: string) =>
     runAction(importedId, async () => {
       await matchTransaction(orgSlug, importedId, txnId);
-      setMatchDropdown(null);
-      setSearchQuery('');
-      setSearchResults([]);
+      closeSearch();
     });
 
   const handleIgnore = (id: string) => runAction(id, () => ignoreImportedAction(orgSlug, id));
@@ -392,11 +419,7 @@ export function ImportedList({
                           <button
                             type="button"
                             className="text-button"
-                            onClick={() => {
-                              setMatchDropdown(null);
-                              setSearchQuery('');
-                              setSearchResults([]);
-                            }}
+                            onClick={closeSearch}
                           >
                             {i18n.common.cancel}
                           </button>
@@ -405,7 +428,10 @@ export function ImportedList({
                         <button
                           type="button"
                           className="text-button"
-                          onClick={() => setMatchDropdown(txn.id)}
+                          onClick={() => {
+                            closeSearch();
+                            setMatchDropdown(txn.id);
+                          }}
                           disabled={acting === txn.id}
                         >
                           {i18n.bankImport.match}

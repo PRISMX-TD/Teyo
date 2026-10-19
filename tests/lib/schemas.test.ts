@@ -236,3 +236,21 @@ describe('exportSchema', () => {
     );
   });
 });
+
+describe('calendar and time zone checks', () => {
+  it('refuses a date that matches the format but is not on the calendar', async () => {
+    const { isoDate } = await import('@/lib/schemas');
+    expect(isoDate.safeParse('2026-02-28').success).toBe(true);
+    expect(isoDate.safeParse('2028-02-29').success).toBe(true);
+    expect(isoDate.safeParse('2026-02-29').success).toBe(false);
+    expect(isoDate.safeParse('2026-13-01').success).toBe(false);
+    expect(isoDate.safeParse('2026-04-31').success).toBe(false);
+  });
+
+  it('refuses a time zone the runtime does not know', async () => {
+    const { createOrgSchema } = await import('@/lib/schemas');
+    const base = { name: 'Acme', baseCurrency: 'MYR' };
+    expect(createOrgSchema.safeParse({ ...base, timezone: 'Asia/Kuala_Lumpur' }).success).toBe(true);
+    expect(createOrgSchema.safeParse({ ...base, timezone: 'Asia/Kuala Lumpur' }).success).toBe(false);
+  });
+});

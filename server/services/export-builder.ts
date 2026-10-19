@@ -38,7 +38,9 @@ function neutralizeFormula(value: string): string {
   // 纯数字（含负数）放行：科目汇总的净额可以是 -1200.50，加上单引号后
   // 文件里那一格就成了文本 '-1200.50，求和全部失效。纯数字不可能是公式。
   if (/^-?\d+(\.\d+)?$/.test(value)) return value;
-  return /^[=+\-@]/.test(value) ? `'${value}` : value;
+  // 开头的制表符与回车同样会被 Excel 吞掉后把后面的内容当公式（OWASP CSV
+  // Injection 列出的六个字符），只挡 = + - @ 四个是不全的。
+  return /^[=+\-@\t\r]/.test(value) ? `'${value}` : value;
 }
 
 function csvField(value: string): string {

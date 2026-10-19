@@ -2,7 +2,7 @@ import { redirect } from 'next/navigation';
 import { BackLink } from '@/components/ui/back-link';
 import { AssetForm } from '@/components/fixed-assets/asset-form';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listAllAccounts } from '@/server/repositories/accounts';
@@ -14,7 +14,7 @@ export default async function NewFixedAssetPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'account:manage');
+  const context = await requirePagePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

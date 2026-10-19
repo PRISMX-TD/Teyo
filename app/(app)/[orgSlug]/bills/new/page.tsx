@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { BillForm, type BillFromPurchaseOrder } from '@/components/bills/bill-form';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import { findActiveBillForPurchaseOrder } from '@/server/repositories/bills';
@@ -25,7 +25,7 @@ export default async function NewBillPage({
   const fromPo = typeof fromPoParam === 'string' && UUID.test(fromPoParam) ? fromPoParam : null;
   // 与 create 那个 action 同一道权限：只读用户进来只会看到一张必然保存
   // 失败的表单。
-  const context = await requirePermission(orgSlug, 'transaction:create');
+  const context = await requirePagePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 

@@ -2,7 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { requirePermission } from '@/server/auth/guard';
+import { isoDate } from '@/lib/schemas';
+import { assertContactInOrg, requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { recordAudit } from '@/server/repositories/audit-logs';
@@ -13,7 +14,8 @@ import {
   setProjectStatus,
 } from '@/server/repositories/projects';
 
-const DATE_ONLY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date format YYYY-MM-DD.');
+// 格式之外还要求是日历上真的有的一天，见 lib/schemas.ts 的 isoDate。
+const DATE_ONLY = isoDate;
 
 /**
  * 预算有两种写法，故意都收：
@@ -85,6 +87,11 @@ export async function createProject(
   const budgetMinor = budgetToMinor(parsed, context.baseCurrency);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 客户可选；选了就必须是本公司的，理由见 assertContactInOrg。
+    if (parsed.contactId) {
+      await assertContactInOrg(tx, context.organizationId, parsed.contactId);
+    }
+
     const { id } = await insertProject(tx, {
       organizationId: context.organizationId,
       name: parsed.name,
@@ -132,6 +139,9 @@ export async function updateProjectAction(
   await withTransaction(context.userId, async (tx) => {
     const before = await getProject(tx, context.organizationId, id);
     if (!before) throw new Error('Project not found.');
+    if (parsed.contactId && parsed.contactId !== before.contactId) {
+      await assertContactInOrg(tx, context.organizationId, parsed.contactId);
+    }
 
     await updateProject(tx, context.organizationId, id, {
       name: parsed.name,

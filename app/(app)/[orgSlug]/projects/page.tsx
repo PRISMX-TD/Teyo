@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -14,25 +14,26 @@ export default async function ProjectsListPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
   // 新建、编辑、改状态三个 action 都要 account:manage。
   const canManage = can(context.role, 'account:manage');
 
-  const projects = await withTransaction(context.userId, async (tx) =>
-    listProjects(tx, context.organizationId),
-  );
-
-  // Fetch profitability for each project
-  const profitabilityEntries = await Promise.all(
-    projects.map(async (p) => {
-      const profit = await withTransaction(context.userId, async (tx) =>
-        getProjectProfitability(tx, context.organizationId, p.id),
-      );
-      return { id: p.id, profit };
-    }),
-  );
+  // 列表与各项目的盈亏放进同一个事务。原来每个项目各开一个事务：N 个项目
+  // 就是 N 次 begin / set role / set_config / commit，而连接池只有 3 条
+  // （server/db/client.ts），其余的排队——项目一多这一页就线性变慢。
+  // 同一事务里的查询由 postgres.js 在一条连接上流水线发送。
+  const { projects, profitabilityEntries } = await withTransaction(context.userId, async (tx) => {
+    const projects = await listProjects(tx, context.organizationId);
+    const profitabilityEntries = await Promise.all(
+      projects.map(async (p) => ({
+        id: p.id,
+        profit: await getProjectProfitability(tx, context.organizationId, p.id),
+      })),
+    );
+    return { projects, profitabilityEntries };
+  });
 
   const profitabilityMap: Record<string, { totalIncome: bigint; totalExpense: bigint; netProfit: bigint }> = {};
   for (const { id, profit } of profitabilityEntries) {

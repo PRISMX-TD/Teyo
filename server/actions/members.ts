@@ -250,6 +250,11 @@ export async function listMySuspendedCompanies(): Promise<string[]> {
  */
 export async function acceptInvitationById(invitationId: string): Promise<{ orgSlug: string }> {
   const userId = await requireUserId();
+  // id 来自 onboarding 页面上的按钮，但这是可直接 POST 的端点：不是 uuid 的串
+  // 交给 Postgres 会抛 22P02，语义上它就是「这条邀请不存在」。
+  if (!idSchema.safeParse(invitationId).success) {
+    throw new AuthError('not_found', 'This invitation link is not valid.');
+  }
 
   const [invitation] = await withoutUserContext(
     (tx) => tx`

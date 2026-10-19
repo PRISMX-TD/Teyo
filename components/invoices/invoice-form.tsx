@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages } from '@/lib/i18n';
 import { createInvoice, issueInvoice, updateInvoice } from '@/server/actions/invoices';
-import { addMonthsLocalISO, todayLocalISO } from '@/lib/date';
+import { addMonthsLocalISO } from '@/lib/date';
+import { localDateFromISO, useLocalToday } from '@/components/ui/use-local-today';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import type { InvoiceDetail } from '@/server/repositories/invoices';
 import { DocumentLifecycle } from '@/components/invoices/document-lifecycle';
@@ -95,8 +96,12 @@ export function InvoiceForm({
   const isPosted = invoice?.transactionId != null;
 
   const [contactId, setContactId] = useState(invoice?.contactId ?? contacts[0]?.id ?? '');
-  const [issueDate, setIssueDate] = useState(invoice?.issueDate ?? todayLocalISO());
-  const [dueDate, setDueDate] = useState(invoice?.dueDate ?? addMonthsLocalISO(1));
+  // 默认日期等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  const today = useLocalToday();
+  const [issueDateInput, setIssueDate] = useState<string | null>(invoice?.issueDate ?? null);
+  const [dueDateInput, setDueDate] = useState<string | null>(invoice?.dueDate ?? null);
+  const issueDate = issueDateInput ?? today;
+  const dueDate = dueDateInput ?? (today ? addMonthsLocalISO(1, localDateFromISO(today)) : '');
   // 缺省是本位币，不是 'USD'。编辑时当然用这张发票自己的币种。
   const [currency, setCurrency] = useState(invoice?.currency ?? baseCurrency);
   const [taxRatePercent, setTaxRatePercent] = useState(

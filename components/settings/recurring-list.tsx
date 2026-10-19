@@ -9,6 +9,7 @@ import type { UserEntryKind } from '@/server/domain/ledger';
 import type { RecurringEditFields, RecurringRunReport } from '@/server/actions/recurring';
 import type { RecurringTransactionRow } from '@/server/repositories/recurring';
 import { todayLocalISO } from '@/lib/date';
+import { useLocalToday } from '@/components/ui/use-local-today';
 import { Plus } from '@/components/ui/icons';
 
 type AccountOption = {
@@ -150,6 +151,9 @@ export function RecurringList({
   toggleAction,
   generateAction,
 }: Props) {
+  // 渲染里判断「有没有到期规则」用的今天：水合前是空串（没有规则到期），
+  // 避免服务端 UTC 日期与设备日期不一致导致按钮的 disabled 水合不匹配。
+  const today = useLocalToday();
   const [showForm, setShowForm] = useState(false);
   /** null = 这张表单在新建；否则是正在编辑的那条规则的 id。 */
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -234,7 +238,7 @@ export function RecurringList({
           // （「这一次不动分类」）。两者在服务端是不同的意思。
           categoryId: form.categoryId || null,
           frequency: form.frequency,
-          interval: form.interval,
+          interval: Math.max(1, form.interval),
           startDate: form.startDate,
           endDate: form.endDate || null,
         });
@@ -248,7 +252,7 @@ export function RecurringList({
           creditAccountId: form.creditAccountId,
           categoryId: form.categoryId || undefined,
           frequency: form.frequency,
-          interval: form.interval,
+          interval: Math.max(1, form.interval),
           startDate: form.startDate,
           endDate: form.endDate || undefined,
         });
@@ -319,7 +323,7 @@ export function RecurringList({
             onClick={handleGenerate}
             disabled={
               generating ||
-              !entries.some((e) => isDue(e, todayLocalISO()))
+              !entries.some((e) => isDue(e, today))
             }
           >
             {generating ? t.common.loading : t.recurring.runDue}
@@ -529,9 +533,11 @@ export function RecurringList({
               <input
                 type="number"
                 min={1}
-                value={form.interval}
+                // 编辑中允许清空：原来一清空就被夹回 1，想改成 3 的人得到的是 13。
+                // 0 显示为空框，提交时再夹到至少 1。
+                value={form.interval || ''}
                 onChange={(e) =>
-                  setForm((f) => ({ ...f, interval: Math.max(1, Number(e.target.value)) }))
+                  setForm((f) => ({ ...f, interval: Math.max(0, Math.floor(Number(e.target.value) || 0)) }))
                 }
               />
             </label>

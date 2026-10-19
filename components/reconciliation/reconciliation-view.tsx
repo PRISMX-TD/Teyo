@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { Locale, Messages } from '@/lib/i18n';
 import { localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -81,19 +81,25 @@ export function ReconciliationView({
   /** 完成对账失败时那句话。原来 handleSubmit 只有 try/finally，失败了界面上一声不吭。 */
   const [submitError, setSubmitError] = useState<string | null>(null);
 
+  // 快速切换账户时，先发的请求可能后回来，把上一个账户的流水显示在当前
+  // 账户名下——用户对着错的流水勾选、完成对账。只认最后一次请求的结果。
+  const latestFetch = useRef(0);
+
   const fetchData = useCallback(
     async (accountId: string) => {
       if (!accountId) return;
+      const seq = ++latestFetch.current;
       setLoading(true);
       try {
         const data = await loadData(accountId);
+        if (seq !== latestFetch.current) return;
         setTxns(data.txns);
         setPastReconciliations(data.past);
         setBookBalance(data.bookBalance);
         setChecked(new Set());
         setAdjustments({});
       } finally {
-        setLoading(false);
+        if (seq === latestFetch.current) setLoading(false);
       }
     },
     [loadData],
@@ -403,7 +409,7 @@ export function ReconciliationView({
                     {p.statementDate} —{' '}
                     {formatMoney(BigInt(p.statementBalanceMinor), baseCurrency, locale)}
                     {p.reconciledAt && (
-                      <span> ({new Date(p.reconciledAt).toLocaleDateString()})</span>
+                      <span> ({new Date(p.reconciledAt).toLocaleDateString(locale === 'zh' ? 'zh-CN' : 'en-GB')})</span>
                     )}
                   </li>
                 ))}

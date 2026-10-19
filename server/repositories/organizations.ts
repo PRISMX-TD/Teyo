@@ -19,12 +19,40 @@ function slugify(name: string): string {
 }
 
 /**
+ * 与 app/ 下顶层路由同名的 slug。公司的页面挂在 /[orgSlug]/ 下，而静态
+ * 路由段优先于动态段——一家叫「Login」的公司拿到 slug `login` 之后，
+ * /login 永远是登录页，它的所有页面都打不开。这些名字一律当作已被占用，
+ * 走与重名相同的「加随机后缀」路径。
+ *
+ * 新增顶层路由（app/ 或 app/(auth)/ 下的目录、icon 这类元数据路由）时要
+ * 同步加在这里；tests/repositories/organizations-slug.test.ts 会对照 app/
+ * 目录检查有没有漏。
+ */
+export const RESERVED_SLUGS: ReadonlySet<string> = new Set([
+  'account',
+  'api',
+  'auth',
+  'offline',
+  'onboarding',
+  'forgot-password',
+  'invite',
+  'login',
+  'reset-password',
+  'signup',
+  'icon',
+  'manifest',
+  'favicon',
+  'sw',
+]);
+
+/**
  * 用 app_slug_taken 而不是直接 `select ... from organizations where slug = ?`：
  * organizations_read 策略是 app_is_member(id)，在 teyo_app 角色下查不到别人的公司，
  * 会把已被占用的 slug 判为可用，插入时才撞上 unique 约束抛裸错误。
  * app_slug_taken 是 SECURITY DEFINER，只回布尔值。见 0004_slug_availability.sql。
  */
 async function isTaken(tx: Tx, candidate: string): Promise<boolean> {
+  if (RESERVED_SLUGS.has(candidate)) return true;
   const [row] = await tx`select app_slug_taken(${candidate}) as taken`;
   return row.taken === true;
 }

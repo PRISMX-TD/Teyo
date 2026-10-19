@@ -1,6 +1,7 @@
 import { cache } from 'react';
-import { redirect } from 'next/navigation';
-import { withTransaction } from '@/server/db/transaction';
+import { notFound, redirect } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
+import { withTransaction, type Tx } from '@/server/db/transaction';
 import { can, type Action, type Role } from '@/server/domain/permissions';
 import { getCurrentUserId } from '@/server/auth/session';
 
@@ -148,5 +149,61 @@ export function assertPermission(context: OrgContext, action: Action): void {
 export async function requirePermission(orgSlug: string, action: Action): Promise<OrgContext> {
   const context = await resolveOrgContext(orgSlug);
   assertPermission(context, action);
+  return context;
+}
+
+/**
+ * 断言这位往来对象（客户 / 供应商）属于本公司。
+ *
+ * invoices / bills / payments / credit_notes / projects / purchase_orders 的
+ * contact_id 外键都只指向 contacts(id)，没有公司维度（0008/0009），0032 的复合
+ * 外键也没有覆盖到它们，而 RLS 对外键校验不生效。不查这一次，别家公司的
+ * 联系人 id 照样存得进来——之后单据列表 `join contacts` 时，那一行在 RLS 下
+ * 读不到，这张单据就从自己公司的列表里整张消失，而它的分录还留在总账上。
+ *
+ * 已停用的联系人仍然放行：编辑一张旧单据，不该因为客户后来被归档就存不下去。
+ * 不是 uuid 的串直接当作「找不到」，不交给 Postgres 去抛 22P02。
+ */
+export async function assertContactInOrg(
+  tx: Tx,
+  organizationId: string,
+  contactId: string,
+): Promise<void> {
+  const rows =
+    typeof contactId === 'string' && isUuid(contactId)
+      ? await tx`
+          select 1 from contacts
+          where id = ${contactId} and organization_id = ${organizationId}
+        `
+      : [];
+  if (rows.length === 0) {
+    throw new AuthError('not_found', 'That contact was not found in this company.');
+  }
+}
+
+/**
+ * 页面专用的 requirePermission：角色不够时渲染公司内的 404，而不是抛错。
+ *
+ * requirePermission 抛 AuthError('forbidden') 对 Server Action 是对的——
+ * 调用方的 catch 把那句话贴到表单上。可同一个异常出现在页面渲染里，没有人
+ * 接，落到 app/error.tsx：一张「出了点问题」加一串 digest 的错误页，还带着
+ * 一个「重试」按钮——而重试一百次结果都一样。viewer 点开一个收藏过的
+ * /settings/accounts 链接就是这样。
+ *
+ * 这里改成 notFound()，落到 app/(app)/[orgSlug]/not-found.tsx：侧栏还在，
+ * 有一个回概览的按钮。用 404 而不是一句「你无权访问」，与 resolveOrgContext
+ * 对非成员用 not_found 同一个考虑——不确认这一页对别的角色存在。
+ *
+ * 只吞 forbidden。not_found（非成员）照常抛：org layout 已经接住它并重定向
+ * 到 /?notice=no_access，这里吞掉反而会让那条路径多一种结局。
+ *
+ * 不能把 requirePermission 本身改成这样：notFound() 在 Server Action 里是
+ * 一个被框架特殊处理的异常，表单的 catch 拿到的不再是那句可读的话。
+ */
+export async function requirePagePermission(orgSlug: string, action: Action): Promise<OrgContext> {
+  const context = await resolveOrgContext(orgSlug);
+  if (!can(context.role, action)) {
+    notFound();
+  }
   return context;
 }

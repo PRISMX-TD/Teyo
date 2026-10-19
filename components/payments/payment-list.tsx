@@ -1,17 +1,24 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
+import dynamic from 'next/dynamic';
 import { useState } from 'react';
+import { useRefreshAfter } from '@/components/ui/use-refresh-after';
 import type { Locale, Messages } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import type { PaymentRow } from '@/server/repositories/payments';
 import { voidPaymentAction } from '@/server/actions/payments';
-import {
-  PrepaymentApplyDialog,
-  type OpenPrepaymentView,
-  type OutstandingDocumentView,
+import type {
+  OpenPrepaymentView,
+  OutstandingDocumentView,
 } from '@/components/payments/prepayment-apply-dialog';
+
+// 核销对话框只有点了「核销」才挂载，大多数打开收付款列表的人一次也不会点。
+// 按需加载，不把它（连同它的核销计算）塞进列表页的首屏 bundle。
+const PrepaymentApplyDialog = dynamic(
+  () => import('@/components/payments/prepayment-apply-dialog').then((m) => m.PrepaymentApplyDialog),
+  { ssr: false },
+);
 
 type Props = {
   orgSlug: string;
@@ -41,7 +48,7 @@ export function PaymentList({
   canWrite,
 }: Props) {
   const t = getMessages(locale);
-  const router = useRouter();
+  const { refresh, isRefreshing } = useRefreshAfter();
 
   const [typeFilter, setTypeFilter] = useState<'all' | 'received' | 'made'>('all');
   const [contactFilter, setContactFilter] = useState<string>('all');
@@ -75,7 +82,8 @@ export function PaymentList({
     setError(null);
     try {
       await voidPaymentAction(orgSlug, id);
-      router.refresh();
+      // 刷新完成前这一行的「作废」保持禁用，见 use-refresh-after.ts。
+      refresh(id);
     } catch (e) {
       // 原来这里是 `catch { /* ignore */ }`。作废一笔收款会反向过账三笔分录
       // （收款本身 + 汇兑收益 + 汇兑损失），期间封账、权限不足、单据已经
@@ -160,7 +168,7 @@ export function PaymentList({
             setApplying(null);
             // 核销改了三处：预收余额、单据状态、总账。整页刷新最省事，
             // 也最不容易漏——手工改本地 state 只会让这三处各自漂移。
-            router.refresh();
+            refresh();
           }}
         />
       ) : null}
@@ -241,7 +249,7 @@ export function PaymentList({
                   <button
                     type="button"
                     className="btn-small btn-danger"
-                    disabled={pendingId === p.id}
+                    disabled={pendingId === p.id || isRefreshing(p.id)}
                     onClick={() => handleVoid(p.id)}
                   >
                     {i18n.transaction.void}

@@ -2,7 +2,7 @@ import { BackLink } from '@/components/ui/back-link';
 import { SCENARIO_TITLE_KEY, ScenarioPicker } from '@/components/transactions/scenario-picker';
 import { TransactionForm } from '@/components/transactions/transaction-form';
 import { getMessages, interpolate, type Locale } from '@/lib/i18n';
-import { requirePermission, type OrgContext } from '@/server/auth/guard';
+import { type OrgContext, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';
 import { isDateLocked } from '@/server/domain/period-lock';
 import { canEditTransaction } from '@/server/domain/permissions';
@@ -81,7 +81,7 @@ export default async function NewTransactionPage({
   const raw = await searchParams;
   const scenarioParam = typeof raw.scenario === 'string' ? raw.scenario : undefined;
 
-  const context = await requirePermission(orgSlug, 'transaction:create');
+  const context = await requirePagePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as Locale;
   const t = getMessages(locale);
 

@@ -1,8 +1,10 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
-import { withTransaction } from '@/server/db/transaction';
+import { z } from 'zod';
+import { isoDate, parseOrThrow } from '@/lib/schemas';
+import { AuthError, requirePermission, todayInOrg } from '@/server/auth/guard';
+import { withTransaction, type Tx } from '@/server/db/transaction';
 import { LedgerError } from '@/server/domain/ledger';
 import { postJournal } from '@/server/posting/post-journal';
 import { recordAudit } from '@/server/repositories/audit-logs';
@@ -21,6 +23,49 @@ import {
   resolvePostingAccounts,
 } from '@/server/services/posting-accounts';
 
+/**
+ * 物料上挂的两个科目必须属于本公司。
+ *
+ * inventory_items.cogs_account_id / inventory_account_id 的外键只指向
+ * accounts(id)，没有公司维度，RLS 也不管外键——与 fixed-assets.ts 的
+ * assertAssetAccountsBelongToOrg 是同一个洞。不在保存时拦，别家公司的科目
+ * id 存得进来，要到第一次出入库过账时才在 postJournal 的归属校验上失败，
+ * 用户那时看到的是一条与「科目设错了」毫不相干的报错。
+ */
+async function assertItemAccountsInOrg(
+  tx: Tx,
+  organizationId: string,
+  accountIds: (string | undefined)[],
+): Promise<void> {
+  const ids = [...new Set(accountIds.filter((id): id is string => Boolean(id)))];
+  if (ids.length === 0) return;
+  if (ids.some((id) => !z.string().uuid().safeParse(id).success)) {
+    throw new AuthError('not_found', 'One of the selected accounts was not found in this company.');
+  }
+  const rows = await tx`
+    select id from accounts
+    where organization_id = ${organizationId} and id = any(${ids}::uuid[])
+  `;
+  if (rows.length !== ids.length) {
+    throw new AuthError('not_found', 'One of the selected accounts was not found in this company.');
+  }
+}
+
+/**
+ * 出入库对话框的入参。原来一个字段都不验：
+ *   - type 不在四种之内时，contraAccountFor 把它当成出库，借销货成本；
+ *   - unitCostMinor 是裸 BigInt()，'12.50' 抛的是一句 SyntaxError；
+ *   - inventoryItemId 不是 uuid 时 Postgres 回 22P02；
+ *   - occurredOn 是 '2026-02-30' 也照收，进封账判断之后才在库里被拒。
+ */
+const inventoryTxnSchema = z.object({
+  inventoryItemId: z.string().uuid('Pick one of the items in the list.'),
+  type: z.enum(['purchase', 'sale', 'adjustment', 'return']),
+  unitCostMinor: z.string().regex(/^\d+$/, 'Enter the unit cost as a whole number of minor units.'),
+  occurredOn: isoDate.optional(),
+  notes: z.string().max(2000).optional(),
+});
+
 export async function createInventoryItem(
   orgSlug: string,
   input: {
@@ -38,6 +83,11 @@ export async function createInventoryItem(
   const context = await requirePermission(orgSlug, 'account:manage');
 
   const result = await withTransaction(context.userId, async (tx) => {
+    await assertItemAccountsInOrg(tx, context.organizationId, [
+      input.cogsAccountId,
+      input.inventoryAccountId,
+    ]);
+
     const { id } = await insertInventoryItem(tx, {
       organizationId: context.organizationId,
       sku: input.sku,
@@ -87,6 +137,10 @@ export async function updateInventoryItemAction(
   await withTransaction(context.userId, async (tx) => {
     const before = await getInventoryItem(tx, context.organizationId, id);
     if (!before) throw new Error('Inventory item not found.');
+    await assertItemAccountsInOrg(tx, context.organizationId, [
+      input.cogsAccountId,
+      input.inventoryAccountId,
+    ]);
 
     await updateInventoryItem(tx, context.organizationId, id, {
       sku: input.sku,
@@ -210,6 +264,17 @@ export async function recordInventoryTxnAction(
   // 不能由这一个 action 单方面决定。
   const context = await requirePermission(orgSlug, 'account:manage');
 
+  parseOrThrow(
+    inventoryTxnSchema,
+    {
+      inventoryItemId: input.inventoryItemId,
+      type: input.type,
+      unitCostMinor: input.unitCostMinor,
+      occurredOn: input.occurredOn,
+      notes: input.notes,
+    },
+    (m) => new LedgerError(m),
+  );
   const quantityScaled = parseQuantityToScaled(input.quantity);
   const occurredOn = input.occurredOn ?? todayInOrg(context);
 

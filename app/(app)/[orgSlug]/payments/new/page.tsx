@@ -1,7 +1,7 @@
 import { PaymentForm } from '@/components/payments/payment-form';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages, localizedName } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -24,7 +24,7 @@ export default async function NewPaymentPage({
       : typeof raw.bill === 'string'
         ? { kind: 'bill' as const, id: raw.bill }
         : null;
-  const context = await requirePermission(orgSlug, 'transaction:create');
+  const context = await requirePagePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
@@ -49,8 +49,10 @@ export default async function NewPaymentPage({
         order by name
       ` as { id: string; name: string }[];
 
-      const documents = await listOutstandingDocuments(tx, context.organizationId);
-      const accounts = await listMoneyAccounts(tx, context.organizationId);
+      const [documents, accounts] = await Promise.all([
+        listOutstandingDocuments(tx, context.organizationId),
+        listMoneyAccounts(tx, context.organizationId),
+      ]);
 
       // 停用的往来对象如果还欠着钱，也要在下拉框里：点了它的发票，表单会把
       // 往来对象切到它，下拉框里没有这一项的话就会落到别人身上。

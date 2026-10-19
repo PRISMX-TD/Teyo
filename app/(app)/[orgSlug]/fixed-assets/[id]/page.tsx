@@ -1,11 +1,12 @@
 import { BackLink } from '@/components/ui/back-link';
 import { notFound } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
 import { AssetForm } from '@/components/fixed-assets/asset-form';
 import { DepreciationSchedule } from '@/components/fixed-assets/depreciation-schedule';
 import { DisposeAssetPanel } from '@/components/fixed-assets/dispose-asset-panel';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { formatMoney, toIsoDate } from '@/lib/format';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
+import { todayInOrg, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listAllAccounts, listMoneyAccounts } from '@/server/repositories/accounts';
@@ -31,9 +32,11 @@ export default async function FixedAssetDetailPage({
   params: Promise<{ orgSlug: string; id: string }>;
 }) {
   const { orgSlug, id } = await params;
+  // 不是 uuid 的 id 进 SQL 是类型错误、整页 500；与「查不到」一样给 404。
+  if (!isUuid(id)) notFound();
   // 这一页本身就是 account:manage（与 updateFixedAssetAction 同一道权限），
   // 所以进得来的人一定改得动，不需要再按角色分出一个只读分支。
-  const context = await requirePermission(orgSlug, 'account:manage');
+  const context = await requirePagePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

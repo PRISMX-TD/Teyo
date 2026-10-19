@@ -6,7 +6,21 @@ import { INVOICE_LOCALES, INVOICE_SIGNOFFS } from '@/lib/invoice-options';
 // 会原样出现在表单上——这些 schema 现在真的跑在生产路径上了，默认文案不再
 // 只是测试里的字符串。
 const uuid = z.string().uuid('Pick one of the options in the list.');
-const isoDate = z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date format YYYY-MM-DD.');
+/**
+ * YYYY-MM-DD，而且必须是日历上真的有的一天。
+ *
+ * 只验格式会放行 '2026-02-30'、'2026-13-01'：它们一路走到 Postgres 才被拒，
+ * 用户读到的是一句 date/time field value out of range——与 zod 默认文案
+ * 一样是给程序员看的。用 UTC 构造再比对回去，2 月 29 日按闰年判，
+ * 不依赖进程时区。
+ */
+export const isoDate = z
+  .string()
+  .regex(/^\d{4}-\d{2}-\d{2}$/, 'Use the date format YYYY-MM-DD.')
+  .refine((value) => {
+    const date = new Date(`${value}T00:00:00Z`);
+    return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+  }, 'That date does not exist on the calendar.');
 const currency = z
   .string()
   .trim()
@@ -39,10 +53,27 @@ const bilingualName = z
 export const localeSchema = z.enum(['en', 'zh']);
 export const inviteRoleSchema = z.enum(['admin', 'bookkeeper', 'viewer']);
 
+/**
+ * IANA 时区名，而且必须是运行时认得的那一个。
+ *
+ * 原来只验「非空、不超过 60 字」，于是 'Asia/Kuala Lumpur'（少一条下划线）
+ * 也存得进去。todayInOrg 遇到它会静默退回 UTC——不报错，只是这家公司每天
+ * 有几个小时的「今天」是错的，报表截止日、定期分录都跟着错，而谁也看不出
+ * 原因。在入口拒掉，用户当场就知道是时区写错了。
+ */
+const timezone = nonEmpty.max(60).refine((value) => {
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: value });
+    return true;
+  } catch {
+    return false;
+  }
+}, 'Pick a time zone from the list.');
+
 export const createOrgSchema = z.object({
   name: nonEmpty.max(120),
   baseCurrency: currency,
-  timezone: nonEmpty.max(60),
+  timezone,
   industry: z.string().trim().max(60).optional(),
 });
 
@@ -78,7 +109,7 @@ const optionalText = (max: number) =>
 
 export const updateOrgSchema = z.object({
   name: nonEmpty.max(120),
-  timezone: nonEmpty.max(60),
+  timezone,
   industry: z.string().trim().max(60).optional(),
   /**
    * 开票方地址，印在发票单据上（0026 迁移加的列）。

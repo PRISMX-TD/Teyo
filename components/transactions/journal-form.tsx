@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { createJournal } from '@/server/actions/transactions';
-import { todayLocalISO } from '@/lib/date';
+import { useLocalToday } from '@/components/ui/use-local-today';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null; type: string };
 
@@ -30,7 +30,10 @@ export function JournalForm({ orgSlug, baseCurrency, locale, accounts }: Props) 
     expense: t.settings.typeExpense,
   };
 
-  const [occurredOn, setOccurredOn] = useState(() => todayLocalISO());
+  // 默认日期等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  const today = useLocalToday();
+  const [occurredOnInput, setOccurredOn] = useState<string | null>(null);
+  const occurredOn = occurredOnInput ?? today;
   const [amount, setAmount] = useState('');
   const [debitAccountId, setDebitAccountId] = useState('');
   const [creditAccountId, setCreditAccountId] = useState('');

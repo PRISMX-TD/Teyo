@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useRefreshAfter } from '@/components/ui/use-refresh-after';
 import type { Locale, Messages } from '@/lib/i18n';
 import { interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -40,7 +40,8 @@ export function CreditNoteList({
   creditNotes,
   canWrite,
 }: Props) {
-  const router = useRouter();
+  // 刷新完成前按钮保持禁用，见 use-refresh-after.ts。
+  const { refresh, isRefreshing } = useRefreshAfter();
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   // 作废原来是点一下就生效：不可逆、不问一句、也不留理由。与发票一样走
@@ -65,7 +66,7 @@ export function CreditNoteList({
     try {
       if (action === 'issue') await issueCreditNote(orgSlug, id);
       else await applyCreditNote(orgSlug, id);
-      router.refresh();
+      refresh(id);
     } catch (e) {
       // 原来这里是 `catch { /* ignore */ }`。签发一张贷项通知单会过账，
       // 于是期间封账、科目没配、金额为零、权限不足都会抛错——而用户看到的
@@ -84,7 +85,7 @@ export function CreditNoteList({
     try {
       await voidCreditNote(orgSlug, target.id, reason);
       setVoidTarget(null);
-      router.refresh();
+      refresh(target.id);
     } catch (e) {
       setVoidError((e as Error).message);
     } finally {
@@ -157,7 +158,7 @@ export function CreditNoteList({
                     <button
                       type="button"
                       className="btn-small"
-                      disabled={pendingId === cn.id}
+                      disabled={pendingId === cn.id || isRefreshing(cn.id)}
                       onClick={() => handleAction(cn.id, 'issue')}
                     >
                       {i18n.creditNotes.issue}
@@ -167,7 +168,7 @@ export function CreditNoteList({
                     <button
                       type="button"
                       className="btn-small"
-                      disabled={pendingId === cn.id}
+                      disabled={pendingId === cn.id || isRefreshing(cn.id)}
                       onClick={() => handleAction(cn.id, 'apply')}
                     >
                       {i18n.creditNotes.apply}
@@ -178,7 +179,7 @@ export function CreditNoteList({
                   <button
                     type="button"
                     className="btn-small btn-danger"
-                    disabled={pendingId === cn.id}
+                    disabled={pendingId === cn.id || isRefreshing(cn.id)}
                     onClick={() => {
                       setVoidError(null);
                       setVoidTarget(cn);

@@ -2,7 +2,7 @@ import { BackLink } from '@/components/ui/back-link';
 import { Plus } from '@/components/ui/icons';
 import { InventoryList } from '@/components/settings/inventory-list';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { getInventoryValuation, listInventoryItems } from '@/server/repositories/inventory';
@@ -19,17 +19,17 @@ export default async function InventorySettingsPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'account:manage');
+  const context = await requirePagePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const { inventoryItems, valuation } = await withTransaction(context.userId, async (tx) => ({
-    inventoryItems: await listInventoryItems(tx, context.organizationId),
-    valuation: await getInventoryValuation(tx, context.organizationId),
-  }));
-
-  const accounts = await withTransaction(context.userId, (tx) =>
-    listAllAccounts(tx, context.organizationId),
+  // 三条查询互不依赖：同一个事务里一起发，原来是两次事务、三次串行。
+  const [inventoryItems, valuation, accounts] = await withTransaction(context.userId, (tx) =>
+    Promise.all([
+      listInventoryItems(tx, context.organizationId),
+      getInventoryValuation(tx, context.organizationId),
+      listAllAccounts(tx, context.organizationId),
+    ]),
   );
 
   return (

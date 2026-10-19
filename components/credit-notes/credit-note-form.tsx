@@ -9,7 +9,7 @@ import {
   issueCreditNote,
   updateCreditNoteAction,
 } from '@/server/actions/credit-notes';
-import { todayLocalISO } from '@/lib/date';
+import { useLocalToday } from '@/components/ui/use-local-today';
 import { RateField } from '@/components/transactions/rate-field';
 import { Plus, X } from '@/components/ui/icons';
 import { useHeaderIssue } from '@/components/invoices/header-issue';
@@ -83,12 +83,14 @@ export function CreditNoteForm({
 }: Props) {
   const t = getMessages(locale);
   const router = useRouter();
-  const today = todayLocalISO();
+  // 默认日期等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  const today = useLocalToday();
   const isEdit = creditNote !== null;
 
   const [invoiceId, setInvoiceId] = useState(creditNote?.invoiceId ?? '');
   const [contactId, setContactId] = useState(creditNote?.contactId ?? contacts[0]?.id ?? '');
-  const [issueDate, setIssueDate] = useState(creditNote?.issueDate ?? today);
+  const [issueDateInput, setIssueDate] = useState<string | null>(creditNote?.issueDate ?? null);
+  const issueDate = issueDateInput ?? today;
   // 缺省本位币，不是 currencies[0]。那个列表的第一项碰巧是 MYR，所以这一处
   // 看着像是对的——但它对的是 SUPPORTED_CURRENCIES 的排序，不是这家公司的
   // 本位币。列表一重排就静默改掉所有新建贷项通知单的币种。

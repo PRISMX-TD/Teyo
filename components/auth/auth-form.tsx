@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, type ReactNode } from 'react';
+import { startTransition, useState, type ReactNode } from 'react';
 
 /** Next.js 用抛错实现 redirect()，摘要以 NEXT_REDIRECT 开头。 */
 function isRedirectError(error: unknown): boolean {
@@ -31,6 +31,19 @@ export function AuthForm({ title, submitLabel, action, children, footer, success
   const [done, setDone] = useState(false);
   const [pending, setPending] = useState(false);
 
+  /**
+   * onSubmit + startTransition，而不是 <form action>：action 跑完后 React 会
+   * 重置表单里的非受控字段，于是「邮箱或密码不对」的同时邮箱框也被清空，
+   * 用户得从头再打一遍。仍然放在 transition 里，是为了 redirect() 抛出的
+   * 特殊错误照旧冒泡给 Next 的 redirect 边界处理。
+   */
+  function onSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+    const formData = new FormData(event.currentTarget);
+    startTransition(() => handleSubmit(formData));
+  }
+
   async function handleSubmit(formData: FormData) {
     setPending(true);
     setError(null);
@@ -54,7 +67,7 @@ export function AuthForm({ title, submitLabel, action, children, footer, success
     <main className="auth-shell">
       <h1>{title}</h1>
 
-      <form action={handleSubmit} noValidate>
+      <form onSubmit={onSubmit} noValidate>
         {children}
 
         {error ? (

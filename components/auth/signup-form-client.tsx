@@ -1,0 +1,92 @@
+'use client';
+
+import { useState } from 'react';
+import Link from 'next/link';
+import { AuthForm } from '@/components/auth/auth-form';
+import type { Locale } from '@/lib/i18n';
+import type { SignupCopy } from '@/components/auth/signup-copy';
+import { signUp } from '@/server/actions/auth';
+import { PasswordInput } from '@/components/auth/password-input';
+
+/**
+ * 注册页在有账号之前没有 locale 可解析——app_users 那行还不存在——所以
+ * 语言只能由用户在这一步自己选。选择立刻决定两件事：这个表单接下来显示
+ * 的文案，以及写进 app_users.locale 的值，后者是 onboarding、根路径乃至
+ * 整个产品之后解析语言的唯一依据（见 getUserLocale）。不选就默认英文的话，
+ * 这家店主永远见不到这个选择器之外的任何中文，直到自己摸到 /account。
+ *
+ * 复用 /account 语言切换器的形状与文案（t.account.language/english/chinese），
+ * 不新造一套。
+ *
+ * initialLocale 由页面按浏览器的 Accept-Language 算好传进来（见
+ * app/(auth)/signup/page.tsx）。它只是**默认值**——用户改了就以用户为准，
+ * 而那个选择才是写进 app_users.locale 的东西。
+ */
+export function SignupFormClient({
+  copy,
+  initialLocale = 'en',
+  next,
+}: {
+  /** 两种语言下这张表单要用的文案，由服务端组件 SignupForm 从目录里摘出来。 */
+  copy: Record<Locale, SignupCopy>;
+  initialLocale?: Locale;
+  /** 注册后回到的站内路径（如邀请链接），由服务端 safeNextPath 校验。 */
+  next?: string;
+}) {
+  const [locale, setLocale] = useState<Locale>(initialLocale);
+  const t = copy[locale];
+
+  async function action(formData: FormData) {
+    return signUp({
+      email: String(formData.get('email') ?? ''),
+      password: String(formData.get('password') ?? ''),
+      displayName: String(formData.get('displayName') ?? ''),
+      locale,
+      next,
+    });
+  }
+
+  return (
+    <AuthForm
+      title={t.auth.signUp}
+      submitLabel={t.auth.signUp}
+      action={action}
+      footer={
+        <p className="auth-links">
+          <span>
+            {t.auth.haveAccountPrompt}
+            <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
+          </span>
+        </p>
+      }
+    >
+      <label htmlFor="locale">{t.account.language}</label>
+      <select
+        id="locale"
+        name="locale"
+        value={locale}
+        onChange={(event) => setLocale(event.target.value as Locale)}
+      >
+        <option value="en">{t.account.english}</option>
+        <option value="zh">{t.account.chinese}</option>
+      </select>
+
+      <label htmlFor="displayName">{t.auth.displayName}</label>
+      <input id="displayName" name="displayName" type="text" autoComplete="name" required />
+
+      <label htmlFor="email">{t.auth.email}</label>
+      <input id="email" name="email" type="email" autoComplete="email" required />
+
+      <label htmlFor="password">{t.auth.password}</label>
+      <PasswordInput
+        id="password"
+        name="password"
+        showLabel={t.auth.showPassword}
+        hideLabel={t.auth.hidePassword}
+        autoComplete="new-password"
+        minLength={8}
+        required
+      />
+    </AuthForm>
+  );
+}

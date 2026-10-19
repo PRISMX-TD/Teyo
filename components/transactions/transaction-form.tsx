@@ -24,8 +24,9 @@ import {
 import { uploadAttachment } from '@/server/actions/attachments';
 import { ALLOWED_ATTACHMENT_TYPES } from '@/lib/upload-rules';
 import { enqueueOfflineTransaction, isOnline, neverReachedServer } from '@/lib/offline-queue';
+import { notifyOfflineQueueChanged } from '@/components/shell/offline-banner';
 import type { Scenario } from '@/server/domain/scenario';
-import { todayLocalISO } from '@/lib/date';
+import { useLocalToday } from '@/components/ui/use-local-today';
 
 type Option = { id: string; name_en: string | null; name_zh: string | null };
 
@@ -154,9 +155,10 @@ export function TransactionForm({
   const [moneyAccountId, setMoneyAccountId] = useState(initialData?.moneyAccountId ?? '');
   const [projectId, setProjectId] = useState(initialData?.projectId ?? '');
   const [currency, setCurrency] = useState(initialData?.currency ?? baseCurrency);
-  const [occurredOn, setOccurredOn] = useState(
-    () => initialData?.occurredOn ?? todayLocalISO(),
-  );
+  // 默认日期等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  const today = useLocalToday();
+  const [occurredOnInput, setOccurredOn] = useState<string | null>(initialData?.occurredOn ?? null);
+  const occurredOn = occurredOnInput ?? today;
   const [amount, setAmount] = useState(initialData?.amount ?? '');
   const [error, setError] = useState<string | null>(null);
   const [pending, setPending] = useState(false);
@@ -320,9 +322,40 @@ export function TransactionForm({
     transfer: t.transaction.transfer,
   };
 
+  /**
+   * 用 onSubmit 而不是 <form action>：React 19 的 action 跑完后会自动重置表单
+   * 里的非受控字段（备注、转账的转出账户）。服务端拒了一笔、把错误显示出来的
+   * 同时，用户刚打的备注也被清空了；编辑时则被打回原值。
+   */
+  function onFormSubmit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (pending) return;
+    void handleSubmit(new FormData(event.currentTarget));
+  }
+
+  /**
+   * 网络问题时把这一笔排进离线队列。IndexedDB 本身也可能不可用（Firefox
+   * 隐私窗口），那时只能如实报错——不能让用户以为它已经存进了设备。
+   */
+  async function saveOffline(payload: Parameters<typeof enqueueOfflineTransaction>[1]) {
+    try {
+      await enqueueOfflineTransaction(orgSlug, payload);
+    } catch (e) {
+      setError((e as Error)?.message || t.errors.unexpected);
+      return;
+    }
+    notifyOfflineQueueChanged();
+    dropPendingFilesForOffline();
+    setSavedOffline(true);
+  }
+
   async function handleSubmit(formData: FormData) {
     setPending(true);
     setError(null);
+    // 成功后会 router.push 离开这一页。跳转完成前按钮必须保持禁用：
+    // 原来 finally 里无条件 setPending(false)，跳转途中再点一次，服务端按
+    // clientUuid 认出是同一笔，但 finishCreate 会把收据再传一遍。
+    let leaving = false;
 
     if (isJournalScenario) {
       // Belt and suspenders on top of the disabled submit button and the
@@ -358,6 +391,7 @@ export function TransactionForm({
 
       try {
         const created = await createJournal(orgSlug, journalPayload);
+        leaving = true;
         await finishCreate(created.id);
       } catch (e) {
         const message = (e as Error)?.message ?? '';
@@ -367,14 +401,12 @@ export function TransactionForm({
           // Same offline safety net as every other scenario card gets below —
           // this branch used to return before ever reaching it, so a lost
           // response here meant a silently dropped entry instead of a queued one.
-          await enqueueOfflineTransaction(orgSlug, journalPayload);
-          dropPendingFilesForOffline();
-          setSavedOffline(true);
+          await saveOffline(journalPayload);
           return;
         }
         setError(message);
       } finally {
-        setPending(false);
+        if (!leaving) setPending(false);
       }
       return;
     }
@@ -411,6 +443,7 @@ export function TransactionForm({
       // 接手说这句话；在这张表单上闪一下再跳走，用户看不见。
       if (isEdit && initialData) {
         await updateTransaction(orgSlug, initialData.id, payload);
+        leaving = true;
         router.push(`/${orgSlug}/transactions?saved=1`);
       } else {
         const created = replacing
@@ -419,6 +452,7 @@ export function TransactionForm({
               voidReason: interpolate(t.transaction.replaceVoidReason, { kind: kindLabels[kind] }),
             })
           : await createTransaction(orgSlug, payload);
+        leaving = true;
         await finishCreate(created.id);
       }
     } catch (e) {
@@ -431,14 +465,12 @@ export function TransactionForm({
         // clientUuid is fixed for the lifetime of this form instance and the
         // server dedupes on it, so replaying this entry from the queue is safe.
         // Offline is create-only: editing needs conflict-merge UI, deferred per spec.
-        await enqueueOfflineTransaction(orgSlug, payload);
-        dropPendingFilesForOffline();
-        setSavedOffline(true);
+        await saveOffline(payload);
         return;
       }
       setError(message);
     } finally {
-      setPending(false);
+      if (!leaving) setPending(false);
     }
   }
 
@@ -479,18 +511,18 @@ export function TransactionForm({
     setError(null);
     try {
       await voidTransaction(orgSlug, initialData.id, voidReason);
+      // 成功后保持 pending 直到跳走，免得跳转途中按钮又亮起来。
       router.push(`/${orgSlug}/transactions`);
     } catch (e) {
       setError((e as Error).message);
       setVoidDialog(false);
-    } finally {
       setPending(false);
     }
   }
 
   return (
     <>
-    <form key={entryGeneration} action={handleSubmit} className="transaction-form">
+    <form key={entryGeneration} onSubmit={onFormSubmit} className="transaction-form">
       {savedOffline ? (
         <div role="status" className="form-success">
           <p>{t.transaction.savedOffline}</p>

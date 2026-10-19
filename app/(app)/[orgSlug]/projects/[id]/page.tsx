@@ -1,9 +1,10 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -29,21 +30,16 @@ export default async function ProjectDetailPage({
   params: Promise<{ orgSlug: string; id: string }>;
 }) {
   const { orgSlug, id } = await params;
+  // 不是 uuid 的 id 进 SQL 是类型错误、整页 500；与「查不到」一样给 404。
+  if (!isUuid(id)) notFound();
   // 与 projects/page.tsx 同一个动作：项目是只读视图，不需要更高的权限，
   // 但也不能比列表页松——列表页看得到的人才该看得到详情。
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
-  const project = await withTransaction(context.userId, (tx) =>
-    getProject(tx, context.organizationId, id),
-  );
-
-  // getProject 已经按 organization_id 过滤过，所以「查不到」与「不是你的」
-  // 在这里是同一件事——两者都只该得到 404，回一句「这个项目属于别家公司」
-  // 等于确认了那个 id 在别处存在。
-  if (!project) notFound();
-
+  // 项目与盈亏放在同一个事务里，省一整轮 begin / set role / commit。
+  //
   // 盈亏必须等项目确认存在之后再查：getProjectProfitability 对查不到的项目
   // 是直接抛错的（那是给调用方传错 id 用的信号），先查它会把一个本该是 404
   // 的请求变成 500。
@@ -51,9 +47,19 @@ export default async function ProjectDetailPage({
   // 口径直接复用列表页用的同一个函数，不在这里另写一条 SQL——项目盈亏和
   // 损益表的口径（本位币、排除作废、按借贷方向取净额）全部集中在那个函数里，
   // 复制一份出来就等于给同一个数字准备了第二个会跑偏的答案。
-  const profitability = await withTransaction(context.userId, (tx) =>
-    getProjectProfitability(tx, context.organizationId, project.id),
-  );
+  const { project, profitability } = await withTransaction(context.userId, async (tx) => {
+    const found = await getProject(tx, context.organizationId, id);
+    if (!found) return { project: null, profitability: null };
+    return {
+      project: found,
+      profitability: await getProjectProfitability(tx, context.organizationId, found.id),
+    };
+  });
+
+  // getProject 已经按 organization_id 过滤过，所以「查不到」与「不是你的」
+  // 在这里是同一件事——两者都只该得到 404，回一句「这个项目属于别家公司」
+  // 等于确认了那个 id 在别处存在。
+  if (!project || !profitability) notFound();
 
   const statusLabel: Record<string, string> = {
     active: t.projects.statusActive,

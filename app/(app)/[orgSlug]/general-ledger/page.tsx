@@ -1,6 +1,6 @@
 import { GeneralLedgerView } from '@/components/reports/general-ledger-view';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
+import { todayInOrg, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getFiscalYearStartMonth, getUserLocale } from '@/server/repositories/organizations';
 import { fiscalYearFor } from '@/server/services/year-end-close';
@@ -26,7 +26,7 @@ export default async function GeneralLedgerPage({
 }) {
   const { orgSlug } = await params;
   const sp = await searchParams;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
@@ -43,11 +43,14 @@ export default async function GeneralLedgerPage({
     // 的一次是「看看 retained-earnings 这个科目到底是怎么来的」，而年结分录
     // 落在财年最后一天——按日历年取默认区间的话，7 月起的公司打开总账，
     // 默认区间正好把上一次年结排除在外，那个科目的余额没有任何一行解释得了。
-    const startMonth = await getFiscalYearStartMonth(tx, context.organizationId);
+    // 两条互不依赖，同一条连接上流水线发出。
+    const [startMonth, allAccts] = await Promise.all([
+      getFiscalYearStartMonth(tx, context.organizationId),
+      listAllAccounts(tx, context.organizationId),
+    ]);
     const defaultFrom = fiscalYearFor(today, startMonth).start;
     const resolvedFrom = isIsoDate(sp.from) ? sp.from : defaultFrom;
 
-    const allAccts = await listAllAccounts(tx, context.organizationId);
     // 当前选中的科目即便已归档也留在下拉里：归档科目照样有历史分录可查，
     // 选项里没有它的话，下拉显示的是「选择科目…」，与下面那张账对不上。
     const options = allAccts.filter((a) => a.isActive || a.id === accountId);

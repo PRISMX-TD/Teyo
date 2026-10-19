@@ -211,23 +211,30 @@ export async function getAttachmentSignedUrl(
 export async function deleteAttachment(orgSlug: string, attachmentId: string): Promise<void> {
   const context = await requirePermission(orgSlug, 'transaction:create');
 
+  // 授权与删行在同一个事务里。原来是两个：先开一个事务查权限、提交，再开
+  // 第二个事务删行——多一次 BEGIN/COMMIT 往返不说，两者之间账单可能已经被
+  // 作废，第二个事务照删不误，而上传那一侧早就为同一个缝隙加了第二遍带锁
+  // 的检查（见 uploadFor）。
   const attachment = await withTransaction(context.userId, async (tx) => {
     const found = await getAttachment(tx, context.organizationId, attachmentId);
     await assertCanEditOwner(tx, context, found.owner);
-    return found;
-  });
+    if (found.owner.type === 'bill') {
+      // 权限过了之后再带锁读一遍，理由见 assertCanEditBill 的 lock 参数。
+      await assertCanEditOwner(tx, context, found.owner, { lock: true });
+    }
 
-  await withTransaction(context.userId, async (tx) => {
     await deleteAttachmentRow(tx, context.organizationId, attachmentId);
     await recordAudit(tx, {
       organizationId: context.organizationId,
       actorUserId: context.userId,
-      action: attachment.owner.type === 'transaction' ? 'transaction.updated' : 'bill.updated',
+      action: found.owner.type === 'transaction' ? 'transaction.updated' : 'bill.updated',
       entityType: 'attachment',
       entityId: attachmentId,
-      before: { fileName: attachment.fileName },
+      before: { fileName: found.fileName },
       after: null,
     });
+
+    return found;
   });
 
   await getStorageClient().remove(attachment.storagePath);

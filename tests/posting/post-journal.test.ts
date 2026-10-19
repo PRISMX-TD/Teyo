@@ -4,7 +4,7 @@ import { admin } from '@/tests/helpers/db';
 import { withTransaction } from '@/server/db/transaction';
 import type { OrgContext } from '@/server/auth/guard';
 import { LedgerError } from '@/server/domain/ledger';
-import { postJournal, type PostJournalInput } from '@/server/posting/post-journal';
+import { postJournal, repostJournal, type PostJournalInput } from '@/server/posting/post-journal';
 import {
   createTestOrgWithSeed,
   createTestUser,
@@ -377,5 +377,58 @@ describe('postJournal - account ownership', () => {
       select id from journal_lines where organization_id = ${org.id} and account_id = ${other.accountsByCode.cash}
     `;
     expect(orphanLines).toHaveLength(0);
+  });
+});
+
+describe('repostJournal - stored rate reuse', () => {
+  // 空汇率框（''）与没送汇率（undefined）同义。只认 undefined 时，一次
+  // 只改备注的保存会重新查缓存，把屏幕上从未展示过的另一个汇率写进去。
+  it('treats an empty manual rate like no manual rate and keeps the stored rate', async () => {
+    const day = '2032-07-14';
+    await seedRate('AUD', 'MYR', 3_00000000n, day);
+
+    const clientUuid = randomUUID();
+    const { transactionId } = await withTransaction(ownerId, (tx) =>
+      postJournal(tx, ctx, baseInput({ currency: 'AUD', occurredOn: day, clientUuid })),
+    );
+
+    // 缓存在这之后变了（cron 补上了当天的精确汇率）。
+    await seedRate('AUD', 'MYR', 3_50000000n, day);
+
+    const [stored] = await admin`
+      select description, currency, amount_minor, base_amount_minor, category_id, project_id,
+             exchange_rate, rate_source
+      from transactions where id = ${transactionId}
+    `;
+
+    await withTransaction(ownerId, (tx) =>
+      repostJournal(tx, ctx, {
+        transactionId,
+        event: baseInput().event,
+        occurredOn: day,
+        description: 'note edited',
+        currency: 'AUD',
+        manualRate: '',
+        manualRateEntry: 'available',
+        categoryId: null,
+        existing: {
+          occurredOn: day,
+          description: stored.description as string,
+          currency: stored.currency as string,
+          amountMinor: BigInt(stored.amount_minor as string),
+          baseAmountMinor: BigInt(stored.base_amount_minor as string),
+          categoryId: null,
+          projectId: null,
+          exchangeRate: String(stored.exchange_rate),
+          rateSource: stored.rate_source as 'auto' | 'manual',
+        },
+      }),
+    );
+
+    const [after] = await admin`
+      select exchange_rate, base_amount_minor from transactions where id = ${transactionId}
+    `;
+    expect(Number(after.exchange_rate)).toBeCloseTo(3.0, 6);
+    expect(after.base_amount_minor).toBe('3000');
   });
 });

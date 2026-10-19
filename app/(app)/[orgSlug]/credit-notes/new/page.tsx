@@ -1,6 +1,6 @@
 import { CreditNoteForm } from '@/components/credit-notes/credit-note-form';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
@@ -11,7 +11,7 @@ export default async function NewCreditNotePage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:create');
+  const context = await requirePagePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 

@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { listAuditLogs } from '@/server/repositories/audit-logs';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -17,7 +17,7 @@ export default async function AuditSettingsPage({
   // audit:read（owner/admin），不是 report:export：audit_logs 的 RLS 只放行
   // owner/admin，用 report:export 时 bookkeeper/viewer 能进这页，但永远只看到
   // 「什么都没发生」——一个看似正常、实则被 RLS 清空的空列表。
-  const context = await requirePermission(orgSlug, 'audit:read');
+  const context = await requirePagePermission(orgSlug, 'audit:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

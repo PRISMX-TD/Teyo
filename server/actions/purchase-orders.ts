@@ -2,8 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { requirePermission } from '@/server/auth/guard';
-import { withTransaction } from '@/server/db/transaction';
+import { isoDate } from '@/lib/schemas';
+import { AuthError, assertContactInOrg, requirePermission } from '@/server/auth/guard';
+import { withTransaction, type Tx } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
   getPurchaseOrder,
@@ -29,7 +30,8 @@ import { LedgerError } from '@/server/domain/ledger';
 import { extendQuantity, parseQuantityToScaled } from '@/server/repositories/inventory';
 
 const CURRENCY = z.string().regex(/^[A-Z]{3}$/, 'Currency must be a three-letter code.');
-const DATE_ONLY = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
+// 格式之外还要求是日历上真的有的一天，见 lib/schemas.ts 的 isoDate。
+const DATE_ONLY = isoDate;
 /** 已经是最小货币单位的整数字符串（可含负号由上层业务决定，这里只收非负）。 */
 const MINOR = z.string().regex(/^\d+$/, 'Amounts must be whole numbers of minor units.');
 /** 数量：十进制字符串或数字，最多四位小数，由 parseQuantityToScaled 兜底校验。 */
@@ -140,6 +142,28 @@ function totalsFor(
 }
 
 /**
+ * 明细上的税率必须属于本公司。
+ *
+ * po_items.tax_rate_id 的外键同样只指向 tax_rates(id)、没有公司维度，与
+ * bills.ts 的 assertTaxRateBelongsToOrg 堵的是同一个洞——这里原来一次都不查。
+ */
+async function assertPoTaxRatesInOrg(
+  tx: Tx,
+  organizationId: string,
+  items: readonly { taxRateId?: string }[],
+): Promise<void> {
+  const ids = [...new Set(items.map((item) => item.taxRateId).filter((id): id is string => !!id))];
+  if (ids.length === 0) return;
+  const rows = await tx`
+    select id from tax_rates
+    where organization_id = ${organizationId} and id = any(${ids}::uuid[])
+  `;
+  if (rows.length !== ids.length) {
+    throw new AuthError('not_found', 'One of the tax rates on this purchase order was not found.');
+  }
+}
+
+/**
  * 汇率：用户填了就解析，没填就 1。
  *
  * 只有在币种等于本位币时「没填」才等于 1。币种不同却没给汇率的话，
@@ -200,6 +224,9 @@ export async function createPurchaseOrder(
   const scaledRate = resolvePoRate(parsed.exchangeRate, currency, context.baseCurrency);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 供应商与明细上的税率都必须是本公司的，理由见 assertContactInOrg。
+    await assertContactInOrg(tx, context.organizationId, parsed.contactId);
+    await assertPoTaxRatesInOrg(tx, context.organizationId, parsed.items);
     const poNumber = await getNextPoNumber(tx, context.organizationId);
 
     const { documentTotalMinor, baseTotalMinor, lineAmounts } = totalsFor(
@@ -295,6 +322,13 @@ export async function updatePurchaseOrderAction(
         `Purchase order ${before.poNumber} is no longer a draft and cannot be edited. ` +
           'Void it and raise a new one.',
       );
+    }
+
+    if (parsed.contactId !== undefined && parsed.contactId !== before.contactId) {
+      await assertContactInOrg(tx, context.organizationId, parsed.contactId);
+    }
+    if (parsed.items) {
+      await assertPoTaxRatesInOrg(tx, context.organizationId, parsed.items);
     }
 
     // 币种与汇率任一没给就沿用这张单原来的。原来的写法是「没给就不改」，

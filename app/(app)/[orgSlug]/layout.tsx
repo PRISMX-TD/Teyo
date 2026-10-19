@@ -1,5 +1,5 @@
-import { requireUserId } from '@/server/auth/guard';
-import { resolveOrgContext } from '@/server/auth/guard';
+import { redirect } from 'next/navigation';
+import { AuthError, requireUserId, resolveOrgContext } from '@/server/auth/guard';
 import { getMessages } from '@/lib/i18n';
 import { listUserOrganizations, getUserLocale } from '@/server/repositories/organizations';
 import { Sidebar } from '@/components/shell/sidebar';
@@ -16,21 +16,31 @@ export default async function AppLayout({
 }) {
   const { orgSlug } = await params;
   const userId = await requireUserId();
-  const allOrgs = await listUserOrganizations(userId);
+
+  // 三条查询互不依赖，拿到 userId 后一起发出。原来是串行的四次往返
+  // （getUser → 公司列表 → 公司上下文 → 语言）。页面与 layout 是并行渲染的，
+  // 页面里的 requirePermission / getUserLocale 经 React.cache 拿到的是这里
+  // 同一个 Promise——语言查询提前发出，页面首段也跟着少等一轮。
+  // resolveOrgContext 对非成员会抛 not_found；先接住，下面按成员资格重定向。
+  const [allOrgs, context, localeRaw] = await Promise.all([
+    listUserOrganizations(userId),
+    resolveOrgContext(orgSlug).catch((error: unknown) => {
+      // 只吞「不是成员」；数据库挂了之类照常抛给 error boundary，
+      // 不能伪装成「你已无权访问」。
+      if (error instanceof AuthError) return null;
+      throw error;
+    }),
+    getUserLocale(userId),
+  ]);
 
   const isMember = allOrgs.some((o) => o.slug === orgSlug);
-  if (!isMember) {
-    const { redirect } = await import('next/navigation');
+  if (!isMember || !context) {
     // 带上原因：被暂停或移除的人不该被一声不响地丢到建公司页。
+    // context 为空而列表里还有它：两次查询之间成员资格被撤销，同样处理。
     redirect('/?notice=no_access');
   }
 
-  // 角色给侧栏/dock 筛入口；React.cache 让页面里同一请求的 resolveOrgContext
-  // 直接复用这次结果。原来这里没有 await：成员资格在这两次查询之间被撤销时，它抛出的 AuthError
-  // 没有任何人接，变成一个未处理的 Promise rejection。
-  const context = await resolveOrgContext(orgSlug);
-
-  const locale = (await getUserLocale(userId)) as 'en' | 'zh';
+  const locale = localeRaw as 'en' | 'zh';
   const t = getMessages(locale);
 
   return (

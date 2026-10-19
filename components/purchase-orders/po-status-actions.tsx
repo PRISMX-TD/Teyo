@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRefreshAfter } from '@/components/ui/use-refresh-after';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import type { PurchaseOrderRow } from '@/server/repositories/purchase-orders';
@@ -42,7 +42,7 @@ type Props = {
  */
 export function PoStatusActions({ orgSlug, locale, po, variant, onChanged }: Props) {
   const t = getMessages(locale);
-  const router = useRouter();
+  const { refresh, refreshing } = useRefreshAfter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [confirmVoid, setConfirmVoid] = useState(false);
@@ -66,7 +66,7 @@ export function PoStatusActions({ orgSlug, locale, po, variant, onChanged }: Pro
       await setPoStatusAction(orgSlug, po.id, status);
       setConfirmVoid(false);
       onChanged?.(status);
-      router.refresh();
+      refresh();
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -84,7 +84,7 @@ export function PoStatusActions({ orgSlug, locale, po, variant, onChanged }: Pro
           key={status}
           type="button"
           className={variant === 'rows' ? 'row-button' : 'btn-small'}
-          disabled={pending}
+          disabled={pending || refreshing}
           onClick={() => change(status)}
         >
           {verb[status]}
@@ -94,7 +94,7 @@ export function PoStatusActions({ orgSlug, locale, po, variant, onChanged }: Pro
         <button
           type="button"
           className={variant === 'rows' ? 'row-button is-destructive' : 'btn-small btn-danger'}
-          disabled={pending}
+          disabled={pending || refreshing}
           onClick={() => {
             setError(null);
             setConfirmVoid(true);

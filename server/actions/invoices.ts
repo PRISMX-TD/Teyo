@@ -2,7 +2,14 @@
 
 import { revalidatePath } from 'next/cache';
 import { withTransaction, type Tx } from '@/server/db/transaction';
-import { requirePermission, AuthError, type OrgContext } from '@/server/auth/guard';
+import { z } from 'zod';
+import { isoDate, parseOrThrow } from '@/lib/schemas';
+import {
+  assertContactInOrg,
+  requirePermission,
+  AuthError,
+  type OrgContext,
+} from '@/server/auth/guard';
 import { MAX_INVOICE_REFERENCE_LENGTH } from '@/lib/invoice-options';
 import { LedgerError } from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor, sumMinor } from '@/server/domain/money';
@@ -149,6 +156,21 @@ function normalizeReference(value: string | undefined): string | null {
   return trimmed || null;
 }
 
+/**
+ * 两个日期必须是真的日期。原来一个字都不验：'2026-02-30' 或者空串一路走到
+ * Postgres 才被拒，用户读到的是一句裸的 date/time 报错；而开具时它还会先
+ * 进封账判断，拿一个不存在的日期去比大小。
+ */
+const invoiceDatesSchema = z.object({ issueDate: isoDate, dueDate: isoDate });
+
+function assertInvoiceDates(input: { issueDate: string; dueDate: string }): void {
+  parseOrThrow(
+    invoiceDatesSchema,
+    { issueDate: input.issueDate, dueDate: input.dueDate },
+    (m) => new LedgerError(m),
+  );
+}
+
 /** 分录摘要。日后翻总账的人要能认出这一笔是哪张发票来的。 */
 function invoiceDescription(invoiceNumber: string): string {
   return `Invoice ${invoiceNumber}`;
@@ -249,6 +271,7 @@ export async function createInvoice(
     throw new AuthError('forbidden', 'An invoice needs at least one item.');
   }
 
+  assertInvoiceDates(input);
   const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
   const issue = input.issue === true;
   const reference = normalizeReference(input.reference);
@@ -258,6 +281,8 @@ export async function createInvoice(
   // 为什么不是行锁，见 withDocumentNumberRetry 的注释。
   const result = await withDocumentNumberRetry('invoices_org_number', () =>
     withTransaction(context.userId, async (tx) => {
+      // 客户必须是本公司的，理由见 assertContactInOrg。
+      await assertContactInOrg(tx, context.organizationId, input.contactId);
       const invoiceNumber = await getNextInvoiceNumber(tx, context.organizationId);
       const { taxRateBps, amounts, items } = computeInvoiceAmounts({ ...input, currency });
 
@@ -406,6 +431,7 @@ export async function updateInvoice(
     throw new AuthError('forbidden', 'An invoice needs at least one item.');
   }
 
+  assertInvoiceDates(input);
   const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
   const reference = normalizeReference(input.reference);
 
@@ -414,6 +440,11 @@ export async function updateInvoice(
 
     if (existing.status === 'voided' || existing.voidedAt) {
       throw new AuthError('forbidden', 'This invoice is voided and can no longer be edited.');
+    }
+
+    // 换了客户才需要再查：原来那位已经在库里，查它是一次白跑的往返。
+    if (input.contactId !== existing.contactId) {
+      await assertContactInOrg(tx, context.organizationId, input.contactId);
     }
 
     const { taxRateBps, amounts, items } = computeInvoiceAmounts({ ...input, currency });

@@ -100,6 +100,10 @@ export function DocumentVoidDialog({
       aria-labelledby={titleId}
       // Esc 关闭时浏览器自己 close()，状态得跟着回去，否则按钮下次点不动。
       onClose={onCancel}
+      // 作废请求在途时不许 Esc 关掉：关掉后请求照样会完成，用户却以为取消了。
+      onCancel={(event) => {
+        if (pending) event.preventDefault();
+      }}
       // 点遮罩关闭。`event.target === dialog` 只有点在 backdrop 上才成立
       // ——对话框内容是它的子元素，点内容不会冒泡成这个相等判断。
       onClick={(event) => {

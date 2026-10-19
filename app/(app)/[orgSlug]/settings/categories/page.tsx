@@ -3,7 +3,7 @@ import { Plus } from '@/components/ui/icons';
 import { NamedList } from '@/components/settings/named-list';
 import { getMessages } from '@/lib/i18n';
 import { createCategoryFromNamedList, renameCategory, setCategoryActive } from '@/server/actions/categories';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listAllCategories } from '@/server/repositories/categories';
@@ -15,16 +15,16 @@ export default async function CategoriesSettingsPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'category:manage');
+  const context = await requirePagePermission(orgSlug, 'category:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
-  const categories = await withTransaction(context.userId, (tx) =>
-    listAllCategories(tx, context.organizationId),
-  );
-
-  const accounts = await withTransaction(context.userId, (tx) =>
-    listAllAccounts(tx, context.organizationId),
+  // 一个事务、两条并发：原来是两次独立事务串行，各自一轮 begin / set role / commit。
+  const [categories, accounts] = await withTransaction(context.userId, (tx) =>
+    Promise.all([
+      listAllCategories(tx, context.organizationId),
+      listAllAccounts(tx, context.organizationId),
+    ]),
   );
 
   const items = categories.map((c) => ({

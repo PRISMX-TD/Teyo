@@ -248,8 +248,12 @@ export async function repostJournal(
   // 方算好汇率再传进来，任何调用方都能注入一个任意的 scaledRate——边界就漏了。
   // 币种或日期真的变了、或者用户主动填了手工汇率，才应该重新解析，那三种
   // 情况都会让这个条件为 false，直接落回 resolveRate。
+  //
+  // 空字符串与 undefined 同义——resolveRate 也是这么认的。只判 undefined 的话，
+  // 一个送了空汇率框的表单（payments / credit-notes 的 schema 允许 ''）会被当成
+  // 「填了手工汇率」，跳过复用、重新查缓存，正是上面这段要挡的那种漂移。
   const reuseStoredRate =
-    input.manualRate === undefined &&
+    (input.manualRate === undefined || input.manualRate === '') &&
     input.currency === existing.currency &&
     input.occurredOn === existing.occurredOn;
 

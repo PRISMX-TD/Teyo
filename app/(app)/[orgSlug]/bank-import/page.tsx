@@ -2,7 +2,7 @@ import { BackLink } from '@/components/ui/back-link';
 import { ImportForm } from '@/components/bank-import/import-form';
 import { ImportedList } from '@/components/bank-import/imported-list';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePermission, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listMoneyAccounts } from '@/server/repositories/accounts';
@@ -17,22 +17,26 @@ export default async function BankImportPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:create');
+  const context = await requirePagePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const i18n = getMessages(locale);
 
-  const moneyAccountsRaw = await withTransaction(context.userId, (tx) =>
-    listMoneyAccounts(tx, context.organizationId),
-  );
+  // 资金账户、已导入流水、两个方向的分类：互不依赖，一个事务里一起查。
+  // 原来是三次独立事务串行。
+  const [moneyAccountsRaw, importedTxns, incomeCategories, expenseCategories] =
+    await withTransaction(context.userId, (tx) =>
+      Promise.all([
+        listMoneyAccounts(tx, context.organizationId),
+        listImportedTransactions(tx, context.organizationId),
+        listSelectableCategories(tx, context.organizationId, 'income'),
+        listSelectableCategories(tx, context.organizationId, 'expense'),
+      ]),
+    );
   const moneyAccounts = moneyAccountsRaw.map((a) => ({
     id: a.id,
     name_en: a.nameEn,
     name_zh: a.nameZh,
   }));
-
-  const importedTxns = await withTransaction(context.userId, (tx) =>
-    listImportedTransactions(tx, context.organizationId),
-  );
 
   /**
    * 生成交易时能选的分类。
@@ -46,18 +50,12 @@ export default async function BankImportPage({
    * 客户端按符号过滤（见 ImportedList）。在这里只查一种，另一半流水就选
    * 不到任何分类。
    */
-  const categories = await withTransaction(context.userId, async (tx) => {
-    const [income, expense] = await Promise.all([
-      listSelectableCategories(tx, context.organizationId, 'income'),
-      listSelectableCategories(tx, context.organizationId, 'expense'),
-    ]);
-    return [...income, ...expense].map((c) => ({
-      id: c.id,
-      nameEn: c.nameEn,
-      nameZh: c.nameZh,
-      kind: c.kind as 'income' | 'expense',
-    }));
-  });
+  const categories = [...incomeCategories, ...expenseCategories].map((c) => ({
+    id: c.id,
+    nameEn: c.nameEn,
+    nameZh: c.nameZh,
+    kind: c.kind as 'income' | 'expense',
+  }));
 
   return (
     <>

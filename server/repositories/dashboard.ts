@@ -179,6 +179,7 @@ export async function getDashboardKpis(
           join transactions t on t.id = l.transaction_id
           join accounts a on a.id = l.account_id
           where a.organization_id = ${organizationId}
+            and l.organization_id = ${organizationId}
             and a.is_money_account
             and t.voided_at is null
             and t.occurred_on <= ${today}::date
@@ -346,6 +347,9 @@ export async function getBankBalances(
           from journal_lines l
           join transactions t on t.id = l.transaction_id
           where l.account_id = a.id
+            -- 冗余但必要：journal_lines 上唯一的科目索引是
+            -- (organization_id, account_id)，不带公司条件就用不上它。
+            and l.organization_id = ${organizationId}
             and t.voided_at is null
             and t.occurred_on <= ${today}::date
         ), 0) as balance

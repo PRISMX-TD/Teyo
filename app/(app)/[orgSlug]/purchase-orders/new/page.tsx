@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { PoForm } from '@/components/purchase-orders/po-form';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listTaxRates } from '@/server/repositories/tax';
@@ -16,7 +16,7 @@ export default async function NewPurchaseOrderPage({
   const { orgSlug } = await params;
   // 与 create 那个 action 同一道权限：只读用户进来只会看到一张必然保存
   // 失败的表单。
-  const context = await requirePermission(orgSlug, 'transaction:create');
+  const context = await requirePagePermission(orgSlug, 'transaction:create');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 

@@ -148,6 +148,12 @@ describe('buildCsv', () => {
     expect(text).toContain("'@z");
   });
 
+  it('neutralises a leading tab or carriage return as well', () => {
+    const text = buildCsv(['a'], [['\t=1+1'], ['\r=2+2']]).toString('utf8');
+    expect(text).toContain("'\t=1+1");
+    expect(text).toContain('"\'\r=2+2"');
+  });
+
   // 负数净额（科目汇总里科目落在自然方向反面）不是公式，不能被加单引号变成文本。
   it('leaves plain negative numbers untouched', () => {
     const text = buildCsv(['a'], [['-1200.50'], ['-3']]).toString('utf8');

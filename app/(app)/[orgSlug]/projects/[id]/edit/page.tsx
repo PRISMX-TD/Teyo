@@ -1,8 +1,9 @@
 import { notFound } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
 import { BackLink } from '@/components/ui/back-link';
 import { ProjectForm } from '@/components/projects/project-form';
 import { getMessages } from '@/lib/i18n';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listContacts } from '@/server/repositories/contacts';
@@ -18,8 +19,10 @@ export default async function EditProjectPage({
   params: Promise<{ orgSlug: string; id: string }>;
 }) {
   const { orgSlug, id } = await params;
+  // 不是 uuid 的 id 进 SQL 是类型错误、整页 500；与「查不到」一样给 404。
+  if (!isUuid(id)) notFound();
   // 与 updateProjectAction 同一道权限，否则只读用户看到的是一张必然保存失败的表单。
-  const context = await requirePermission(orgSlug, 'account:manage');
+  const context = await requirePagePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 

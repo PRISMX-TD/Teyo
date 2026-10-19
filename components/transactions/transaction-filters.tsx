@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useTransition } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
@@ -19,14 +19,21 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
   const t = getMessages(locale);
   const router = useRouter();
   const params = useSearchParams();
+  // 筛选要等服务端把新列表渲染出来，手机上可能要一两秒。放进 transition 里，
+  // 按钮在这段时间显示「加载中」，而不是看上去点了没反应、再点一次。
+  const [navigating, startNavigation] = useTransition();
 
-  function apply(formData: FormData) {
+  // 用 onSubmit 而不是 <form action>：action 跑完后 React 会把非受控字段
+  // 重置回 defaultValue——那是旧地址栏里的值，新列表到来之前筛选框会先
+  // 闪回上一次的条件。
+  function apply(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     const next = new URLSearchParams();
-    for (const [key, value] of formData.entries()) {
+    for (const [key, value] of new FormData(event.currentTarget).entries()) {
       const text = String(value).trim();
       if (text.length > 0) next.set(key, text);
     }
-    router.push(`/${orgSlug}/transactions?${next.toString()}`);
+    startNavigation(() => router.push(`/${orgSlug}/transactions?${next.toString()}`));
   }
 
   /* 有没有条件正在生效。决定筛选区一进页面是展开还是收起：
@@ -72,7 +79,11 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
       </button>
       <form
         id="transaction-filters"
-        action={apply}
+        // 地址栏一变就重建表单：字段都是非受控的 defaultValue，用户改过的框
+        // 不会跟着新的 defaultValue 走。原来点「重置」后地址栏清空了，框里却
+        // 还留着刚才打的条件，再点「筛选」又把它们带回去。
+        key={params.toString()}
+        onSubmit={apply}
         className="filters"
         data-collapsed={openOnMobile ? undefined : 'true'}
       >
@@ -157,10 +168,16 @@ export function TransactionFilters({ orgSlug, locale, categories, moneyAccounts,
         </label>
 
         {/* 重置在左、筛选在右：主按钮落在拇指那一侧，桌面上也是主按钮靠右。 */}
-        <button type="button" onClick={() => router.push(`/${orgSlug}/transactions`)}>
+        <button
+          type="button"
+          disabled={navigating}
+          onClick={() => startNavigation(() => router.push(`/${orgSlug}/transactions`))}
+        >
           {t.filters.reset}
         </button>
-        <button type="submit">{t.filters.apply}</button>
+        <button type="submit" disabled={navigating} aria-busy={navigating || undefined}>
+          {navigating ? t.common.loading : t.filters.apply}
+        </button>
       </div>
       </form>
     </div>

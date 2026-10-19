@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
 import { BillForm } from '@/components/bills/bill-form';
 import { AttachmentPanel } from '@/components/transactions/attachment-panel';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import { requirePermission, todayInOrg } from '@/server/auth/guard';
+import { todayInOrg, requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -38,30 +39,35 @@ export default async function BillDetailPage({
   params: Promise<{ orgSlug: string; id: string }>;
 }) {
   const { orgSlug, id } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  // 不是 uuid 的 id 进 SQL 是类型错误、整页 500；与「查不到」一样给 404。
+  if (!isUuid(id)) notFound();
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 
   const { bill, contacts, taxRates, attachments, deductedMinor } = await withTransaction(context.userId, async (tx) => {
-    const found = await getBill(tx, context.organizationId, id);
-    const deducted = found
-      ? ((await sumDeductedByDocument(tx, context.organizationId, 'bill', [found.id])).get(
-          found.id,
-        ) ?? 0n)
-      : 0n;
-    const rows = await tx`
-      select id, name
-      from contacts
-      where organization_id = ${context.organizationId}
-        and type in ('vendor', 'both')
-        and is_active = true
-      order by name
-    ` as { id: string; name: string }[];
-    const rates = await listTaxRates(tx, context.organizationId);
-    // 查不到账单时 found 是 null，下面会 404；这时也就不必去取附件。
-    const files = found
-      ? await listAttachments(tx, context.organizationId, { type: 'bill', id: found.id })
-      : [];
+    // 账单、供应商、税率互不依赖，同一条连接上一起发；已付与附件要等账单。
+    const [found, rows, rates] = await Promise.all([
+      getBill(tx, context.organizationId, id),
+      tx`
+        select id, name
+        from contacts
+        where organization_id = ${context.organizationId}
+          and type in ('vendor', 'both')
+          and is_active = true
+        order by name
+      ` as Promise<{ id: string; name: string }[]>,
+      listTaxRates(tx, context.organizationId),
+    ]);
+    // 查不到账单时 found 是 null，下面会 404；这时也就不必去取已付与附件。
+    const [deducted, files] = found
+      ? await Promise.all([
+          sumDeductedByDocument(tx, context.organizationId, 'bill', [found.id]).then(
+            (sums) => sums.get(found.id) ?? 0n,
+          ),
+          listAttachments(tx, context.organizationId, { type: 'bill', id: found.id }),
+        ])
+      : [0n, []];
     return {
       bill: found,
       contacts: rows,

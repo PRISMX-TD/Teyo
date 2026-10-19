@@ -3,7 +3,7 @@ import { Plus } from '@/components/ui/icons';
 import { ContactList } from '@/components/settings/contact-list';
 import { getMessages } from '@/lib/i18n';
 import { createContact, updateContactAction, toggleContactActive } from '@/server/actions/contacts';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listContacts } from '@/server/repositories/contacts';
@@ -14,7 +14,7 @@ export default async function ContactsSettingsPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'account:manage');
+  const context = await requirePagePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

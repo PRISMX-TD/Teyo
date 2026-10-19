@@ -2,7 +2,7 @@ import { BackLink } from '@/components/ui/back-link';
 import { redirect } from 'next/navigation';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { INVOICE_LOCALES, INVOICE_LOCALE_NAMES } from '@/lib/invoice-options';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { updatePeriodLock, updateOrganization } from '@/server/actions/organizations';
@@ -45,7 +45,7 @@ export default async function GeneralSettingsPage({
 }) {
   const { orgSlug } = await params;
   const saved = (await searchParams).saved as SavedSection | undefined;
-  const context = await requirePermission(orgSlug, 'account:manage');
+  const context = await requirePagePermission(orgSlug, 'account:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
@@ -55,8 +55,11 @@ export default async function GeneralSettingsPage({
   const settings = await withTransaction(context.userId, (tx) =>
     getOrganizationSettings(tx, context.organizationId),
   );
-  const logoUrl = await getLogoSignedUrl(settings.logoPath);
-  const paymentImages = await getPaymentImageUrls(settings.paymentImagePaths);
+  // 两组签名 URL 各是一次对象存储往返，互不依赖，一起发。
+  const [logoUrl, paymentImages] = await Promise.all([
+    getLogoSignedUrl(settings.logoPath),
+    getPaymentImageUrls(settings.paymentImagePaths),
+  ]);
 
   return (
     <>

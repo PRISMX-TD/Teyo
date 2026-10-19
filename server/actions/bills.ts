@@ -3,7 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { withTransaction, type Tx } from '@/server/db/transaction';
-import { requirePermission, AuthError, type OrgContext } from '@/server/auth/guard';
+import { isoDate, parseOrThrow } from '@/lib/schemas';
+import {
+  assertContactInOrg,
+  requirePermission,
+  AuthError,
+  type OrgContext,
+} from '@/server/auth/guard';
 import { LedgerError } from '@/server/domain/ledger';
 import { currencyExponent, parseDecimalToMinor, sumMinor } from '@/server/domain/money';
 import {
@@ -144,6 +150,41 @@ function computeBillAmounts(
     amounts: { subtotalMinor, taxMinor, totalMinor: subtotalMinor + taxMinor },
     items,
   };
+}
+
+/**
+ * 入参里不经计算、原样进库的那几项。
+ *
+ * status 是这里最要紧的一项：类型上它只能是 'draft' | 'received'，可 Server
+ * Action 收的是网络上的任意 JSON。原来 `input.status ?? 'received'` 照单全收，
+ * 传 'paid' 就建出一张不过账、却显示「已付清」的账单——应付从未记上，应付
+ * 账龄表里也找不到它；传 'voided' 则是一张 voided_at 为空的「作废」账单，
+ * 列表与税务报表（读的是 voided_at）照样把它算进去。
+ */
+const billInputSchema = z.object({
+  issueDate: isoDate,
+  dueDate: isoDate,
+  status: z.enum(['draft', 'received']).optional(),
+  taxRateId: z.string().uuid('That tax rate was not found in this company.').nullish(),
+});
+
+function parseBillInput(input: {
+  issueDate: string;
+  dueDate: string;
+  status?: string;
+  taxRateId?: string | null;
+}): z.infer<typeof billInputSchema> {
+  return parseOrThrow(
+    billInputSchema,
+    {
+      issueDate: input.issueDate,
+      dueDate: input.dueDate,
+      status: input.status,
+      // 空串当作没选，与表单「--」那一项同义。
+      taxRateId: input.taxRateId === '' ? null : input.taxRateId,
+    },
+    (m) => new LedgerError(m),
+  );
 }
 
 function billDescription(billNumber: string): string {
@@ -376,8 +417,9 @@ export async function createBill(
     throw new AuthError('forbidden', 'A bill needs at least one item.');
   }
 
+  const checked = parseBillInput(input);
   const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
-  const status = input.status ?? 'received';
+  const status = checked.status ?? 'received';
   const purchaseOrderId =
     input.purchaseOrderId == null || input.purchaseOrderId === ''
       ? null
@@ -388,8 +430,10 @@ export async function createBill(
   // 为什么不是行锁，见 withDocumentNumberRetry 的注释。
   const result = await withDocumentNumberRetry('bills_org_number', () =>
     withTransaction(context.userId, async (tx) => {
+      // 供应商必须是本公司的，理由见 assertContactInOrg。
+      await assertContactInOrg(tx, context.organizationId, input.contactId);
       const billNumber = await getNextBillNumber(tx, context.organizationId);
-      await assertTaxRateBelongsToOrg(tx, context.organizationId, input.taxRateId);
+      await assertTaxRateBelongsToOrg(tx, context.organizationId, checked.taxRateId);
       // 先核对采购单再写任何东西：被拒的转换不该留下半张账单。
       const sourcePo = purchaseOrderId
         ? await assertPurchaseOrderBillable(tx, context.organizationId, purchaseOrderId, {
@@ -411,7 +455,7 @@ export async function createBill(
         taxRateBps,
         taxMinor: amounts.taxMinor,
         totalMinor: amounts.totalMinor,
-        taxRateId: input.taxRateId ?? null,
+        taxRateId: checked.taxRateId ?? null,
         notes: input.notes?.trim() || null,
         purchaseOrderId,
       });
@@ -546,6 +590,7 @@ export async function updateBill(
     throw new AuthError('forbidden', 'A bill needs at least one item.');
   }
 
+  const checked = parseBillInput(input);
   const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
 
   const posted = await withTransaction(context.userId, async (tx) => {
@@ -567,7 +612,12 @@ export async function updateBill(
       );
     }
 
-    await assertTaxRateBelongsToOrg(tx, context.organizationId, input.taxRateId);
+    // 换了供应商才需要再查，理由同 updateInvoice。
+    if (input.contactId !== existing.contactId) {
+      await assertContactInOrg(tx, context.organizationId, input.contactId);
+    }
+
+    await assertTaxRateBelongsToOrg(tx, context.organizationId, checked.taxRateId);
     const { taxRateBps, amounts, items } = computeBillAmounts({ ...input, currency });
 
     // 已经付过款的账单：付款核销的是原币金额，换币种之后那几笔付款的数就
@@ -580,6 +630,15 @@ export async function updateBill(
       if (currency !== existing.currency) {
         throw new LedgerError(
           'This bill already has payments against it, so its currency cannot be changed. ' +
+            'Void those payments first.',
+        );
+      }
+      // 供应商同理，与 updateInvoice 对「客户」的那条拒绝对称：那几笔付款是
+      // 付给原来那家供应商的（payments.contact_id），把账单换到另一家名下，
+      // 两家的对账单从此都对不上，而这里原来一声不吭地放行了。
+      if (input.contactId !== existing.contactId) {
+        throw new LedgerError(
+          'This bill already has payments against it, so its vendor cannot be changed. ' +
             'Void those payments first.',
         );
       }
@@ -602,7 +661,7 @@ export async function updateBill(
       totalMinor: amounts.totalMinor,
       // 编辑时这一列原来根本没传，于是改税率只会改掉税率数值，
       // 「选的是哪一条税率记录」永远停在创建时的那个值。
-      taxRateId: input.taxRateId ?? null,
+      taxRateId: checked.taxRateId ?? null,
       notes: input.notes?.trim() || null,
     });
 

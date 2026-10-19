@@ -48,17 +48,20 @@ export default async function AccountPage({
   searchParams: Promise<{ saved?: string; error?: string; from?: string }>;
 }) {
   const userId = await requireUserId();
-  const locale = (await getUserLocale(userId)) as 'en' | 'zh';
+  // 语言、查询串、个人资料互不依赖，一起等。
+  const [localeRaw, query, [me]] = await Promise.all([
+    getUserLocale(userId),
+    searchParams,
+    withTransaction(
+      userId,
+      (tx) => tx`select display_name, email from app_users where id = ${userId}`,
+    ),
+  ]);
+  const locale = localeRaw as 'en' | 'zh';
   const t = getMessages(locale);
-  const query = await searchParams;
   const saved = query.saved as Saved | undefined;
   const failed = query.error as Failed | undefined;
   const from = returnPath(query.from);
-
-  const [me] = await withTransaction(
-    userId,
-    (tx) => tx`select display_name, email from app_users where id = ${userId}`,
-  );
   const displayName = (me?.display_name as string | undefined) ?? '';
   const email = (me?.email as string | undefined) ?? '';
   // Array.from 按码点切：中文名、带重音的名字取第一个字不会切出半个字符。

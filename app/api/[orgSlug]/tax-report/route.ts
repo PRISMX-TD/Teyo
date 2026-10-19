@@ -11,6 +11,7 @@
  * 碰到 bigint 会直接抛 TypeError，整个响应挂掉。
  */
 import { NextResponse } from 'next/server';
+import { ZodError } from 'zod';
 import { AuthError } from '@/server/auth/guard';
 import { getTaxReportAction } from '@/server/actions/tax';
 import type { TaxSideView } from '@/components/reports/tax-report-view';
@@ -62,6 +63,11 @@ export async function GET(
     }
     // action 里的 dateRangeSchema 会把「起日晚于止日」一类挡下来。那是用户
     // 填错了，不是服务器坏了——400 而不是 500。
-    return NextResponse.json({ error: 'bad_request' }, { status: 400 });
+    if (error instanceof ZodError) {
+      return NextResponse.json({ error: 'bad_request' }, { status: 400 });
+    }
+    // 其余（数据库故障等）是真的服务器错误，不能伪装成用户填错。
+    console.error('[tax-report]', error);
+    return NextResponse.json({ error: 'server_error' }, { status: 500 });
   }
 }

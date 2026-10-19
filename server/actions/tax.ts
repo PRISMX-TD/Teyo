@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
-import { requirePermission } from '@/server/auth/guard';
+import { AuthError, requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { recordAudit } from '@/server/repositories/audit-logs';
 import {
@@ -109,6 +109,13 @@ export async function updateTaxRateAction(
     // after 的话，事后对账时看到「这个月 6%、上个月 8%」也无从判断是谁在
     // 什么时候改的、从多少改到多少。
     const before = await findTaxRate(tx, context.organizationId, id);
+    // 查不到（不存在、属于别家公司、或已经删掉）就停下。原来照样往下走：
+    // update 匹配零行不报错，可 isDefault 为真时 setDefaultTaxRate 会先把
+    // 本公司现有的默认税率清掉，再去设一个根本不存在的——这家公司从此没有
+    // 默认税率，而用户看到的是「保存成功」。
+    if (!before) {
+      throw new AuthError('not_found', 'That tax rate was not found in this company.');
+    }
 
     await updateTaxRate(tx, context.organizationId, id, parsed);
 
@@ -122,14 +129,12 @@ export async function updateTaxRateAction(
       action: 'tax_rate.updated',
       entityType: 'tax_rate',
       entityId: id,
-      before: before
-        ? {
-            nameEn: before.nameEn,
-            nameZh: before.nameZh,
-            rateBps: before.rateBps,
-            isDefault: before.isDefault,
-          }
-        : null,
+      before: {
+        nameEn: before.nameEn,
+        nameZh: before.nameZh,
+        rateBps: before.rateBps,
+        isDefault: before.isDefault,
+      },
       after: parsed,
     });
   });
@@ -144,6 +149,14 @@ export async function setDefaultTaxRateAction(
   const context = await requirePermission(orgSlug, 'account:manage');
 
   await withTransaction(context.userId, async (tx) => {
+    // 先确认这条税率在本公司、而且还在用，理由同 updateTaxRateAction：
+    // setDefaultTaxRate 是「先清旧默认、再设新默认」，新的那条不存在时，
+    // 结果就是这家公司一条默认税率都不剩。已删除（停用）的税率同样不行——
+    // tax_rates_single_default 只管启用中的，设上去等于没有默认。
+    if (!(await findTaxRate(tx, context.organizationId, id))) {
+      throw new AuthError('not_found', 'That tax rate was not found in this company.');
+    }
+
     await setDefaultTaxRate(tx, context.organizationId, id);
 
     await recordAudit(tx, {

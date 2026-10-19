@@ -7,7 +7,7 @@ import { interpolate, localizedName } from '@/lib/i18n';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import { createFixedAsset, updateFixedAssetAction } from '@/server/actions/fixed-assets';
 import type { FixedAssetRow } from '@/server/repositories/fixed-assets';
-import { todayLocalISO } from '@/lib/date';
+import { useLocalToday } from '@/components/ui/use-local-today';
 
 type AccountOption = {
   id: string;
@@ -59,7 +59,10 @@ export function AssetForm({
 
   const [name, setName] = useState(asset?.name ?? '');
   const [description, setDescription] = useState(asset?.description ?? '');
-  const [purchaseDate, setPurchaseDate] = useState(asset?.purchaseDate ?? todayLocalISO());
+  // 默认日期等水合完成后才取设备上的今天，见 components/ui/use-local-today.ts。
+  const today = useLocalToday();
+  const [purchaseDateInput, setPurchaseDate] = useState<string | null>(asset?.purchaseDate ?? null);
+  const purchaseDate = purchaseDateInput ?? today;
   const [cost, setCost] = useState(
     asset ? formatMinorToDecimal(asset.costMinor, baseDecimals) : '',
   );
@@ -348,8 +351,9 @@ export function AssetForm({
             id={fid('life')}
             type="number"
             inputMode="numeric"
-            value={usefulLifeMonths}
-            onChange={(e) => setUsefulLifeMonths(Number(e.target.value))}
+            // 0 显示为空框：原来清空后框里立刻变回「0」，再打 12 得到 012。
+            value={usefulLifeMonths || ''}
+            onChange={(e) => setUsefulLifeMonths(Number(e.target.value) || 0)}
             min={1}
           />
         </div>
@@ -376,8 +380,8 @@ export function AssetForm({
             id={fid('declining')}
             type="number"
             inputMode="decimal"
-            value={decliningRateBps / 100}
-            onChange={(e) => setDecliningRateBps(Math.round(Number(e.target.value) * 100))}
+            value={decliningRateBps ? decliningRateBps / 100 : ''}
+            onChange={(e) => setDecliningRateBps(Math.round((Number(e.target.value) || 0) * 100))}
             min={0}
             step="0.01"
           />

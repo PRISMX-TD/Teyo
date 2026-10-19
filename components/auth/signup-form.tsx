@@ -1,88 +1,16 @@
-'use client';
-
-import { useState } from 'react';
-import Link from 'next/link';
-import { AuthForm } from '@/components/auth/auth-form';
 import { getMessages, type Locale } from '@/lib/i18n';
-import { signUp } from '@/server/actions/auth';
-import { PasswordInput } from '@/components/auth/password-input';
+import { pickSignupCopy } from '@/components/auth/signup-copy';
+import { SignupFormClient } from '@/components/auth/signup-form-client';
 
 /**
- * 注册页在有账号之前没有 locale 可解析——app_users 那行还不存在——所以
- * 语言只能由用户在这一步自己选。选择立刻决定两件事：这个表单接下来显示
- * 的文案，以及写进 app_users.locale 的值，后者是 onboarding、根路径乃至
- * 整个产品之后解析语言的唯一依据（见 getUserLocale）。不选就默认英文的话，
- * 这家店主永远见不到这个选择器之外的任何中文，直到自己摸到 /account。
+ * 注册表单的服务端外壳。
  *
- * 复用 /account 语言切换器的形状与文案（t.account.language/english/chinese），
- * 不新造一套。
- *
- * initialLocale 由页面按浏览器的 Accept-Language 算好传进来（见
- * app/(auth)/signup/page.tsx）。它只是**默认值**——用户改了就以用户为准，
- * 而那个选择才是写进 app_users.locale 的东西。
+ * 表单要能在中英文之间即时切换，所以两种语言的文案都得到客户端。原来客户端
+ * 组件直接 getMessages(locale)，等于把 en.ts 与 zh.ts 两整本目录（一千多条）
+ * 打进 /signup 的首屏 JS——比 /login 多出三十多 kB，只为了用其中十一条。
+ * 这里在服务端把那十一条摘出来再传下去；页面的用法不变。
  */
-export function SignupForm({
-  initialLocale = 'en',
-  next,
-}: {
-  initialLocale?: Locale;
-  /** 注册后回到的站内路径（如邀请链接），由服务端 safeNextPath 校验。 */
-  next?: string;
-}) {
-  const [locale, setLocale] = useState<Locale>(initialLocale);
-  const t = getMessages(locale);
-
-  async function action(formData: FormData) {
-    return signUp({
-      email: String(formData.get('email') ?? ''),
-      password: String(formData.get('password') ?? ''),
-      displayName: String(formData.get('displayName') ?? ''),
-      locale,
-      next,
-    });
-  }
-
-  return (
-    <AuthForm
-      title={t.auth.signUp}
-      submitLabel={t.auth.signUp}
-      action={action}
-      footer={
-        <p className="auth-links">
-          <span>
-            {t.auth.haveAccountPrompt}
-            <Link href={next ? `/login?next=${encodeURIComponent(next)}` : '/login'}>{t.auth.signIn}</Link>
-          </span>
-        </p>
-      }
-    >
-      <label htmlFor="locale">{t.account.language}</label>
-      <select
-        id="locale"
-        name="locale"
-        value={locale}
-        onChange={(event) => setLocale(event.target.value as Locale)}
-      >
-        <option value="en">{t.account.english}</option>
-        <option value="zh">{t.account.chinese}</option>
-      </select>
-
-      <label htmlFor="displayName">{t.auth.displayName}</label>
-      <input id="displayName" name="displayName" type="text" autoComplete="name" required />
-
-      <label htmlFor="email">{t.auth.email}</label>
-      <input id="email" name="email" type="email" autoComplete="email" required />
-
-      <label htmlFor="password">{t.auth.password}</label>
-      <PasswordInput
-        id="password"
-        name="password"
-        showLabel={t.auth.showPassword}
-        hideLabel={t.auth.hidePassword}
-        autoComplete="new-password"
-        minLength={8}
-        required
-      />
-    </AuthForm>
-  );
+export function SignupForm({ initialLocale = 'en', next }: { initialLocale?: Locale; next?: string }) {
+  const copy = { en: pickSignupCopy(getMessages('en')), zh: pickSignupCopy(getMessages('zh')) };
+  return <SignupFormClient copy={copy} initialLocale={initialLocale} next={next} />;
 }

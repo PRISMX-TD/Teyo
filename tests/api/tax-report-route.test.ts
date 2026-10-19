@@ -14,6 +14,7 @@
  * 读表的人就再也无法把报表和总账对上，而且报表本身看起来完全正常。
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { ZodError } from 'zod';
 
 const getTaxReportAction = vi.hoisted(() => vi.fn());
 
@@ -75,11 +76,23 @@ describe('GET /api/[orgSlug]/tax-report', () => {
   });
 
   it('action 自己拒绝的区间（起日晚于止日）落成 400，不是 500', async () => {
-    getTaxReportAction.mockRejectedValue(new Error('from must be on or before to'));
+    getTaxReportAction.mockRejectedValue(
+      new ZodError([{ code: 'custom', path: ['from'], message: 'from must be on or before to' }]),
+    );
 
     const response = await call('from=2026-03-31&to=2026-01-01');
 
     expect(response.status).toBe(400);
+  });
+
+  it('数据库故障之类的真错误落成 500，不伪装成用户填错', async () => {
+    getTaxReportAction.mockRejectedValue(new Error('connection terminated'));
+    const spy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const response = await call('from=2026-01-01&to=2026-03-31');
+
+    expect(response.status).toBe(500);
+    spy.mockRestore();
   });
 
   it('没有权限时回 403', async () => {

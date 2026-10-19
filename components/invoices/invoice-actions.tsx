@@ -1,7 +1,7 @@
 'use client';
 
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useRefreshAfter } from '@/components/ui/use-refresh-after';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { voidInvoice } from '@/server/actions/invoices';
@@ -29,7 +29,7 @@ export function InvoiceVoidButton({
   invoiceNumber: string;
 }) {
   const t = getMessages(locale);
-  const router = useRouter();
+  const { refresh, refreshing } = useRefreshAfter();
   const [open, setOpen] = useState(false);
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -40,7 +40,7 @@ export function InvoiceVoidButton({
     try {
       await voidInvoice(orgSlug, invoiceId, reason);
       setOpen(false);
-      router.refresh();
+      refresh();
     } catch (e) {
       // 错误留在对话框里，对话框不关：关掉的话用户刚打的理由就没了。
       setError((e as Error).message);
@@ -54,7 +54,7 @@ export function InvoiceVoidButton({
       <button
         type="button"
         className="row-button is-destructive"
-        disabled={pending}
+        disabled={pending || refreshing}
         onClick={() => {
           setError(null);
           setOpen(true);

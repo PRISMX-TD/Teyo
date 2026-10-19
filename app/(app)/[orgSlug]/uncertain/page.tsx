@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
 import { listUncertain } from '@/server/repositories/uncertain';
@@ -16,7 +16,7 @@ export default async function UncertainPage({
   searchParams: Promise<{ page?: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 

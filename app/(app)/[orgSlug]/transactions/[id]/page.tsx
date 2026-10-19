@@ -1,8 +1,10 @@
 import Link from 'next/link';
+import { notFound } from 'next/navigation';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages, interpolate, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
-import { requirePermission } from '@/server/auth/guard';
+import { isUuid } from '@/lib/uuid';
+import { requirePagePermission } from '@/server/auth/guard';
 import { canEditTransaction } from '@/server/domain/permissions';
 import { withTransaction } from '@/server/db/transaction';
 import { getUserLocale } from '@/server/repositories/organizations';
@@ -35,12 +37,15 @@ export default async function TransactionDetailPage({
   searchParams: Promise<{ receiptsFailed?: string }>;
 }) {
   const { orgSlug, id } = await params;
+  // 不是 uuid 的 id 不必开事务：同一批查询里的 listAttachments 等会先撞上
+  // Postgres 的类型错误。
+  if (!isUuid(id)) notFound();
   // 新建表单在交易存好、收据却有几张没传上去时跳到这里（见 transaction-form.tsx
   // 的 finishCreate）。只认正整数，地址栏里随手改出来的别的值一律当作没有。
   const receiptsFailed = Number((await searchParams).receiptsFailed ?? '');
   const receiptsFailedNotice =
     Number.isInteger(receiptsFailed) && receiptsFailed > 0 ? receiptsFailed : null;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
@@ -81,13 +86,9 @@ export default async function TransactionDetailPage({
       ]),
     );
   } catch (e) {
-    if (e instanceof TransactionNotFoundError) {
-      return (
-        <Layout orgSlug={orgSlug} t={t}>
-          <p>{t.errors.notFound}</p>
-        </Layout>
-      );
-    }
+    // 与其他详情页一样走 notFound()：原来在这里渲染一句「未找到」，HTTP 状态
+    // 却是 200，也落不到公司外壳的 404 页（[orgSlug]/not-found.tsx）上。
+    if (e instanceof TransactionNotFoundError) notFound();
     throw e;
   }
 

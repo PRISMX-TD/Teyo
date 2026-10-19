@@ -24,8 +24,9 @@ export async function withTransaction<T>(
   }
 
   const result = await sql.begin(async (tx) => {
-    await tx`set local role teyo_app`;
-    await tx`select set_config('app.user_id', ${userId}, true)`;
+    // 两步合进一条语句：set_config('role', …, true) 与 `set local role` 等价，
+    // 省掉每个事务开头一次完整的往返。
+    await tx`select set_config('role', 'teyo_app', true), set_config('app.user_id', ${userId}, true)`;
     return (await fn(tx as Tx)) as unknown as never;
   });
 

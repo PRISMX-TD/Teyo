@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { isUuid } from '@/lib/uuid';
 import { CreditNoteForm } from '@/components/credit-notes/credit-note-form';
 import {
   CreditNoteApplyButton,
@@ -11,7 +12,7 @@ import { trimQuantity } from '@/components/invoices/line-items';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney, formatQuantity } from '@/lib/format';
-import { requirePermission } from '@/server/auth/guard';
+import { requirePagePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
 import { can } from '@/server/domain/permissions';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
@@ -39,7 +40,9 @@ export default async function CreditNoteDetailPage({
   params: Promise<{ orgSlug: string; id: string }>;
 }) {
   const { orgSlug, id } = await params;
-  const context = await requirePermission(orgSlug, 'transaction:read');
+  // 不是 uuid 的 id 进 SQL 是类型错误、整页 500；与「查不到」一样给 404。
+  if (!isUuid(id)) notFound();
+  const context = await requirePagePermission(orgSlug, 'transaction:read');
   const locale = (await getUserLocale(context.userId)) as import('@/lib/i18n').Locale;
   const t = getMessages(locale);
 

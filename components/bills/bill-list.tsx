@@ -1,8 +1,8 @@
 'use client';
 
 import Link from 'next/link';
-import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { useRefreshAfter } from '@/components/ui/use-refresh-after';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
@@ -37,7 +37,8 @@ const OPEN_STATUSES = new Set(['draft', 'received', 'partially_paid', 'overdue']
 
 export function BillList({ orgSlug, rows, locale, emptyLabel, today }: Props) {
   const t = getMessages(locale);
-  const router = useRouter();
+  // 刷新完成前按钮保持禁用，见 use-refresh-after.ts。
+  const { refresh, isRefreshing } = useRefreshAfter();
 
   const [pendingId, setPendingId] = useState<string | null>(null);
   const [voidTarget, setVoidTarget] = useState<BillListRow | null>(null);
@@ -62,7 +63,7 @@ export function BillList({ orgSlug, rows, locale, emptyLabel, today }: Props) {
     setError(null);
     try {
       await receiveBill(orgSlug, id);
-      router.refresh();
+      refresh(id);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -78,7 +79,7 @@ export function BillList({ orgSlug, rows, locale, emptyLabel, today }: Props) {
     try {
       await voidBill(orgSlug, target.id, reason);
       setVoidTarget(null);
-      router.refresh();
+      refresh(target.id);
     } catch (e) {
       setVoidError((e as Error).message);
     } finally {
@@ -116,7 +117,7 @@ export function BillList({ orgSlug, rows, locale, emptyLabel, today }: Props) {
               !isVoided && (status === 'received' || status === 'partially_paid') && row.dueDate < today
                 ? 'overdue'
                 : status;
-            const busy = pendingId === row.id;
+            const busy = pendingId === row.id || isRefreshing(row.id);
             // 账单号允许为 null（唯一约束里 null 不参与），而 receiveBill 会
             // 因为分录摘要写不出单据号而拒绝过账。既然服务端一定会拒，
             // 这里就不画那个按钮。

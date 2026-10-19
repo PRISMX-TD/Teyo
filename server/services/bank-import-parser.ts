@@ -103,7 +103,9 @@ export function parseStatementAmountToMinor(raw: string, exponent: number): bigi
 
   // CR/DR 标记。CR 在银行对账单上是「进账」，DR 是「出账」——从公司的角度
   // 看，进账为正、出账为负，与 TRNAMT 的符号约定一致。
-  const crdr = /\b(CR|DR)\b\s*$/i.exec(text);
+  // 前面只要求「不是字母」而不是 \b：'1,234.56DR' 里 6 与 D 都是单词字符，
+  // 之间没有 \b，标记会被当成装饰剥掉，一笔出账就读成了进账。
+  const crdr = /(?<![A-Za-z])(CR|DR)\s*$/i.exec(text);
   if (crdr) {
     if (crdr[1].toUpperCase() === 'DR') negative = true;
     text = text.slice(0, crdr.index).trim();
@@ -359,13 +361,21 @@ export function parseCsvBuffer(buffer: Buffer, options: ParseOptions): ParsedTra
   // 金额列不能是一个日期列。马来西亚不少银行的导出同时有「Transaction Date」
   // 和「Value Date」两列，只按 /value/ 找会先命中「Value Date」，于是整份
   // 对账单的每一行都在「这不是金额」上失败，而文件本身完全正常。
-  const amountColumn = (pattern: RegExp) =>
-    headers.findIndex((h) => pattern.test(h) && !/date/i.test(h));
-  const amountIdx = amountColumn(/amount|sum|value/i);
+  const amountColumn = (pattern: RegExp, exclude?: RegExp) =>
+    headers.findIndex((h) => pattern.test(h) && !/date/i.test(h) && !(exclude?.test(h) ?? false));
+  const DEBIT_HEADER = /debit|withdrawal|payment/i;
+  const CREDIT_HEADER = /credit|deposit|income/i;
+  // 单一金额列不能是借/贷其中一列。「Debit Amount, Credit Amount」是很常见的
+  // 表头，只按 /amount/ 找会把「Debit Amount」当成唯一的金额列：每一笔支出
+  // 读成正数（进账），贷方那一列整列被忽略——导入照样「成功」。
+  const amountIdx = amountColumn(
+    /amount|sum|value/i,
+    new RegExp(`${DEBIT_HEADER.source}|${CREDIT_HEADER.source}`, 'i'),
+  );
 
   // 没有单一金额列时退回借/贷两列。
-  const debitIdx = amountIdx === -1 ? amountColumn(/debit|withdrawal|payment/i) : -1;
-  const creditIdx = amountIdx === -1 ? amountColumn(/credit|deposit|income/i) : -1;
+  const debitIdx = amountIdx === -1 ? amountColumn(DEBIT_HEADER) : -1;
+  const creditIdx = amountIdx === -1 ? amountColumn(CREDIT_HEADER) : -1;
 
   if (dateIdx === -1) {
     throw new BankImportError(

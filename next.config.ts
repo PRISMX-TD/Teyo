@@ -128,6 +128,8 @@ function reportOnlyCsp(): string {
 }
 
 const nextConfig: NextConfig = {
+  // 每个响应少一个 X-Powered-By: Next.js：对用户无用，只是在告诉扫描器用的什么框架。
+  poweredByHeader: false,
   experimental: {
     serverActions: { bodySizeLimit: '12mb' },
   },

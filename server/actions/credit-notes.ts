@@ -3,7 +3,13 @@
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
 import { withTransaction, type Tx } from '@/server/db/transaction';
-import { requirePermission, AuthError, type OrgContext } from '@/server/auth/guard';
+import { isoDate, parseOrThrow } from '@/lib/schemas';
+import {
+  assertContactInOrg,
+  requirePermission,
+  AuthError,
+  type OrgContext,
+} from '@/server/auth/guard';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
 import { convertToBaseMinor, formatScaledRate } from '@/server/domain/exchange-rate';
 import { LedgerError } from '@/server/domain/ledger';
@@ -16,6 +22,7 @@ import {
 import {
   lineAmountMinor,
   postDocument,
+  resolveDocumentCurrency,
   voidDocumentPosting,
   withDocumentNumberRetry,
 } from '@/server/services/document-posting';
@@ -102,13 +109,19 @@ export async function createCreditNote(
   }
 
   const items = input.items.map((item) => creditNoteItemSchema.parse(item));
+  parseOrThrow(z.object({ issueDate: isoDate }), { issueDate: input.issueDate }, (m) => new LedgerError(m));
+  // 与发票同一条归一：'usd' 大写成 'USD'，'US' 当场拒绝。原来是裸的
+  // `input.currency || baseCurrency`，小写币种一路撞到库里的 CHECK 上。
+  const currency = resolveDocumentCurrency(input.currency, context.baseCurrency);
 
   // 单号是「读最大号 + 1」，并发创建会撞 credit_notes_org_number，与发票
   // 同一个处理：整笔重来。见 withDocumentNumberRetry。
   const result = await withDocumentNumberRetry('credit_notes_org_number', () =>
     withTransaction(context.userId, async (tx) => {
+      // 客户必须是本公司的。挂了发票时 assertInvoiceLink 会再比一次客户，
+      // 但独立的贷项通知单（不挂发票）此前一次都不查。
+      await assertContactInOrg(tx, context.organizationId, input.contactId);
       const cnNumber = await getNextCnNumber(tx, context.organizationId);
-      const currency = input.currency || context.baseCurrency;
 
       await assertInvoiceLink(tx, context, {
         invoiceId: input.invoiceId ?? null,
@@ -212,7 +225,16 @@ export async function updateCreditNoteAction(
       );
     }
 
-    const currency = input.currency ?? existing.currency;
+    if (input.issueDate !== undefined) {
+      parseOrThrow(z.object({ issueDate: isoDate }), { issueDate: input.issueDate }, (m) => new LedgerError(m));
+    }
+    const currency =
+      input.currency === undefined
+        ? existing.currency
+        : resolveDocumentCurrency(input.currency, context.baseCurrency);
+    if (input.contactId !== undefined && input.contactId !== existing.contactId) {
+      await assertContactInOrg(tx, context.organizationId, input.contactId);
+    }
 
     // 换币种而不重报明细是没有意义的：明细上存的是最小单位整数，而最小单位
     // 由币种决定（JPY 0 位、MYR 2 位）。把一张 JPY 单据改成 MYR 却沿用原来的
@@ -234,7 +256,7 @@ export async function updateCreditNoteAction(
     if (input.invoiceId !== undefined) fields.invoiceId = input.invoiceId;
     if (input.contactId !== undefined) fields.contactId = input.contactId;
     if (input.issueDate !== undefined) fields.issueDate = input.issueDate;
-    if (input.currency !== undefined) fields.currency = input.currency;
+    if (input.currency !== undefined) fields.currency = currency;
     if (input.reason !== undefined) fields.reason = input.reason?.trim() || null;
     if (input.notes !== undefined) fields.notes = input.notes?.trim() || null;
 

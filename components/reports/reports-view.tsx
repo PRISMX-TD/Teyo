@@ -230,7 +230,11 @@ export function ReportsView({
       ) : tab === 'ap-aging' ? (
         <AgingTable rows={apAging} locale={locale} baseCurrency={baseCurrency} t={t} type="ap" />
       ) : tab === 'customer-statement' ? (
+        // 两个对账单页签在树上是同一位置、同一组件：不给 key 的话从「客户对账单」
+        // 切到「供应商对账单」时 state 原样保留——选中的客户和他的对账单数据
+        // 会显示在供应商标题下面。
         <StatementTab
+          key="customer"
           contacts={contacts.filter((c) => c.type === 'customer' || c.type === 'both')}
           orgSlug={orgSlug}
           locale={locale}
@@ -241,6 +245,7 @@ export function ReportsView({
         />
       ) : tab === 'vendor-statement' ? (
         <StatementTab
+          key="vendor"
           contacts={contacts.filter((c) => c.type === 'vendor' || c.type === 'both')}
           orgSlug={orgSlug}
           locale={locale}

@@ -2,8 +2,9 @@
 
 import { revalidatePath } from 'next/cache';
 import { z } from 'zod';
+import { isoDate } from '@/lib/schemas';
 import { withTransaction, type Tx } from '@/server/db/transaction';
-import { requirePermission, AuthError } from '@/server/auth/guard';
+import { assertContactInOrg, requirePermission, AuthError } from '@/server/auth/guard';
 import {
   currencyExponent,
   formatMinorToDecimal,
@@ -50,6 +51,7 @@ import {
 import { recordAudit } from '@/server/repositories/audit-logs';
 import { getMoneyAccount } from '@/server/repositories/accounts';
 import { MONEY_ACCOUNT_CODE_BY_METHOD, type PaymentMethod } from '@/lib/payment-methods';
+import { isUuid } from '@/lib/uuid';
 import { findTransactionByClientUuid } from '@/server/repositories/transactions';
 import {
   findMoneyAccountId,
@@ -94,7 +96,7 @@ const createPaymentSchema = z.object({
   amount: z.string().min(1),
   currency: z.string().length(3).default('USD'),
   exchangeRate: z.string().optional(),
-  paymentDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  paymentDate: isoDate,
   method: z.enum(['cash', 'bank_transfer', 'cheque', 'online', 'other']).default('bank_transfer'),
   /**
    * 钱进出的资金账户。表单总会送；不送时按 method 落到系统自带的
@@ -173,6 +175,11 @@ export async function createPayment(
   const parsed = createPaymentSchema.parse(input);
 
   const result = await withTransaction(context.userId, async (tx) => {
+    // 0. 往来对象必须是本公司的。有核销明细时 assertDocumentsSettleable 会拿
+    // 单据上的客户来比，等于间接查过；纯预收（items 为空）却一次都不查，
+    // 别家公司的联系人 id 就这样挂上一笔真金白银的收款。
+    await assertContactInOrg(tx, context.organizationId, parsed.contactId);
+
     // 1. 汇率 R2。
     //
     // 这里自己解析一遍，而不是等 postJournal 去解析：payments.exchange_rate
@@ -225,6 +232,7 @@ export async function createPayment(
     const baseAmountMinor = legs.baseAmountMinor;
 
     const documentIds = [...new Set(itemDocumentIds)];
+    await lockSettlementDocuments(tx, context.organizationId, documentKind, documentIds);
     const documents =
       documentKind === 'invoice'
         ? await loadInvoicesForSettlement(tx, context.organizationId, documentIds)
@@ -532,7 +540,7 @@ export async function createPayment(
 const applyPrepaymentSchema = z.object({
   paymentId: z.string().uuid(),
   /** 核销发生在哪一天。它决定这笔分录落在哪个月，也因此要过封账检查。 */
-  applicationDate: z.string().regex(/^\d{4}-\d{2}-\d{2}$/),
+  applicationDate: isoDate,
   items: z.array(paymentItemSchema).min(1),
 });
 
@@ -578,7 +586,9 @@ export async function applyPrepayment(
   const parsed = applyPrepaymentSchema.parse(input);
 
   const result = await withTransaction(context.userId, async (tx) => {
-    // 1. 这笔收付款。
+    // 1. 这笔收付款。先锁住它的表头再读：两次核销（或核销与作废）同时进来时，
+    // 后到的那一个等前一个提交，再读到的「剩余额度」才是真的剩余额度。
+    await lockPayment(tx, context.organizationId, parsed.paymentId);
     const payment = await getPayment(tx, context.organizationId, parsed.paymentId);
     if (!payment) {
       throw new AuthError('not_found', 'Payment not found.');
@@ -618,6 +628,7 @@ export async function applyPrepayment(
     // 单据装载 + 归属/币种校验。与 createPayment 逐字同一套：查不到就是
     // 不存在或属于别家公司，两种都不把 id 回显出去。
     const documentIds = [...new Set(itemDocumentIds)];
+    await lockSettlementDocuments(tx, context.organizationId, documentKind, documentIds);
     const documents =
       documentKind === 'invoice'
         ? await loadInvoicesForSettlement(tx, context.organizationId, documentIds)
@@ -831,7 +842,14 @@ export async function voidPaymentAction(
 ): Promise<void> {
   const context = await requirePermission(orgSlug, 'transaction:create');
 
+  if (!isUuid(id)) {
+    throw new AuthError('not_found', 'Payment not found.');
+  }
+
   await withTransaction(context.userId, async (tx) => {
+    // 与 applyPrepayment 同一把锁：双击「作废」时后一次等前一次提交，读到的
+    // 是「已作废」并走下面的幂等返回，而不是两次都去作废同一串分录。
+    await lockPayment(tx, context.organizationId, id);
     const payment = await getPayment(tx, context.organizationId, id);
     if (!payment) {
       throw new AuthError('not_found', 'Payment not found.');
@@ -1043,6 +1061,51 @@ async function assertDocumentsSettleable(
       );
     }
   }
+}
+
+/**
+ * 锁住将要被核销的单据表头。
+ *
+ * assertDocumentsSettleable 的「不得超过剩余额度」是先读后写：两笔收款
+ * 同时核销同一张发票（双击「记录收款」、两个标签页）时，两边读到的都是
+ * 核销之前的余额，都通过，发票被收了两遍——多出来的那一截在 clearedBaseMinor
+ * 里被 clamp 掉，记成一笔假的汇兑收益。锁住表头之后后到的那一笔等前一笔
+ * 提交，再读到的是真实余额，被那条校验拒掉。
+ *
+ * 按 id 排序加锁，两笔各自核销 {A, B} 与 {B, A} 时不会互相等成死锁。
+ * ids 已经过 zod 的 uuid 校验，不会把 22P02 抛给用户。
+ */
+async function lockSettlementDocuments(
+  tx: Tx,
+  organizationId: string,
+  kind: SettlementDocumentKind,
+  ids: readonly string[],
+): Promise<void> {
+  if (ids.length === 0) return;
+  if (kind === 'invoice') {
+    await tx`
+      select id from invoices
+      where organization_id = ${organizationId} and id = any(${ids as string[]}::uuid[])
+      order by id
+      for update
+    `;
+  } else {
+    await tx`
+      select id from bills
+      where organization_id = ${organizationId} and id = any(${ids as string[]}::uuid[])
+      order by id
+      for update
+    `;
+  }
+}
+
+/** 锁住一笔收付款的表头。不存在或属于别家公司时什么也不锁，交给后面的 getPayment 报 not_found。 */
+async function lockPayment(tx: Tx, organizationId: string, paymentId: string): Promise<void> {
+  await tx`
+    select id from payments
+    where id = ${paymentId} and organization_id = ${organizationId}
+    for update
+  `;
 }
 
 function settlementDescription(type: 'received' | 'made', reference: string | null): string {
