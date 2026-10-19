@@ -654,6 +654,45 @@ select:required:invalid { color: var(--text-secondary); }
 option, optgroup { color: var(--text-primary); background-color: var(--bg-elevated); }
 option:disabled { color: var(--text-secondary); }
 
+/* 可定制下拉（Chrome 135+ 的 appearance: base-select）：弹出层画成浮起的圆角卡片，
+   选项是圆角行，选中项强调色 + 勾。其他浏览器不认，照旧用上面的原生弹出层。 */
+@supports (appearance: base-select) {
+  select, ::picker(select) { appearance: base-select; }
+  select::picker-icon { display: none; } /* 用上面自己画的上下箭头 */
+  select > button { display: contents; }
+  ::picker(select) {
+    background: var(--bg-elevated);
+    color: var(--text-primary);
+    border: 1px solid var(--border-primary);
+    border-radius: var(--radius-md, 12px);
+    box-shadow: var(--shadow-raised);
+    padding: 4px;
+    margin-block: 6px;
+    min-width: anchor-size(width);
+    max-height: min(360px, 60vh);
+    overflow-y: auto;
+    opacity: 1; transform: translateY(0);
+    transition: opacity 140ms ease, transform 140ms ease, overlay 140ms allow-discrete, display 140ms allow-discrete;
+  }
+  ::picker(select):not(:popover-open) { opacity: 0; transform: translateY(-4px); }
+  @starting-style { ::picker(select):popover-open { opacity: 0; transform: translateY(-4px); } }
+  select option {
+    display: flex; align-items: center; gap: 8px;
+    min-height: 36px; padding: 6px 10px;
+    border-radius: 8px;
+    background: transparent; color: var(--text-primary);
+    font-size: var(--text-base); cursor: pointer;
+  }
+  select option::checkmark { order: 1; margin-left: auto; color: var(--accent); content: '✓'; font-weight: 600; }
+  select option:hover, select option:focus-visible { background: var(--bg-hover); outline: none; }
+  select option:checked { color: var(--accent); font-weight: 500; }
+  select option:disabled { color: var(--text-tertiary); cursor: default; background: transparent; }
+  select optgroup { background: transparent; }
+  select optgroup legend { padding: 8px 10px 4px; font-size: 12px; color: var(--text-secondary); font-weight: 500; }
+  @media (max-width: 767px) { select option { min-height: 44px; } }
+  @media (prefers-reduced-motion: reduce) { ::picker(select) { transition: none; } }
+}
+
 /* 密码框 + 显示 / 隐藏（components/auth/password-input.tsx）。 */
 .password-field { position: relative; display: block; }
 .password-field > input { width: 100%; padding-right: 48px; }
