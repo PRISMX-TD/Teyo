@@ -22,9 +22,9 @@ import { listAttachments } from '@/server/repositories/attachments';
 import { listProjects } from '@/server/repositories/projects';
 import { currencyExponent, formatMinorToDecimal } from '@/server/domain/money';
 import { SUPPORTED_CURRENCIES } from '@/server/services/exchange-rate-sync';
-import { TransactionForm } from '@/components/transaction/transaction-form';
-import { VoidButton } from '@/components/transaction/void-button';
-import { AttachmentPanel } from '@/components/transaction/attachment-panel';
+import { TransactionForm } from '@/components/transactions/transaction-form';
+import { VoidButton } from '@/components/transactions/void-button';
+import { AttachmentPanel } from '@/components/transactions/attachment-panel';
 import type { ReactNode } from 'react';
 
 export default async function TransactionDetailPage({

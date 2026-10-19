@@ -1,6 +1,6 @@
 import { BackLink } from '@/components/ui/back-link';
-import { SCENARIO_TITLE_KEY, ScenarioPicker } from '@/components/transaction/scenario-picker';
-import { TransactionForm } from '@/components/transaction/transaction-form';
+import { SCENARIO_TITLE_KEY, ScenarioPicker } from '@/components/transactions/scenario-picker';
+import { TransactionForm } from '@/components/transactions/transaction-form';
 import { getMessages, interpolate, type Locale } from '@/lib/i18n';
 import { requirePermission, type OrgContext } from '@/server/auth/guard';
 import { withTransaction, type Tx } from '@/server/db/transaction';

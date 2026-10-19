@@ -144,7 +144,7 @@ export type ProjectProfitability = {
  * 两条查询合并成一条：原来收入与费用各查一次，同一组 join 跑两遍，而它们
  * 唯一的差别是 a.type。
  *
- * 挂载那一侧在交易表单上（components/transaction/transaction-form.tsx 的
+ * 挂载那一侧在交易表单上（components/transactions/transaction-form.tsx 的
  * 项目下拉 -> server/actions/transactions.ts 的 projectId -> transactions.project_id）。
  */
 export async function getProjectProfitability(

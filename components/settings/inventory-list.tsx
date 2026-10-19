@@ -5,7 +5,7 @@ import type { Locale } from '@/lib/i18n';
 import { getMessages, localizedName } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
-import { ModalDialog } from '@/components/shell/modal-dialog';
+import { ModalDialog } from '@/components/ui/modal-dialog';
 import type { InventoryItemRow } from '@/server/repositories/inventory';
 import {
   createInventoryItem,

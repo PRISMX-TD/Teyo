@@ -10,7 +10,7 @@ import {
   updateCreditNoteAction,
 } from '@/server/actions/credit-notes';
 import { todayLocalISO } from '@/lib/date';
-import { RateField } from '@/components/transaction/rate-field';
+import { RateField } from '@/components/transactions/rate-field';
 import { Plus, X } from '@/components/ui/icons';
 import { useHeaderIssue } from '@/components/invoices/header-issue';
 
@@ -165,7 +165,7 @@ export function CreditNoteForm({
 
     // 汇率从 form 里取而不是 state：RateField 只在用户手工改过时才提交
     // exchangeRate，自动查到的那个值刻意不带 name——否则服务端会把一个
-    // 缓存汇率记成「用户手工输入」。见 components/transaction/rate-field.tsx。
+    // 缓存汇率记成「用户手工输入」。见 components/transactions/rate-field.tsx。
     const formData = new FormData(form);
     const exchangeRate = formData.get('exchangeRate')
       ? String(formData.get('exchangeRate'))

@@ -9,7 +9,7 @@ vi.mock('@/server/actions/attachments', () => ({
   uploadBillAttachment: async () => ({ id: 'x' }),
 }));
 
-const { AttachmentPanel } = await import('@/components/transaction/attachment-panel');
+const { AttachmentPanel } = await import('@/components/transactions/attachment-panel');
 const { getMessages } = await import('@/lib/i18n');
 
 const zh = getMessages('zh');

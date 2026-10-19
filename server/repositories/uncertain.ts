@@ -26,7 +26,7 @@ async function findSuspenseAccountId(tx: Tx, organizationId: string): Promise<st
 /**
  * “待确认”条目的定义：一条分录行挂在该公司的悬置科目上，且所属交易未作废。
  *
- * 不按 kind = 'journal' 判断——手工日记账（components/transaction/journal-form.tsx）
+ * 不按 kind = 'journal' 判断——手工日记账（components/transactions/journal-form.tsx）
  * 也是 kind = 'journal'，但可以在任意两个科目之间过账，未必碰悬置科目；
  * 反过来，只要一笔交易真的挂在悬置科目上，不管是通过「不确定」场景卡片
  * 还是手工日记账录入的，用户都还没有为它选定分类，理应出现在这里。

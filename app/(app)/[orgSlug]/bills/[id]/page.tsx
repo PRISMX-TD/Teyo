@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { BillForm } from '@/components/bills/bill-form';
-import { AttachmentPanel } from '@/components/transaction/attachment-panel';
+import { AttachmentPanel } from '@/components/transactions/attachment-panel';
 import { BackLink } from '@/components/ui/back-link';
 import { getMessages } from '@/lib/i18n';
 import { formatMoney } from '@/lib/format';

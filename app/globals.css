@@ -857,7 +857,7 @@ button.row-button.is-destructive, button.row-button.is-destructive:hover:not(:di
 .numeric { text-align: right; white-space: nowrap; }
 .transaction-table th.numeric, .audit-table th.numeric, .report-table th.numeric { text-align: right; }
 
-/* 流水表的备注一栏（components/transaction/transaction-table.tsx）。
+/* 流水表的备注一栏（components/transactions/transaction-table.tsx）。
    备注里常有一整串不换行的 TXID，原来它把这一列撑到页面以外。
    width: 100% + max-width: 0：这一列只拿其余各列排完之后剩下的宽度，
    放不下的截成省略号。截断放在里面那层 flex 上：「已作废」徽章不能跟着

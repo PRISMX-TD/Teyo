@@ -469,7 +469,7 @@ const FIELD_LABELS: Record<string, string> = {
  * 字符串，长这样——
  *   [{"code":"invalid_string","validation":"uuid","path":["moneyAccountId"],...}]
  * 而 Server Action 抛出的错误，message 会被组件原样贴到表单上（见
- * components/transaction/transaction-form.tsx 的 catch）。让一个小店主对着
+ * components/transactions/transaction-form.tsx 的 catch）。让一个小店主对着
  * 一坨 JSON 猜自己哪儿填错了，等于没有校验。
  *
  * 只取第一条：一次说清一件事。表单是逐个字段改的，把五条堆在一起反而

@@ -7,7 +7,7 @@ import { todayLocalISO } from '@/lib/date';
 import { formatMoney } from '@/lib/format';
 import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
 import { applyPrepayment } from '@/server/actions/payments';
-import { ModalDialog } from '@/components/shell/modal-dialog';
+import { ModalDialog } from '@/components/ui/modal-dialog';
 
 /** 一笔还挂着钱的预收/预付款。字段与 server/repositories/payments.ts 的 OpenPrepayment 一致。 */
 export type OpenPrepaymentView = {

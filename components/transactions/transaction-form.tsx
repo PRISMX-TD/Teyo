@@ -6,14 +6,14 @@ import { useRouter } from 'next/navigation';
 import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate, localizedName } from '@/lib/i18n';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
-import { ModalDialog } from '@/components/shell/modal-dialog';
-import { RateField } from '@/components/transaction/rate-field';
+import { ModalDialog } from '@/components/ui/modal-dialog';
+import { RateField } from '@/components/transactions/rate-field';
 import {
   AttachmentPanel,
   attachmentIssue,
   formatFileSize,
-} from '@/components/transaction/attachment-panel';
-import { CategoryChips } from '@/components/transaction/category-chips';
+} from '@/components/transactions/attachment-panel';
+import { CategoryChips } from '@/components/transactions/category-chips';
 import {
   createJournal,
   createTransaction,
@@ -397,7 +397,7 @@ export function TransactionForm({
       projectId: formData.get('projectId') ? String(formData.get('projectId')) : undefined,
       description: String(formData.get('description') ?? ''),
       // RateField renders no exchangeRate field for domestic currency (see
-      // components/transaction/rate-field.tsx) so createTransaction/updateTransaction
+      // components/transactions/rate-field.tsx) so createTransaction/updateTransaction
       // can take the currency === baseCurrency branch and record source 'auto'.
       // Defaulting this to '1' would resurrect the bug the field's removal fixes:
       // every transaction would be stamped rate_source='manual' again.

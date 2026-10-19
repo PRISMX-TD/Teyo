@@ -11,7 +11,7 @@ import { findRate } from '@/server/repositories/exchange-rates';
  * 这个入口的界面上有没有一个能填汇率的地方。
  *
  * 缓存里查不到汇率时，那句报错要告诉用户接下来做什么，而「做什么」只有
- * 调用方知道。交易表单上就有 RateField（见 components/transaction/
+ * 调用方知道。交易表单上就有 RateField（见 components/transactions/
  * rate-field.tsx），当场填一个就能存下去；定期规则的补记没有——
  * recurring_transactions 里没有汇率字段，界面上也没有这一栏，
  * 折旧与手工凭证同样没有（createJournal 的入参里根本没有 exchangeRate）。

@@ -23,7 +23,7 @@ type Props = {
 /**
  * 作废对话框：要求填写理由，填不出就不让提交。
  *
- * **为什么不照抄 components/transaction/void-button.tsx。**
+ * **为什么不照抄 components/transactions/void-button.tsx。**
  * 那个组件写的是 `<dialog open>`。HTML 的 `open` 属性打开的是**非模态**
  * 对话框，它与 `showModal()` 完全不是一回事：
  *

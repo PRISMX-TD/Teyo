@@ -1,5 +1,5 @@
-import { TransactionFilters } from '@/components/transaction/transaction-filters';
-import { TransactionTable } from '@/components/transaction/transaction-table';
+import { TransactionFilters } from '@/components/transactions/transaction-filters';
+import { TransactionTable } from '@/components/transactions/transaction-table';
 import Link from 'next/link';
 import { getMessages, interpolate } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';

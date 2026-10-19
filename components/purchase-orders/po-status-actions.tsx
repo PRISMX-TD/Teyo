@@ -6,7 +6,7 @@ import type { Locale } from '@/lib/i18n';
 import { getMessages, interpolate } from '@/lib/i18n';
 import type { PurchaseOrderRow } from '@/server/repositories/purchase-orders';
 import { setPoStatusAction } from '@/server/actions/purchase-orders';
-import { ModalDialog } from '@/components/shell/modal-dialog';
+import { ModalDialog } from '@/components/ui/modal-dialog';
 
 type PoStatus = PurchaseOrderRow['status'];
 

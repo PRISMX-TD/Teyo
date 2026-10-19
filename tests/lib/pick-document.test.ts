@@ -6,7 +6,7 @@ import {
   type PaymentDraft,
   type PickableDocument,
   type SelectedItem,
-} from '@/components/payments/pick-document';
+} from '@/lib/pick-document';
 import { hasBalanceToSettle } from '@/server/repositories/payments';
 
 const EMPTY: PaymentDraft = {

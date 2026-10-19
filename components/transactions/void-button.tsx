@@ -3,7 +3,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import type { Messages } from '@/lib/i18n';
-import { ModalDialog } from '@/components/shell/modal-dialog';
+import { ModalDialog } from '@/components/ui/modal-dialog';
 import { voidTransaction } from '@/server/actions/transactions';
 
 type Props = {

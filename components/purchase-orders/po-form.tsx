@@ -7,7 +7,7 @@ import { getMessages } from '@/lib/i18n';
 import { createPurchaseOrder, updatePurchaseOrderAction } from '@/server/actions/purchase-orders';
 import { todayLocalISO } from '@/lib/date';
 import { currencyExponent, parseDecimalToMinor } from '@/server/domain/money';
-import { RateField } from '@/components/transaction/rate-field';
+import { RateField } from '@/components/transactions/rate-field';
 import { Plus, X } from '@/components/ui/icons';
 
 type Vendor = {

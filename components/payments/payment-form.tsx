@@ -8,7 +8,7 @@ import { createPayment } from '@/server/actions/payments';
 import { todayLocalISO } from '@/lib/date';
 import { formatMoney } from '@/lib/format';
 import { currencyExponent, formatMinorToDecimal, parseDecimalToMinor } from '@/server/domain/money';
-import { RateField } from '@/components/transaction/rate-field';
+import { RateField } from '@/components/transactions/rate-field';
 import {
   defaultMoneyAccountId,
   type MoneyAccountOption,
@@ -22,7 +22,7 @@ import {
   type PaymentDraft,
   type PickableDocument,
   type SelectedItem,
-} from '@/components/payments/pick-document';
+} from '@/lib/pick-document';
 
 type Contact = { id: string; name: string };
 
@@ -408,7 +408,7 @@ export function PaymentForm({
     // RateField 刻意不提交自动查到的汇率（只有用户手工改过才带 name），
     // 所以这里从 form 里取，而不是从 React state 里取——让服务端在本币
     // 与「自动汇率」两种情况下都走它自己的解析分支，rate_source 才记得对。
-    // 见 components/transaction/rate-field.tsx。
+    // 见 components/transactions/rate-field.tsx。
     const formData = new FormData(e.currentTarget as HTMLFormElement);
     const exchangeRate = formData.get('exchangeRate')
       ? String(formData.get('exchangeRate'))

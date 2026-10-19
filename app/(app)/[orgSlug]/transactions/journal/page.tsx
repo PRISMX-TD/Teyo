@@ -1,5 +1,5 @@
 import { BackLink } from '@/components/ui/back-link';
-import { JournalForm } from '@/components/transaction/journal-form';
+import { JournalForm } from '@/components/transactions/journal-form';
 import { getMessages } from '@/lib/i18n';
 import { requirePermission } from '@/server/auth/guard';
 import { withTransaction } from '@/server/db/transaction';
