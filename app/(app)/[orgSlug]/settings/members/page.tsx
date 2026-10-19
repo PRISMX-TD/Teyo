@@ -3,7 +3,7 @@ import { ZodError } from 'zod';
 import { MembersPanel, type MemberActionResult } from '@/components/settings/members-panel';
 import { getMessages } from '@/lib/i18n';
 import { firstIssueMessage } from '@/lib/schemas';
-import { AuthError, requirePermission } from '@/server/auth/guard';
+import { AuthError, requirePagePermission } from '@/server/auth/guard';
 import {
   changeMemberRole,
   inviteMember,
@@ -42,7 +42,7 @@ export default async function MembersSettingsPage({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  const context = await requirePermission(orgSlug, 'member:manage');
+  const context = await requirePagePermission(orgSlug, 'member:manage');
   const locale = (await getUserLocale(context.userId)) as 'en' | 'zh';
   const t = getMessages(locale);
 
