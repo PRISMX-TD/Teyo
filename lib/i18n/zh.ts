@@ -200,6 +200,7 @@ const zh: Translated<typeof en> = {
     voidReasonLabel: '作废原因',
     transferredFrom: '转出账户',
     transferredTo: '转入账户',
+    noProject: '不属于任何项目',
   },
   scenario: {
     title: '发生了什么？',

@@ -131,6 +131,7 @@ export function MembersPanel({ members, invitations, currentUserId, locale, acti
               {canManageMember(m) ? (
                 <>
                   <select
+                    aria-label={`${t.members.inviteRole} ${m.displayName}`}
                     aria-describedby={`role-hint-${m.membershipId}`}
                     defaultValue={m.role}
                     onChange={async (e) => {

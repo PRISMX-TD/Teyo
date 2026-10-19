@@ -728,7 +728,7 @@ export function TransactionForm({
             value={projectId}
             onChange={(e) => setProjectId(e.target.value)}
           >
-            <option value="">--</option>
+            <option value="">{t.transaction.noProject}</option>
             {projects.map((project) => (
               <option key={project.id} value={project.id}>
                 {project.name}

@@ -332,7 +332,7 @@ export function BillForm({
               <option value="">{t.bills.noTaxRate}</option>
               {taxRates.map((rate) => (
                 <option key={rate.id} value={rate.id}>
-                  {rate.name} ({bpsToPercent(rate.rateBps)}%)
+                  {bpsToPercent(rate.rateBps)}% · {rate.name}
                 </option>
               ))}
             </select>

@@ -189,6 +189,7 @@ const en = {
     voidReasonLabel: 'Reason for voiding',
     transferredFrom: 'Transferred from',
     transferredTo: 'Transferred to',
+    noProject: 'No project',
   },
   scenario: {
     title: 'What happened?',

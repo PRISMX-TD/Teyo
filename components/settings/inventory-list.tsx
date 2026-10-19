@@ -328,6 +328,7 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                         />
                         <div className="inline-edit-row">
                           <select
+                            aria-label={t.inventory.costMethod}
                             value={editCostMethod}
                             onChange={(e) => setEditCostMethod(e.target.value as 'fifo' | 'average')}
                           >
@@ -348,10 +349,11 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                         </div>
                         <div className="inline-edit-row">
                           <select
+                            aria-label={t.inventory.cogsAccount}
                             value={editCogsAccountId}
                             onChange={(e) => setEditCogsAccountId(e.target.value)}
                           >
-                            <option value="">{t.inventory.cogsAccount}</option>
+                            <option value="">{t.inventory.noAccount}</option>
                             {accounts.map((a) => (
                               <option key={a.id} value={a.id}>
                                 {a.code} {localizedName({ name_en: a.nameEn, name_zh: a.nameZh }, locale)}
@@ -359,10 +361,11 @@ export function InventoryList({ orgSlug, locale, items: initialItems, accounts, 
                             ))}
                           </select>
                           <select
+                            aria-label={t.inventory.inventoryAccount}
                             value={editInventoryAccountId}
                             onChange={(e) => setEditInventoryAccountId(e.target.value)}
                           >
-                            <option value="">{t.inventory.inventoryAccount}</option>
+                            <option value="">{t.inventory.noAccount}</option>
                             {accounts
                               .filter((a) => a.type === 'asset')
                               .map((a) => (

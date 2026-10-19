@@ -314,7 +314,7 @@ export function PoForm({
                 <option value="">{t.purchaseOrders.noTax}</option>
                 {taxRates.map((rate) => (
                   <option key={rate.id} value={rate.id}>
-                    {rate.name} ({bpsToPercent(rate.rateBps)}%)
+                    {bpsToPercent(rate.rateBps)}% · {rate.name}
                   </option>
                 ))}
               </select>
